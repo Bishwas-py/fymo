@@ -21,31 +21,33 @@ if root_path:
     })
 
 # sets template and controller path through given routes
-for resource in routes.get('resources'):
-    templates_dir = os.listdir(BASE_DIR / f"{template_path}/{resource}")
+resources = routes.get('resources')
+if resources:
+    for resource in resources:
+        templates_dir = os.listdir(BASE_DIR / f"{template_path}/{resource}")
 
-    for template_file_name in templates_dir:
-        no_extension_file_path = re.sub(r'\.svelte$', '', template_file_name)
-        controller_path = f"{resource}.{no_extension_file_path}"
-        template_path = f"{resource}/{template_file_name}"
-        paths.update(
-            {
-                f"{resource}/{no_extension_file_path}": {
-                    'template_path': template_path,
-                    'controller_path': controller_path
+        for template_file_name in templates_dir:
+            no_extension_file_path = re.sub(r'\.svelte$', '', template_file_name)
+            controller_path = f"{resource}.{no_extension_file_path}"
+            template_path = f"{resource}/{template_file_name}"
+            paths.update(
+                {
+                    f"{resource}/{no_extension_file_path}": {
+                        'template_path': template_path,
+                        'controller_path': controller_path
+                    }
                 }
-            }
-        )
+            )
 
 
-def render_template(actual_path):
+def render_template(path):
     """
     Renders template, where actual path is unformulated slash containing string.
     """
-    html_str = ""
-    path = actual_path.lstrip('/')
-    #  paths[path] gives filename i.e. index.svelte
+    if path != "/":
+        path = path.lstrip('/')
 
+    #  paths[path] gives filename i.e. index.svelte
     with open(BASE_DIR / f"templates/{paths[path]['template_path']}", 'r') as f:
         html_str = f.read()
         print(paths[path])
