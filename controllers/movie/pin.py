@@ -1,3 +1,0 @@
-context = {
-    "numbers": 100
-}

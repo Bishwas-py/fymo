@@ -1,3 +1,4 @@
 root: movie.index
 resources:
-  - movie
+  - posts
+  - comments

@@ -6,7 +6,7 @@ from pathlib import Path
 from routes.config import get_routes
 
 BASE_DIR = Path(__file__).resolve().parent
-template_path = "templates"
+templates_root = "templates"
 
 routes = get_routes()
 
@@ -22,9 +22,12 @@ if root_path:
 
 # sets template and controller path through given routes
 resources = routes.get('resources')
+print(f"resources {resources}")
 if resources:
     for resource in resources:
-        templates_dir = os.listdir(BASE_DIR / f"{template_path}/{resource}")
+
+        print(f"{templates_root}/{resource}")
+        templates_dir = os.listdir(BASE_DIR / f"{templates_root}/{resource}")
 
         for template_file_name in templates_dir:
             no_extension_file_path = re.sub(r'\.svelte$', '', template_file_name)
