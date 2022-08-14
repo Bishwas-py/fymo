@@ -3,40 +3,62 @@ import os
 import importlib
 from pathlib import Path
 
+from routes.config import get_routes
+
 BASE_DIR = Path(__file__).resolve().parent
 template_path = "templates"
 
-templates_dir = os.listdir(BASE_DIR / template_path)
-
-
-def render_template(path, context={}):
-    html_str = ""
-    #  paths[path] gives filename i.e. index.svelte
-    with open(BASE_DIR / f"templates/{paths[path]['fn']}", 'r') as f:
-        html_str = f.read()
-        mod = importlib.import_module(f"controllers.{paths[path]['ap']}")
-        html_str = html_str.format(**mod.context)
-        return html_str
-
+routes = get_routes()
 
 paths = {}
-for file_name in templates_dir:
-    path = re.sub(r'\.svelte$', '', file_name)
-    actual_path = path
-    if path == "index":
-        path = "/"
-    paths.update(
-        {
-            path: {'fn': file_name, 'ap': actual_path}
-        }
-    )
+
+root_path = routes.get('root')
+# sets the global root path domain.com/
+if root_path:
+    file_name = f"{root_path.replace('.', '/')}.svelte"
+    paths.update({
+        '/': {'template_path': file_name, 'controller_path': root_path}
+    })
+
+# sets template and controller path through given routes
+for resource in routes.get('resources'):
+    templates_dir = os.listdir(BASE_DIR / f"{template_path}/{resource}")
+
+    for template_file_name in templates_dir:
+        no_extension_file_path = re.sub(r'\.svelte$', '', template_file_name)
+        controller_path = f"{resource}.{no_extension_file_path}"
+        template_path = f"{resource}/{template_file_name}"
+        paths.update(
+            {
+                f"{resource}/{no_extension_file_path}": {
+                    'template_path': template_path,
+                    'controller_path': controller_path
+                }
+            }
+        )
 
 
+def render_template(actual_path):
+    """
+    Renders template, where actual path is unformulated slash containing string.
+    """
+    html_str = ""
+    path = actual_path.lstrip('/')
+    #  paths[path] gives filename i.e. index.svelte
+
+    with open(BASE_DIR / f"templates/{paths[path]['template_path']}", 'r') as f:
+        html_str = f.read()
+        print(paths[path])
+        mod = importlib.import_module(f"controllers.{paths[path]['controller_path']}")
+        html_str = html_str.format(**mod.context)
+    return html_str
+
+
+# main server handler
 def app(environ, start_response):
     path = environ.get("PATH_INFO")
     data = render_template(path)
     data = data.encode("utf-8")
-
     start_response(
         f"200 OK", [
             ("Content-Type", "text/html"),
