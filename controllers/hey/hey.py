@@ -1,3 +1,3 @@
-content = {
-        'name': 'Job the wealthy'
-    }
+context = {
+    'name': 'Job the wealthy'
+}

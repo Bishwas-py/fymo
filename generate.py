@@ -38,16 +38,17 @@ def generate_content(params, handler_name, content, extension):
 
 def template_generator():
     content = """<script>export let name;</script>
-    Hello, I am {name}"""
+
+Hello, I am {name}"""
     handler_name = 'templates'
     extension = 'svelte'
     generate_content(args.template, handler_name, content, extension)
 
 
 def controller_generator():
-    content = """content = {
-        'name': 'Job the wealthy'
-    }"""
+    content = """context = {
+    'name': 'Job the wealthy'
+}"""
     handler_name = 'controllers'
     extension = 'py'
     generate_content(args.controller, handler_name, content, extension)

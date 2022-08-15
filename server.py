@@ -51,6 +51,7 @@ def render_template(path):
         path = path.lstrip('/')
 
     #  paths[path] gives filename i.e. index.svelte
+    print(paths[path])
     with open(BASE_DIR / f"templates/{paths[path]['template_path']}", 'r') as f:
         html_str = f.read()
         print(paths[path])
