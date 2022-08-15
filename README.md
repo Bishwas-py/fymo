@@ -16,7 +16,7 @@ via string formatting
 
 ## Yet to be done
 - [ ] ORM: Model and ORM is yet to be done
-- [ ] Svelte Template Rendering
+- [ ] Svelte Template Rendering, [livebud/bud](https://github.com/livebud/bud/discussions/248) as inspiration 
 - [ ] SPA routing
 
 
