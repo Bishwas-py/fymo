@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "esbuild": "^0.15.3",
-    "svelte": "^3.49.0"
-  }
-}
