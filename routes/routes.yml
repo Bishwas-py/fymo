@@ -2,4 +2,3 @@ root: posts.index
 resources:
   - posts
   - comments
-  - hey

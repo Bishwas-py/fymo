@@ -45,7 +45,7 @@ def controller_generator():
 
 
 # Instantiate the parser
-parser = argparse.ArgumentParser(description='Optional app description')
+parser = argparse.ArgumentParser(description=f'{SColor.OKCYAN}{SColor.BOLD}Generator Handler for {SColor.UNDERLINE}FyMO{SColor.ENDC}')
 
 parser.add_argument('-t', '--template', type=str,
                     help='The template name that you wanna create with.', nargs=2)
