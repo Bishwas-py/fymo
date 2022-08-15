@@ -1,4 +1,4 @@
-root: movie.index
+root: posts.index
 resources:
   - posts
   - comments
