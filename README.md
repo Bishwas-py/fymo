@@ -1,9 +1,10 @@
 # FyMo
 A full stack monolith python web framework; renders svelte in client/server side
 
+![Fymo](https://user-images.githubusercontent.com/42182303/201951609-b0bf3448-ac00-423f-8ec3-26d77fbcae94.png)
+
 We are on the way to develop an monolith web framework
- for quick development. This web framework will allow developers to 
-develop efficient webapps fast.
+ for quick development. This web framework will allow developers to develop efficient webapps fast.
 
 > FyMo:
 > **Fy** stands for full stack for Python, **Mo** stands for monolith  
