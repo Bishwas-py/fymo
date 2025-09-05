@@ -151,15 +151,34 @@ export const FILENAME = Symbol('filename');
 const states = new WeakMap();
 const deriveds = new WeakMap();
 const effects = [];
+const userEffects = [];
+const templateEffects = [];
 let current_component = null;
+let currentEffect = null;
 
 export function state(initial) {
-    const value = { current: initial, subscribers: new Set() };
+    const value = { 
+        current: initial, 
+        subscribers: new Set(),
+        set(newValue) {
+            this.current = newValue;
+            this.notify();
+        },
+        notify() {
+            // Trigger all template effects to re-run
+            templateEffects.forEach(fn => fn());
+            // Trigger all user effects to re-run
+            userEffects.forEach(fn => fn());
+            // Notify all subscribers
+            this.subscribers.forEach(fn => fn());
+        }
+    };
     return value;
 }
 
 export function tag(stateObj, name) {
     // Tags are just for debugging, return the state object
+    stateObj.name = name;
     return stateObj;
 }
 
@@ -171,17 +190,24 @@ export function get(stateObj) {
 export function update(stateObj) {
     if (stateObj && typeof stateObj === 'object' && stateObj.current !== undefined) {
         stateObj.current++;
-        // Notify subscribers
-        if (stateObj.subscribers) {
-            stateObj.subscribers.forEach(fn => fn());
-        }
+        stateObj.notify();
     }
 }
 
 export function derived(fn) {
-    const derived = { fn, current: undefined, subscribers: new Set() };
+    let cachedValue = undefined;
+    const derived = { 
+        fn, 
+        subscribers: new Set(),
+        get current() {
+            // Recompute on access
+            cachedValue = fn();
+            return cachedValue;
+        }
+    };
     // Compute initial value
-    derived.current = fn();
+    cachedValue = fn();
+    derived.cachedValue = cachedValue;
     return derived;
 }
 
@@ -222,7 +248,15 @@ export function append(parent, child) {
 
 export function set_text(node, text) {
     if (node) {
-        node.textContent = text;
+        // Handle both text nodes and element nodes
+        if (node.nodeType === 3) { // Text node
+            node.textContent = text;
+        } else if (node.nodeType === 1) { // Element node
+            node.textContent = text;
+        } else {
+            // For other node types, try to set the text content
+            node.textContent = text;
+        }
     }
 }
 
@@ -246,13 +280,16 @@ export function reset(node) {
 
 // Effects
 export function template_effect(fn) {
-    // Run the effect immediately and store for updates
-    effects.push(fn);
+    // Store the effect for re-running on state changes
+    templateEffects.push(fn);
+    // Run the effect immediately
     fn();
 }
 
 export function user_effect(fn) {
-    // User effects run after template effects
+    // Store user effect for re-running on state changes
+    userEffects.push(fn);
+    // Run the effect initially after a microtask
     setTimeout(fn, 0);
 }
 
