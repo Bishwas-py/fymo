@@ -9,7 +9,8 @@
   "scripts": {
     "build:runtime": "node build_runtime.js",
     "build": "npm run build:runtime",
-    "dev": "echo 'Development server'"
+    "dev": "npm run build:runtime && python3 ensure_runtime.py && source venv/bin/activate && python -m gunicorn server:app --bind 127.0.0.1:8000 --reload",
+    "start": "python3 ensure_runtime.py && source venv/bin/activate && python -m gunicorn server:app --bind 127.0.0.1:8000"
   },
   "devDependencies": {
     "esbuild": "^0.25.9"
