@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**FyMo** is a full-stack monolith Python web framework that aims to render Svelte components on both client and server side. This plan outlines the roadmap to transform FyMo from a basic string-templating system into a modern framework with proper Svelte 5 server-side rendering (SSR) capabilities.
+**FyMo** is a full-stack monolith Python web framework inspired by LiveBud and enhanced with patterns from Frizzante. This plan outlines the roadmap to transform FyMo from a basic string-templating system into a modern framework with proper Svelte 5 server-side rendering (SSR) capabilities, professional tooling, and embedded asset management.
 
 ### Current State Analysis
 
@@ -22,6 +22,17 @@ Bud demonstrates sophisticated Svelte SSR implementation in Go:
 - **ESBuild Integration**: Fast bundling with custom plugins
 - **Hot Reloading**: Real-time updates via Server-Sent Events
 - **Hydration Strategy**: Isomorphic rendering with client-side hydration
+
+#### Frizzante Framework (Architecture Reference)
+Frizzante provides excellent patterns for professional tooling and asset management:
+- **Embedded Assets**: `//go:embed` for bundling templates and static files
+- **CLI Tooling**: Comprehensive command-line interface for project management
+- **Project Scaffolding**: Automated project generation with templates
+- **Asset Pipeline**: Sophisticated file copying and template processing
+- **JavaScript Bundling**: ESBuild integration with format templates
+- **Runtime Management**: Goja-based JavaScript execution with pooling
+- **Template System**: `.format` files for code generation templates
+- **Professional UX**: Spinners, confirmations, and rich terminal interfaces
 
 #### Svelte 5 Changes (Key Updates)
 - **Component Architecture**: `SvelteComponent` → `Component` interface
@@ -138,9 +149,91 @@ def render_template(path):
 - Performance profiling
 - Debug mode enhancements
 
-## Phase 4: Advanced Features (Future)
+## Phase 4: Frizzante-Inspired Tooling & Architecture
 
-### 4.1 Layout System
+### 4.1 Embedded Asset System
+**Goal**: Bundle templates and static files into the Python executable
+
+**Implementation**:
+```python
+# fymo/embeds/
+class EmbeddedAssets:
+    def copy_file(self, from_path: str, to_path: str)
+    def copy_directory(self, from_dir: str, to_dir: str)
+    def is_file(self, path: str) -> bool
+    def is_directory(self, path: str) -> bool
+    def read_file(self, path: str) -> bytes
+    def zip_directory(self, from_dir: str, to_zip: str)
+```
+
+**Benefits**:
+- Single executable deployment
+- No external template dependencies
+- Faster template loading
+- Version consistency
+
+### 4.2 CLI Tooling System
+**Goal**: Professional command-line interface for project management
+
+**Implementation**:
+```python
+# fymo/cli/
+fymo new project-name          # Create new project
+fymo generate component Name   # Generate Svelte component
+fymo dev                       # Start development server
+fymo build                     # Build for production
+fymo test                      # Run tests
+fymo format                    # Format code
+```
+
+**Features**:
+- Interactive project scaffolding
+- Component generators
+- Development server with hot reload
+- Build optimization
+- Code formatting and linting
+
+### 4.3 Advanced JavaScript Bundling
+**Goal**: ESBuild integration with format templates like Frizzante
+
+**Implementation**:
+```python
+# fymo/bundler/
+class JSBundler:
+    def bundle_ssr(self, source: str, format: str) -> str
+    def bundle_client(self, source: str) -> str
+    def create_entry_point(self, component: str, template: str) -> str
+```
+
+**Format Templates**:
+```javascript
+// fymo/templates/ssr_entry.format
+const module = {exports: {}};
+(function(){
+    %s  // Compiled component code
+    return render
+})()
+```
+
+### 4.4 Professional Project Structure
+**Goal**: Standardized project layout inspired by Frizzante
+
+```
+fymo-project/
+├── fymo.yaml              # Project configuration
+├── app/                   # Application code
+│   ├── components/        # Svelte components
+│   ├── controllers/       # Python controllers  
+│   ├── routes/           # Route definitions
+│   └── static/           # Static assets
+├── lib/                  # Shared libraries
+├── templates/            # Template formats
+└── dist/                 # Built assets
+```
+
+## Phase 5: Advanced Features (Future)
+
+### 5.1 Layout System
 - Nested layouts support
 - Layout composition
 - Slot-based architecture

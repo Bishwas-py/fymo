@@ -70,8 +70,15 @@ globalThis.renderSvelte5 = function(componentCode, props) {
         // Remove export default
         transformedCode = transformedCode.replace(/export default \\w+;?/, '');
         
-        // Prepend the $ definition and append component assignment
-        transformedCode = `const $ = svelteInternal;\\n${transformedCode}\\nglobalThis.Component = ${componentName};`;
+        // Create a wrapper function that provides $$props in the correct scope
+        transformedCode = `
+const $ = svelteInternal;
+${transformedCode}
+
+// Create wrapper that provides $$props
+globalThis.Component = function(payload, $$props) {
+    return ${componentName}(payload, $$props);
+};`;
         
         // Execute the transformed component code
         eval(transformedCode);
@@ -116,6 +123,7 @@ if (typeof console === 'undefined') {
     };
 }
 """
+    
     
     def render_component(self, compiled_js: str, props: Dict[str, Any], template_path: str) -> Dict[str, Any]:
         """Execute compiled Svelte SSR component using STPyV8 like LiveBud does"""
@@ -176,56 +184,57 @@ if (typeof console === 'undefined') {
             }
     
     def transform_client_js_for_hydration(self, client_js: str, props: Dict[str, Any]) -> str:
-        """Transform compiled Svelte client JS to work with hydration"""
+        """Transform compiled Svelte client JS - dynamically handle any component"""
         
-        # Simple approach: use the compiled client JS with proper imports
+        # Escape backticks and backslashes for JS template literal
+        client_js_escaped = client_js.replace('\\', '\\\\').replace('`', '\\`')
+
         hydration_code = f"""
-// Import Svelte runtime from CDN
-import * as $ from 'https://esm.run/svelte@5.38.6/src/internal/client/index.js';
+// Import Svelte client runtime from same server
+import * as $ from '/assets/svelte/client/index.js';
 
-// Get props from the server
-const props = JSON.parse(document.getElementById('svelte-props').textContent);
+// Get target and props
+const target = document.getElementById('svelte-app');
+const $$props = {json.dumps(props)};
 
-// Mock the disclose-version import
-const mockDisclosure = {{}};
+// The compiled Svelte component code
+const clientCode = `{client_js_escaped}`;
 
-// Transform the compiled client code to work in browser
-const transformedCode = `{client_js.replace('`', '\\`')}`;
+// Remove ES module imports that we handle at the top level
+const moduleCode = clientCode
+    .replace(/import 'svelte\\/internal\\/disclose-version';?\\s*/g, '')
+    .replace(/import \\* as \\$ from 'svelte\\/internal\\/client';?\\s*/g, '');
 
 try {{
-    // Create a module from the transformed code
-    const moduleCode = transformedCode
-        .replace(/import 'svelte\/internal\/disclose-version';/, '')
-        .replace(/import \* as \$ from 'svelte\/internal\/client';/, '');
+    // Make Svelte client runtime available globally for the component code
+    globalThis.$ = $;
     
-    // Execute the module code
-    eval(moduleCode);
+    // Create a module environment to capture the component export
+    const module = {{ exports: {{}} }};
     
-    // Mount the component for hydration
-    const target = document.getElementById('svelte-app');
-    if (typeof Component !== 'undefined') {{
-        // Clear server content and mount interactive component
+    // Convert ES module `export default` to a CommonJS-style assignment
+    const runnableCode = moduleCode.replace(/export default/g, 'module.exports.default =');
+    
+    // Execute the code within a function scope to create a closure
+    const wrappedCode = '(function(module, exports) { ' + runnableCode + ' })(module, module.exports)';
+    eval(wrappedCode);
+
+    const Component = module.exports.default;
+    
+    if (Component && typeof Component === 'function') {{
+        // Clear server-rendered content for clean client-side hydration
         target.innerHTML = '';
-        new Component(target, props);
+        
+        // Instantiate the component
+        Component(target, $$props);
+        
+        console.log('✅ Svelte 5 component hydrated successfully');
+    }} else {{
+        throw new Error('Hydration failed: Svelte component could not be found on module.exports.default');
     }}
-    
-    console.log('✅ Svelte component hydrated with real compiled code');
 }} catch (error) {{
-    console.error('Hydration failed, using fallback:', error);
-    
-    // Fallback: simple vanilla JS for basic interactivity
-    const button = document.querySelector('button');
-    if (button) {{
-        let count = 0;
-        button.onclick = () => {{
-            count++;
-            const countText = document.querySelector('.counter p');
-            if (countText) {{
-                countText.textContent = `Count: ${{count}} (doubled: ${{count * 2}})`;
-            }}
-        }};
-        console.log('✅ Fallback hydration active');
-    }}
+    console.error('Hydration failed:', error);
+    throw error;
 }}
 """
         
