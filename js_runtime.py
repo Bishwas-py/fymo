@@ -184,11 +184,16 @@ if (typeof console === 'undefined') {
             }
     
     def transform_client_js_for_hydration(self, client_js: str, props: Dict[str, Any]) -> str:
-        """Transform compiled Svelte client JS - dynamically handle any component"""
+        """Transform compiled Svelte client JS for proper hydration with scope handling"""
         
-        # Escape backticks and backslashes for JS template literal
-        client_js_escaped = client_js.replace('\\', '\\\\').replace('`', '\\`')
-
+        # Properly escape the client JS for embedding in JavaScript
+        # We need to handle backticks and other special characters
+        client_js_escaped = (client_js
+            .replace('\\', '\\\\')  # Escape backslashes first
+            .replace('`', '\\`')     # Escape backticks
+            .replace('${', '\\${')   # Escape template literal syntax
+        )
+        
         hydration_code = f"""
 // Import Svelte client runtime from same server
 import * as $ from '/assets/svelte/client/index.js';
@@ -197,44 +202,91 @@ import * as $ from '/assets/svelte/client/index.js';
 const target = document.getElementById('svelte-app');
 const $$props = {json.dumps(props)};
 
-// The compiled Svelte component code
-const clientCode = `{client_js_escaped}`;
-
-// Remove ES module imports that we handle at the top level
-const moduleCode = clientCode
-    .replace(/import 'svelte\\/internal\\/disclose-version';?\\s*/g, '')
-    .replace(/import \\* as \\$ from 'svelte\\/internal\\/client';?\\s*/g, '');
+// Store the component source as a properly escaped string
+const componentSource = `{client_js_escaped}`;
 
 try {{
-    // Make Svelte client runtime available globally for the component code
-    globalThis.$ = $;
+    // Remove module-specific imports
+    let processedCode = componentSource
+        .replace(/import 'svelte\\/internal\\/disclose-version';?\\s*/g, '')
+        .replace(/import \\* as \\$ from 'svelte\\/internal\\/client';?\\s*/g, '');
     
-    // Create a module environment to capture the component export
-    const module = {{ exports: {{}} }};
+    // Extract the component function name
+    const componentMatch = processedCode.match(/export default function (\\w+)/);
+    const componentName = componentMatch ? componentMatch[1] : null;
     
-    // Convert ES module `export default` to a CommonJS-style assignment
-    const runnableCode = moduleCode.replace(/export default/g, 'module.exports.default =');
+    if (!componentName) {{
+        throw new Error('Could not find component function name');
+    }}
     
-    // Execute the code within a function scope to create a closure
-    const wrappedCode = '(function(module, exports) { ' + runnableCode + ' })(module, module.exports)';
-    eval(wrappedCode);
-
-    const Component = module.exports.default;
+    console.log('Found component:', componentName);
+    
+    // Make $ available globally for the component
+    window.$ = $;
+    window.Posts = {{}};  // Create Posts object for FILENAME assignment
+    
+    // Create a new Function with the component code
+    // This approach avoids issues with template literals in eval
+    const createComponent = new Function('$', 'Posts', `
+        // Remove export statement and define the component
+        ${{processedCode.replace(/export default function/, 'function')}}
+        
+        // Return the component function
+        return ${{componentName}};
+    `);
+    
+    // Get the component constructor
+    const Component = createComponent($, window.Posts);
     
     if (Component && typeof Component === 'function') {{
         // Clear server-rendered content for clean client-side hydration
         target.innerHTML = '';
         
-        // Instantiate the component
+        // Mount the component
         Component(target, $$props);
         
         console.log('✅ Svelte 5 component hydrated successfully');
     }} else {{
-        throw new Error('Hydration failed: Svelte component could not be found on module.exports.default');
+        throw new Error('Component is not a function');
     }}
 }} catch (error) {{
     console.error('Hydration failed:', error);
-    throw error;
+    console.error('Component source preview:', componentSource.substring(0, 200) + '...');
+    
+    // Try an alternative approach using direct eval with proper scoping
+    try {{
+        console.log('Attempting alternative hydration approach...');
+        
+        // Make runtime available globally
+        window.$ = $;
+        window.Posts = {{}};
+        
+        // Process the code to remove imports and exports
+        const cleanCode = componentSource
+            .replace(/import 'svelte\\/internal\\/disclose-version';?\\s*/g, '')
+            .replace(/import \\* as \\$ from 'svelte\\/internal\\/client';?\\s*/g, '')
+            .replace(/export default function (\\w+)/, 'window.__SvelteComponent = function $1');
+        
+        // Execute the cleaned code
+        eval(cleanCode);
+        
+        // Get the component
+        const Component = window.__SvelteComponent;
+        
+        if (Component && typeof Component === 'function') {{
+            target.innerHTML = '';
+            Component(target, $$props);
+            console.log('✅ Alternative hydration successful');
+            
+            // Clean up
+            delete window.__SvelteComponent;
+        }} else {{
+            throw new Error('Component not found on window.__SvelteComponent');
+        }}
+    }} catch (altError) {{
+        console.error('Alternative hydration also failed:', altError);
+        throw error;
+    }}
 }}
 """
         

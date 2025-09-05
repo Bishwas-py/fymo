@@ -6,10 +6,11 @@
   
   function increment() {
     count++;
+    console.log('increament worked:', count);
   }
 
   $effect(() => {
-    console.log('count', count);
+    console.log('count is', count);
   });
 </script>
 
