@@ -1,18 +1,29 @@
 {
-  "name": "fymo",
-  "version": "1.0.0",
+  "name": "fymo-framework",
+  "version": "0.1.0",
   "type": "module",
   "description": "Production-ready Python SSR framework for Svelte 5",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bishwas-py/fymo.git"
+  },
+  "keywords": [
+    "python",
+    "svelte",
+    "ssr",
+    "framework",
+    "web"
+  ],
+  "author": "Fymo Contributors",
+  "license": "MIT",
   "dependencies": {
     "svelte": "^5.38.6"
   },
-  "scripts": {
-    "build:runtime": "node build_runtime.js",
-    "build": "npm run build:runtime",
-    "dev": "npm run build:runtime && python3 ensure_runtime.py && source venv/bin/activate && python -m gunicorn server:app --bind 127.0.0.1:8000 --reload",
-    "start": "python3 ensure_runtime.py && source venv/bin/activate && python -m gunicorn server:app --bind 127.0.0.1:8000"
-  },
   "devDependencies": {
     "esbuild": "^0.25.9"
+  },
+  "scripts": {
+    "build:runtime": "node fymo/bundler/js/build_runtime.js",
+    "test": "pytest tests/"
   }
 }

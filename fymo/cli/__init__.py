@@ -1,0 +1,1 @@
+"""Fymo CLI commands"""
