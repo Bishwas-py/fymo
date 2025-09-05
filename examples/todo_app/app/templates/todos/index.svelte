@@ -1,5 +1,10 @@
 <script>
-  let { todos: initialTodos = [] } = $props();
+  // Get dynamic context from server
+  const contextData = getContext();
+  let { todos: initialTodos = [], user = {}, stats = {} } = contextData;
+  
+  // Get document metadata
+  const docData = getDoc();
   
   let todos = $state([...initialTodos]);
   let newTodoText = $state('');
@@ -59,6 +64,11 @@
 <div class="todo-app">
   <header class="header">
     <h1>todos</h1>
+    <div class="user-info">
+      <p>Welcome, {user.name || 'Guest'}! Theme: {user.theme || 'light'}</p>
+      <p>Projects: {stats.total_projects || 0} | Active Todos: {stats.active_todos || 0}</p>
+      <p>Document Title: {docData.title || 'Default Title'}</p>
+    </div>
     <input
       class="new-todo"
       placeholder="What needs to be done?"
@@ -138,6 +148,19 @@
 
   .header {
     position: relative;
+  }
+
+  .user-info {
+    background: #f8f9fa;
+    padding: 10px 15px;
+    margin: 10px 0;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #666;
+  }
+
+  .user-info p {
+    margin: 5px 0;
   }
 
   h1 {
