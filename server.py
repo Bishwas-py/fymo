@@ -6,12 +6,18 @@ from rigids import SColor
 from routes.config import paths
 from svelte_compiler import SvelteCompiler
 from js_runtime import JSRuntime
+import mimetypes
+import os
 
 BASE_DIR = Path(__file__).resolve().parent
 
 # Initialize Svelte compiler and runtime
 svelte_compiler = SvelteCompiler()
 js_runtime = JSRuntime()
+
+# Asset storage for compiled components and extracted CSS
+compiled_components = {}
+extracted_css = {}
 
 
 def render_svelte_template(path):
@@ -26,7 +32,7 @@ def render_svelte_template(path):
     controller_module = importlib.import_module(f"controllers.{paths[path]['controller_path']}")
     props = controller_module.context
     
-    # Compile for SSR
+    # Compile for SSR (extract CSS for serving separately)
     compiled = svelte_compiler.compile_ssr(svelte_source, str(template_path))
     
     if not compiled.get('success'):
@@ -41,25 +47,43 @@ def render_svelte_template(path):
     
     # Generate full HTML with hydration support
     html = render_result.get('html', '')
-    css = render_result.get('css', {}).get('code', '') or compiled.get('css', '')
+    
+    # Extract and store CSS from compilation
+    css = compiled.get('css', '')
+    if css:
+        component_name = Path(template_path).stem
+        extracted_css[f"{component_name}.css"] = css
     
     # Compile client-side version for hydration
     client_compiled = svelte_compiler.compile_dom(svelte_source, str(template_path))
     
     if client_compiled.get('success'):
         client_js = client_compiled.get('js', '')
+        
+        # Store compiled component for serving
+        component_name = Path(template_path).stem
+        compiled_components[f"{component_name}.js"] = client_js
+        
         # Transform the client JS to work with our hydration approach
         hydration_js = js_runtime.transform_client_js_for_hydration(client_js, props)
+        
+        # Add component URL as a comment for debugging
+        component_url = f"/assets/components/{component_name}.js"
+        hydration_js = f"// Component available at: {component_url}\n{hydration_js}"
     else:
         hydration_js = "console.log('Client compilation failed');"
+    
+    # Generate CSS links for all extracted CSS
+    css_links = ""
+    for css_file in extracted_css.keys():
+        css_links += f'    <link rel="stylesheet" href="/assets/css/{css_file}">\n'
     
     full_html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>FyMo - Svelte SSR</title>
-    {f'<style>{css}</style>' if css else ''}
-</head>
+{css_links}</head>
 <body>
     <div id="svelte-app">{html}</div>
     <script id="svelte-props" type="application/json">{json.dumps(props)}</script>
@@ -71,6 +95,175 @@ def render_svelte_template(path):
 </html>"""
     
     return full_html
+
+
+def serve_asset(path):
+    """Serve static assets and compiled components"""
+    try:
+        if path.startswith('/assets/'):
+            asset_path = path[8:]  # Remove '/assets/' prefix
+            
+            # Serve compiled components
+            if asset_path.startswith('components/'):
+                component_file = asset_path[11:]  # Remove 'components/' prefix
+                if component_file in compiled_components:
+                    return compiled_components[component_file], "200 OK", "application/javascript"
+                else:
+                    return f"Component not found: {component_file}", "404 NOT FOUND", "text/plain"
+            
+            # Serve Svelte runtime files
+            elif asset_path.startswith('svelte/'):
+                return serve_svelte_runtime(asset_path), "200 OK", "application/javascript"
+            
+            # Serve extracted CSS files
+            elif asset_path.startswith('css/'):
+                css_file = asset_path[4:]  # Remove 'css/' prefix
+                if css_file in extracted_css:
+                    return extracted_css[css_file], "200 OK", "text/css"
+                else:
+                    return serve_static_file(asset_path)
+            
+            # Serve other static files (JS, images, etc.)
+            elif asset_path.startswith('js/') or asset_path.startswith('images/'):
+                return serve_static_file(asset_path)
+            
+            else:
+                return "Asset not found", "404 NOT FOUND", "text/plain"
+        
+        return "Invalid asset path", "400 BAD REQUEST", "text/plain"
+        
+    except Exception as e:
+        print(f"{SColor.FAIL}Asset serving error: {e}{SColor.ENDC}")
+        return f"Asset serving error: {str(e)}", "500 INTERNAL SERVER ERROR", "text/plain"
+
+
+def serve_svelte_runtime(asset_path):
+    """Serve Svelte runtime files"""
+    if asset_path == 'svelte/client/index.js':
+        return """
+// Svelte 5 Client Runtime - Served from same server
+// This is a minimal implementation for hydration
+
+// Core Svelte client functions
+export function mount(component, target, props) {
+    if (typeof component === 'function') {
+        return component(target, props);
+    }
+    throw new Error('Invalid component for mounting');
+}
+
+export function hydrate(component, target, props) {
+    return mount(component, target, props);
+}
+
+// State management primitives
+export function writable(value) {
+    const subscribers = new Set();
+    
+    function set(new_value) {
+        value = new_value;
+        subscribers.forEach(fn => fn(value));
+    }
+    
+    function update(fn) {
+        set(fn(value));
+    }
+    
+    function subscribe(fn) {
+        subscribers.add(fn);
+        fn(value);
+        return () => subscribers.delete(fn);
+    }
+    
+    return { set, update, subscribe };
+}
+
+// DOM manipulation helpers
+export function element(name) {
+    return document.createElement(name);
+}
+
+export function text(data) {
+    return document.createTextNode(data);
+}
+
+export function attr(node, attribute, value) {
+    if (value == null) {
+        node.removeAttribute(attribute);
+    } else {
+        node.setAttribute(attribute, value);
+    }
+}
+
+export function set_data(text, data) {
+    if (text.data !== data) {
+        text.data = data;
+    }
+}
+
+// Component lifecycle
+export function onMount(fn) {
+    if (typeof fn === 'function') {
+        setTimeout(fn, 0);
+    }
+}
+
+export function safe_not_equal(a, b) {
+    return a != a ? b == b : a !== b || ((a && typeof a === 'object') || typeof a === 'function');
+}
+
+console.log('✅ Svelte client runtime loaded from same server');
+"""
+    
+    elif asset_path == 'svelte/internal/server.js':
+        return """
+// Svelte 5 Server Runtime - Served from same server
+export function escape(value) {
+    if (value == null) return '';
+    const str = String(value);
+    
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+export const FILENAME = Symbol('filename');
+console.log('✅ Svelte server runtime loaded from same server');
+"""
+    
+    else:
+        return f"// Svelte runtime file not found: {asset_path}"
+
+
+def serve_static_file(asset_path):
+    """Serve static files from the static directory"""
+    try:
+        # Security check - prevent directory traversal
+        if '..' in asset_path or asset_path.startswith('/'):
+            return "Access denied", "403 FORBIDDEN", "text/plain"
+        
+        # Build full path to static file
+        static_file_path = BASE_DIR / 'static' / asset_path
+        
+        if static_file_path.exists() and static_file_path.is_file():
+            # Determine content type
+            content_type, _ = mimetypes.guess_type(str(static_file_path))
+            if not content_type:
+                content_type = 'application/octet-stream'
+            
+            # Read file content
+            with open(static_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            return content, "200 OK", content_type
+        else:
+            return f"Static file not found: {asset_path}", "404 NOT FOUND", "text/plain"
+            
+    except Exception as e:
+        return f"Error serving static file: {str(e)}", "500 INTERNAL SERVER ERROR", "text/plain"
 
 
 def render_template(path):
@@ -105,6 +298,22 @@ def render_template(path):
 # main server handler
 def app(environ, start_response):
     path = environ.get("PATH_INFO")
+    
+    # Handle asset requests
+    if path.startswith('/assets/'):
+        content, status, content_type = serve_asset(path)
+        content_bytes = content.encode("utf-8")
+        start_response(
+            status, [
+                ("Content-Type", content_type),
+                ("Content-Length", str(len(content_bytes))),
+                ("Access-Control-Allow-Origin", "*"),  # CORS for assets
+                ("Cache-Control", "public, max-age=3600")  # Cache assets for 1 hour
+            ]
+        )
+        return iter([content_bytes])
+    
+    # Handle template requests
     html_raw, response = render_template(path)
     html = html_raw.encode("utf-8")
     start_response(
