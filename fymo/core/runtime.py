@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Dict, Any
 import STPyV8
 
@@ -11,7 +12,259 @@ class JSRuntime:
     
     def _setup_runtime(self):
         """Initialize Svelte SSR runtime environment with proper error handling"""
-        self.runtime_code = """
+        
+        # Try to load real Svelte server runtime first
+        server_runtime = self._load_real_server_runtime()
+        
+        if server_runtime:
+            # Use the real Svelte server runtime
+            # Setup a module.exports object for CommonJS
+            self.runtime_code = """
+// Setup console for logging
+const console = {
+    log: function(...args) {
+        const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+        if (!globalThis.__logs) globalThis.__logs = [];
+        globalThis.__logs.push('[LOG] ' + msg);
+    },
+    error: function(...args) {
+        const msg = args.map(a => String(a)).join(' ');
+        if (!globalThis.__logs) globalThis.__logs = [];
+        globalThis.__logs.push('[ERROR] ' + msg);
+    },
+    warn: function(...args) {
+        const msg = args.map(a => String(a)).join(' ');
+        if (!globalThis.__logs) globalThis.__logs = [];
+        globalThis.__logs.push('[WARN] ' + msg);
+    }
+};
+globalThis.console = console;
+globalThis.__logs = [];
+
+// Setup CommonJS environment for the server runtime
+const module = { exports: {} };
+const exports = module.exports;
+
+""" + server_runtime + """
+
+// Now extract the exported SvelteServer from module.exports
+// Check if it's already defined to avoid redeclaration
+if (!globalThis.SvelteServer) {
+    const SvelteServer = module.exports;
+    globalThis.SvelteServer = SvelteServer;
+    globalThis.$ = SvelteServer;
+    
+    console.log('=== Loaded Svelte server runtime from module.exports ===');
+    console.log('Type of SvelteServer:', typeof SvelteServer);
+    console.log('SvelteServer keys (first 20):', SvelteServer ? Object.keys(SvelteServer).slice(0, 20).join(', ') : 'null');
+    console.log('Has render:', !!SvelteServer?.render);
+    console.log('Has FILENAME:', !!SvelteServer?.FILENAME);
+} else {
+    // Already loaded, just ensure $ is set
+    globalThis.$ = globalThis.SvelteServer;
+    console.log('=== Svelte server runtime already loaded, reusing existing instance ===');
+}
+
+// Verify the runtime loaded correctly
+if (!globalThis.$) {
+    console.error('Failed to load Svelte server runtime!');
+    console.error('globalThis.SvelteServer:', globalThis.SvelteServer);
+    console.error('module.exports:', module.exports);
+    throw new Error('Failed to load Svelte server runtime');
+}
+
+console.log('=== Server runtime verification passed ===');
+console.log('$.render type:', typeof globalThis.$.render);
+console.log('$.FILENAME type:', typeof globalThis.$.FILENAME);
+
+// Additional setup for real Svelte server runtime
+globalThis.renderSvelte5 = function(componentCode, props) {
+    try {
+        console.log('=== Starting renderSvelte5 with real server runtime ===');
+        
+        // Transform ES module import to use global $
+        let transformedCode = componentCode;
+        
+        // Handle the FILENAME assignment
+        const filenameMatch = transformedCode.match(/^(.+?)\\[\\$\\.FILENAME\\]\\s*=\\s*['"]([^'"]+)['"];?\\n/);
+        let componentName = '';
+        let filename = '';
+        if (filenameMatch) {
+            componentName = filenameMatch[1].trim();
+            filename = filenameMatch[2];
+            transformedCode = transformedCode.replace(filenameMatch[0], '');
+            console.log('Found component:', componentName, 'from file:', filename);
+        }
+        
+        // Remove import statement
+        transformedCode = transformedCode.replace(/import \\* as \\$ from ['"](svelte\\/internal\\/server)['"];?/g, '');
+        
+        // Extract component function name
+        const functionMatch = transformedCode.match(/function\\s+(\\w+)\\s*\\(/);
+        if (!componentName && functionMatch) {
+            componentName = functionMatch[1];
+            console.log('Extracted component name from function:', componentName);
+        }
+        
+        // Remove export default
+        transformedCode = transformedCode.replace(/export default \\w+;?/, '');
+        
+        // Debug: Check what server runtime functions are available
+        console.log('Checking server runtime availability...');
+        console.log('globalThis.$ exists:', !!globalThis.$);
+        console.log('globalThis.SvelteServer exists:', !!globalThis.SvelteServer);
+        
+        if (globalThis.$) {
+            console.log('Available $ functions:', Object.keys(globalThis.$).slice(0, 10).join(', ') + '...');
+            console.log('$.render exists:', !!globalThis.$.render);
+            console.log('$.FILENAME exists:', !!globalThis.$.FILENAME);
+        }
+        
+        // Create wrapper that uses the real Svelte server runtime render function
+        transformedCode = `
+// Use the real Svelte server runtime
+const $ = globalThis.$ || globalThis.SvelteServer;
+
+// Debug: Check if $ is available
+if (!$) {
+    console.error('Svelte server runtime not found!');
+    console.log('Available globals:', Object.keys(globalThis).filter(k => !k.startsWith('_')).join(', '));
+    throw new Error('Svelte server runtime not found. Available globals: ' + Object.keys(globalThis).join(', '));
+}
+
+console.log('Using real Svelte server runtime, render function exists:', !!$.render);
+
+// Define the component
+${transformedCode}
+
+// Set FILENAME if we have it
+if ('${filename}' && '${componentName}' && $.FILENAME) {
+    ${componentName}[$.FILENAME] = '${filename}';
+    console.log('Set FILENAME for component ${componentName}');
+}
+
+// Use the real Svelte render function
+globalThis.renderComponent = function(props) {
+    console.log('Calling $.render with component ${componentName}');
+    console.log('Props:', JSON.stringify(props));
+    
+    try {
+        // First try the standard render approach
+        const result = $.render(${componentName}, { 
+            props: props || {},
+            context: new Map()  // Add context map
+        });
+        
+        console.log('Render result keys:', result ? Object.keys(result) : 'null');
+        console.log('HTML length:', result?.html?.length || 0);
+        
+        return result;
+    } catch (error) {
+        console.error('Standard render failed:', error.message);
+        console.log('Error details:', error.stack);
+        
+        // The error is happening because push_element is trying to read
+        // component[$.FILENAME] but the component context isn't set up properly
+        // Let's try to debug what's happening
+        
+        console.log('Checking component properties:');
+        console.log('Component has FILENAME symbol:', $.FILENAME in ${componentName});
+        console.log('Component FILENAME value:', ${componentName}[$.FILENAME]);
+        
+        // The real issue is that the render function expects the component
+        // to have certain internal properties set up. Let's try a different approach:
+        // Instead of calling render directly, we need to ensure the component
+        // is properly wrapped with the necessary context
+        
+        // Create a wrapper that sets up the component properly
+        const wrappedComponent = function(payload, props, slots, context) {
+            // Ensure the component has the FILENAME symbol
+            if (!${componentName}[$.FILENAME]) {
+                ${componentName}[$.FILENAME] = '${filename}';
+            }
+            
+            // Call the original component
+            return ${componentName}(payload, props, slots, context);
+        };
+        
+        // Copy over the FILENAME property
+        wrappedComponent[$.FILENAME] = '${filename}';
+        
+        console.log('Trying render with wrapped component...');
+        
+        try {
+            const result = $.render(wrappedComponent, {
+                props: props || {},
+                context: new Map()
+            });
+            
+            console.log('Wrapped render successful, HTML length:', result?.html?.length || 0);
+            return result;
+        } catch (wrapError) {
+            console.error('Wrapped render also failed:', wrapError.message);
+            
+            // Final fallback: return an error message
+            return {
+                html: '<div class="ssr-error">SSR Error: ' + error.message + '</div>',
+                head: '',
+                css: { code: '' }
+            };
+        }
+    }
+};`;
+        
+        // Execute the transformed component code
+        console.log('Executing transformed component code...');
+        eval(transformedCode);
+        
+        // Call the render function with props
+        console.log('Calling renderComponent...');
+        const result = globalThis.renderComponent(props);
+        
+        console.log('=== renderSvelte5 completed successfully ===');
+        return result;
+    } catch (error) {
+        console.error('=== renderSvelte5 error ===');
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        return {
+            error: error.message,
+            stack: error.stack,
+            html: '<div class="ssr-error">SSR Error: ' + error.message + '</div>'
+        };
+    }
+};
+
+// Mock browser globals for SSR compatibility
+globalThis.document = undefined;
+globalThis.window = undefined;
+globalThis.navigator = undefined;
+globalThis.location = undefined;
+"""
+            print("✅ Loaded real Svelte server runtime")
+        else:
+            # Fall back to mocked runtime
+            print("⚠️ Using mocked Svelte server runtime (real runtime not found)")
+            self.runtime_code = self._get_mocked_runtime()
+    
+    def _load_real_server_runtime(self):
+        """Load the real Svelte server runtime if available"""
+        try:
+            # Get the path to the bundled server runtime
+            bundler_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            server_runtime_path = os.path.join(bundler_dir, 'bundler', 'js', 'dist', 'svelte-server-runtime.js')
+            
+            if os.path.exists(server_runtime_path):
+                with open(server_runtime_path, 'r') as f:
+                    return f.read()
+        except Exception as e:
+            print(f"Failed to load server runtime: {e}")
+        
+        return None
+    
+    def _get_mocked_runtime(self):
+        """Return the mocked Svelte server runtime as fallback"""
+        return """
 // Svelte 5 SSR Runtime - Mocked implementation that works
 // Mock the svelte/internal/server module with all necessary functions
 const svelteInternal = {
@@ -72,6 +325,10 @@ const svelteInternal = {
     },
     FILENAME: Symbol('filename')
 };
+
+// Expose as global $ for compatibility
+globalThis.$ = svelteInternal;
+globalThis.SvelteServer = svelteInternal;
 
 // Create render function for Svelte 5 components
 globalThis.renderSvelte5 = function(componentCode, props) {
@@ -179,6 +436,21 @@ if (typeof console === 'undefined') {
 }
 """
     
+    def _get_and_print_logs(self, ctx):
+        """Retrieve and print logs from V8 context"""
+        try:
+            logs = ctx.eval("globalThis.__logs || []")
+            if logs:
+                print("\n=== V8 JavaScript Logs ===")
+                for i in range(len(logs)):
+                    log = ctx.eval(f"globalThis.__logs[{i}]")
+                    print(log)
+                print("=== End V8 Logs ===\n")
+                # Clear logs after printing
+                ctx.eval("globalThis.__logs = []")
+        except Exception as e:
+            print(f"Could not retrieve logs: {e}")
+    
     def render_component(self, compiled_js: str, props: Dict[str, Any], template_path: str) -> Dict[str, Any]:
         """Execute compiled Svelte SSR component using STPyV8"""
         try:
@@ -187,6 +459,9 @@ if (typeof console === 'undefined') {
                 # Setup the runtime environment
                 ctx.eval(self.runtime_code)
                 
+                # Print any logs from setup
+                self._get_and_print_logs(ctx)
+                
                 # Prepare props as JSON string for safe injection
                 props_json = json.dumps(props, ensure_ascii=False, separators=(',', ':'))
                 
@@ -194,6 +469,9 @@ if (typeof console === 'undefined') {
                 # Pass the compiled code as a string to our render function
                 script = f"renderSvelte5({json.dumps(compiled_js)}, {props_json})"
                 result = ctx.eval(script)
+                
+                # Print any logs from rendering
+                self._get_and_print_logs(ctx)
                 
                 # Convert JSObject to Python dict if needed
                 if hasattr(result, '__dict__') or str(type(result)) == "<class '_STPyV8.JSObject'>":
@@ -236,10 +514,25 @@ if (typeof console === 'undefined') {
             }
         except Exception as e:
             error_msg = str(e)
+            print(f"\n=== SSR Error ===")
             print(f"Unexpected error in SSR: {error_msg}")
+            
+            # Try to get any logs before the error
+            try:
+                if 'ctx' in locals():
+                    self._get_and_print_logs(ctx)
+            except:
+                pass
+            
+            import traceback
+            stack = traceback.format_exc()
+            print(f"Stack trace:\n{stack}")
+            print("=== End SSR Error ===\n")
+            
             return {
                 'error': f"Unexpected error: {error_msg}",
-                'html': f'<div class="ssr-error">SSR Error: {error_msg}</div>'
+                'html': f'<div class="ssr-error">SSR Error: {error_msg}</div>',
+                'stack': stack
             }
 
     def transform_client_js_for_hydration(self, compiled_js: str, template_path: str) -> str:
