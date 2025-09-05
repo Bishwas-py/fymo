@@ -65,7 +65,9 @@ def render_svelte_template(path):
         compiled_components[f"{component_name}.js"] = client_js
         
         # Transform the client JS to work with our hydration approach
-        hydration_js = js_runtime.transform_client_js_for_hydration(client_js, props)
+        # Pass the relative template path for proper component identification
+        relative_template_path = str(template_path).replace(str(BASE_DIR) + '/', '')
+        hydration_js = js_runtime.transform_client_js_for_hydration(client_js, props, relative_template_path)
         
         # Add component URL as a comment for debugging
         component_url = f"/assets/components/{component_name}.js"
@@ -138,196 +140,22 @@ def serve_asset(path):
 
 
 def serve_svelte_runtime(asset_path):
-    """Serve Svelte runtime files"""
+    """Serve the real bundled Svelte runtime"""
     if asset_path == 'svelte/client/index.js':
-        return """
-// Svelte 5 Client Runtime - Complete implementation for hydration
-// This provides all the necessary internal client functions for Svelte 5
-
-// Component filename tracking
-export const FILENAME = Symbol('filename');
-
-// State management
-const states = new WeakMap();
-const deriveds = new WeakMap();
-const effects = [];
-const userEffects = [];
-const templateEffects = [];
-let current_component = null;
-let currentEffect = null;
-
-export function state(initial) {
-    const value = { 
-        current: initial, 
-        subscribers: new Set(),
-        set(newValue) {
-            this.current = newValue;
-            this.notify();
-        },
-        notify() {
-            // Trigger all template effects to re-run
-            templateEffects.forEach(fn => fn());
-            // Trigger all user effects to re-run
-            userEffects.forEach(fn => fn());
-            // Notify all subscribers
-            this.subscribers.forEach(fn => fn());
-        }
-    };
-    return value;
-}
-
-export function tag(stateObj, name) {
-    // Tags are just for debugging, return the state object
-    stateObj.name = name;
-    return stateObj;
-}
-
-export function get(stateObj) {
-    if (!stateObj || typeof stateObj !== 'object') return stateObj;
-    return stateObj.current !== undefined ? stateObj.current : stateObj;
-}
-
-export function update(stateObj) {
-    if (stateObj && typeof stateObj === 'object' && stateObj.current !== undefined) {
-        stateObj.current++;
-        stateObj.notify();
-    }
-}
-
-export function derived(fn) {
-    let cachedValue = undefined;
-    const derived = { 
-        fn, 
-        subscribers: new Set(),
-        get current() {
-            // Recompute on access
-            cachedValue = fn();
-            return cachedValue;
-        }
-    };
-    // Compute initial value
-    cachedValue = fn();
-    derived.cachedValue = cachedValue;
-    return derived;
-}
-
-// DOM creation and manipulation
-export function from_html(html) {
-    const template = document.createElement('template');
-    template.innerHTML = html.trim();
-    return template.content.firstElementChild;
-}
-
-export function add_locations(node, filename, locations) {
-    // This is for dev tools, just return the node
-    return () => node.cloneNode(true);
-}
-
-export function child(parent, skip) {
-    if (skip === true) {
-        return parent.firstChild;
-    }
-    let child = parent.firstChild;
-    for (let i = 0; i < (skip || 0); i++) {
-        if (child) child = child.nextSibling;
-    }
-    return child || parent.firstChild;
-}
-
-export function sibling(node, skip) {
-    let sibling = node;
-    for (let i = 0; i < skip; i++) {
-        if (sibling) sibling = sibling.nextSibling;
-    }
-    return sibling;
-}
-
-export function append(parent, child) {
-    parent.appendChild(child);
-}
-
-export function set_text(node, text) {
-    if (node) {
-        // Handle both text nodes and element nodes
-        if (node.nodeType === 3) { // Text node
-            node.textContent = text;
-        } else if (node.nodeType === 1) { // Element node
-            node.textContent = text;
-        } else {
-            // For other node types, try to set the text content
-            node.textContent = text;
-        }
-    }
-}
-
-// Component lifecycle
-export function check_target(target) {
-    // Validation for new.target
-}
-
-export function push(props, flag, component) {
-    current_component = { props, component };
-}
-
-export function pop(api) {
-    current_component = null;
-    return api || {};
-}
-
-export function reset(node) {
-    // Reset node state if needed
-}
-
-// Effects
-export function template_effect(fn) {
-    // Store the effect for re-running on state changes
-    templateEffects.push(fn);
-    // Run the effect immediately
-    fn();
-}
-
-export function user_effect(fn) {
-    // Store user effect for re-running on state changes
-    userEffects.push(fn);
-    // Run the effect initially after a microtask
-    setTimeout(fn, 0);
-}
-
-export function log_if_contains_state(type, name, value) {
-    return [name + ':', value];
-}
-
-// Event handling
-export function delegate(events) {
-    events.forEach(event => {
-        document.addEventListener(event, (e) => {
-            let target = e.target;
-            while (target) {
-                const handler = target['__' + event];
-                if (handler) {
-                    if (Array.isArray(handler)) {
-                        const [fn, ...args] = handler;
-                        fn(e, ...args);
-                    } else {
-                        handler(e);
-                    }
-                    break;
-                }
-                target = target.parentElement;
-            }
-        });
-    });
-}
-
-// Legacy API support
-export function legacy_api() {
-    return {
-        // Return empty object for legacy API
-    };
-}
-
-console.log('✅ Svelte 5 client runtime loaded successfully');
-"""
+        # Serve the actual bundled Svelte runtime
+        try:
+            runtime_path = BASE_DIR / 'dist' / 'svelte-runtime.js'
+            if runtime_path.exists():
+                with open(runtime_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            else:
+                # Fallback error message
+                return """
+                    console.error('Svelte runtime not found. Please run: node build_runtime.js');
+                    throw new Error('Svelte runtime bundle not found at dist/svelte-runtime.js');
+                """
+        except Exception as e:
+            return f"console.error('Failed to load Svelte runtime: {str(e)}');"
     
     elif asset_path == 'svelte/internal/server.js':
         return """

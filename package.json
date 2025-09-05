@@ -1,11 +1,17 @@
 {
   "name": "fymo",
   "version": "1.0.0",
-  "description": "Full-stack monolith Python web framework with Svelte SSR",
+  "type": "module",
+  "description": "Production-ready Python SSR framework for Svelte 5",
   "dependencies": {
     "svelte": "^5.38.6"
   },
   "scripts": {
+    "build:runtime": "node build_runtime.js",
+    "build": "npm run build:runtime",
     "dev": "echo 'Development server'"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
   }
 }
