@@ -1,0 +1,21 @@
+# Fymo project configuration
+name: todo_app
+version: 1.0.0
+description: "A todo app example built with Fymo - Python SSR framework for Svelte 5"
+
+# Routing configuration
+routes:
+  root: todos.index
+  resources:
+    - todos
+
+# Build configuration
+build:
+  output_dir: dist
+  minify: false
+  
+# Server configuration  
+server:
+  host: 127.0.0.1
+  port: 8000
+  reload: true

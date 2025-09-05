@@ -123,7 +123,7 @@ class FymoApp:
                 # Transform for hydration
                 relative_template_path = str(template_path).replace(str(self.project_root) + '/', '')
                 hydration_js = self.runtime.transform_client_js_for_hydration(
-                    client_js, props, relative_template_path
+                    client_js, relative_template_path
                 )
             else:
                 hydration_js = "console.error('Client compilation failed');"

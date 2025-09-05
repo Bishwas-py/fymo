@@ -60,6 +60,13 @@ def init():
     initialize_project()
 
 
+@cli.command(name='build-runtime')
+def build_runtime_cmd():
+    """Build the Svelte runtime for the current project"""
+    from fymo.cli.commands.build import build_runtime
+    build_runtime()
+
+
 def main():
     """Main entry point"""
     try:
