@@ -194,7 +194,7 @@ if (typeof console === 'undefined') {
 import * as $ from '/assets/svelte/client/index.js';
 
 // Get target and props
-const target = document.getElementById('app');
+const target = document.getElementById('svelte-app');
 const $$props = {json.dumps(props)};
 
 // The compiled Svelte component code
