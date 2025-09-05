@@ -246,88 +246,163 @@ if (typeof console === 'undefined') {
         """
         Transform compiled Svelte client JS for browser hydration.
         This version uses the actual Svelte runtime bundled with esbuild.
+        This is the WORKING version from the old commit!
         """
-        # Extract just the filename from the template path
+        # Remove import statements from the compiled code
+        # These imports are handled by our bundled runtime
+        cleaned_js = compiled_js
+        cleaned_js = cleaned_js.replace("import 'svelte/internal/disclose-version';", '')
+        cleaned_js = cleaned_js.replace("import * as $ from 'svelte/internal/client';", '')
+        
+        # Extract the actual filename from the component source
+        # Look for the pattern: ComponentName[$.FILENAME] = 'path/to/file.svelte';
+        import re
+        filename_match = re.search(r"\w+\[\$\.FILENAME\]\s*=\s*['\"]([^'\"]+)['\"]", cleaned_js)
+        if filename_match:
+            component_filename = filename_match.group(1)
+        elif template_path:
+            # Use provided template path as fallback
+            component_filename = template_path
+        else:
+            # Default fallback
+            component_filename = 'component.svelte'
+        
+        # Extract just the filename from the path
         from pathlib import Path
-        component_filename = Path(template_path).name
-        component_name = Path(template_path).stem.capitalize()
+        component_name = Path(template_path).stem.capitalize() if template_path else 'Component'
         
-        # Process the component source to work with our bundled runtime
-        # Remove all import statements since we're providing the runtime globally
-        lines = compiled_js.split('\n')
-        processed_lines = []
+        # Escape the cleaned JS for JSON embedding - THIS IS THE KEY!
+        # Use json.dumps to properly escape all special characters
+        client_js_escaped = json.dumps(cleaned_js)
         
-        for line in lines:
-            # Skip import statements
-            if line.strip().startswith('import ') or line.strip().startswith('import{'):
-                continue
-            # Skip the filename assignment at the top (we'll add it back later)
-            if '$.FILENAME' in line and component_name in line:
-                continue
-            processed_lines.append(line)
+        # Get props for embedding
+        # Note: props should be passed from the server, but for now we'll use empty
+        props_json = '{}'
         
-        component_source = '\n'.join(processed_lines)
+        hydration_code = f"""
+// Production-ready Svelte 5 hydration with real runtime
+import * as SvelteRuntime from '/assets/svelte-runtime.js';
+
+// Get target and props
+const target = document.getElementById('svelte-app');
+const propsElement = document.getElementById('svelte-props');
+const $$props = propsElement ? JSON.parse(propsElement.textContent) : {{}};
+
+// Component source code (with imports already removed and properly escaped)
+const componentSource = {client_js_escaped};
+
+try {{
+    // Process code to create a clean module structure
+    let moduleCode = componentSource
+        .replace(/export default function (\\w+)/, 'const ComponentExport = function $1')
+        .trim();
+    
+    // Extract component name
+    const match = moduleCode.match(/const ComponentExport = function (\\w+)/);
+    if (!match) {{
+        throw new Error('Could not extract component name');
+    }}
+    const componentName = match[1];
+    
+    console.log('Found component:', componentName);
+    
+    // Use the mount approach directly as it's more reliable
+    const createModule = new Function('SvelteRuntime', `
+        const $ = SvelteRuntime;
+        const {{
+            state, derived, get, update, tag,
+            template_effect, user_effect,
+            from_html, add_locations, child, sibling, append, set_text,
+            check_target, push, pop, reset, delegate,
+            log_if_contains_state, legacy_api, FILENAME
+        }} = SvelteRuntime;
         
-        # Replace export default with a variable assignment
-        component_source = component_source.replace('export default function', 'const ComponentExport = function')
+        // Component namespace
+        const ${{componentName}} = {{}};
+        ${{componentName}}[FILENAME] = '{component_filename}';
         
-        # Use JSON.stringify to properly escape the component source
-        import json
-        component_source_json = json.dumps(component_source)
+        ${{moduleCode}}
         
-        # Build the hydration script that uses the bundled Svelte runtime
-        hydration_script = f"""
-(async function() {{
-    try {{
-        // Wait for the Svelte runtime to be loaded
-        const SvelteRuntime = await import('/assets/svelte-runtime.js');
+        return ComponentExport;
+    `);
+    
+    const Component = createModule(SvelteRuntime);
+    
+    if (Component && typeof Component === 'function') {{
+        target.innerHTML = '';
         
-        // Get the component source from JSON (properly escaped)
-        const componentSource = {component_source_json};
-        
-        // Create component factory
-        const createComponent = new Function('SvelteRuntime', 'target', '$$props', 'componentSource', `
-            const $ = SvelteRuntime;
-            
-            // Set the filename for debugging
-            const {component_name} = {{}};
-            {component_name}[$.FILENAME] = '{component_filename}';
-            
-            // Evaluate the component source
-            eval(componentSource);
-            
-            // Use Svelte's mount function for hydration
-            return $.mount(ComponentExport, {{
-                target: target,
-                props: $$props,
-                hydrate: true
-            }});
-        `);
-        
-        // Get target element
-        const target = document.getElementById('svelte-app');
-        if (!target) {{
-            console.error('Target element #svelte-app not found');
-            return;
+        // Use mount if available, otherwise direct call
+        if (SvelteRuntime.mount) {{
+            SvelteRuntime.mount(Component, {{ target, props: $$props }});
+        }} else {{
+            Component(target, $$props);
         }}
         
-        // Get initial props from the page
-        const propsElement = document.getElementById('svelte-props');
-        const props = propsElement ? JSON.parse(propsElement.textContent) : {{}};
-        
-        console.log('Found component:', '{component_name}');
-        
-        // Create and hydrate the component
-        const app = createComponent(SvelteRuntime, target, props, componentSource);
-        
-        // Store reference globally for debugging
-        window.{component_name}App = app;
-        
-        console.log('✅ Svelte 5 component hydrated successfully');
-        
-    }} catch (error) {{
-        console.error('Hydration failed:', error);
+        console.log('✅ Svelte 5 component hydrated with production runtime');
+    }} else {{
+        throw new Error('Component is not a valid function');
     }}
-}})();
+}} catch (error) {{
+    console.error('Primary hydration failed:', error);
+    
+    // Alternative approach using mount from Svelte
+    try {{
+        console.log('Trying mount approach...');
+        
+        // Process code to create a module-like structure
+        let moduleCode = componentSource
+            .replace(/export default function (\\w+)/, 'const $1Component = function $1')
+            .trim();
+        
+        // Extract component name
+        const match = moduleCode.match(/const (\\w+)Component = function/);
+        if (!match) {{
+            throw new Error('Could not extract component name');
+        }}
+        const componentName = match[1];
+        
+        // Create a module wrapper
+        const createModule = new Function('SvelteRuntime', `
+            const $ = SvelteRuntime;
+            const {{
+                state, derived, get, update, tag,
+                template_effect, user_effect,
+                from_html, add_locations, child, sibling, append, set_text,
+                check_target, push, pop, reset, delegate,
+                log_if_contains_state, legacy_api, FILENAME
+            }} = SvelteRuntime;
+            
+            // Component namespace
+            const ${{componentName}} = {{}};
+            ${{componentName}}[FILENAME] = '{component_filename}';
+            
+            ${{moduleCode}}
+            
+            return ${{componentName}}Component;
+        `);
+        
+        const Component = createModule(SvelteRuntime);
+        
+        if (Component && typeof Component === 'function') {{
+            target.innerHTML = '';
+            
+            // Use Svelte's mount if available
+            if (SvelteRuntime.mount) {{
+                SvelteRuntime.mount(Component, {{ target, props: $$props }});
+            }} else {{
+                // Direct call as fallback
+                Component(target, $$props);
+            }}
+            
+            console.log('✅ Mount approach hydration successful');
+        }} else {{
+            throw new Error('Component not found');
+        }}
+    }} catch (fallbackError) {{
+        console.error('Mount approach also failed:', fallbackError);
+        throw error;
+    }}
+}}
 """
-        return hydration_script
+        
+        return hydration_code
