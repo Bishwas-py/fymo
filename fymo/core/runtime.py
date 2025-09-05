@@ -105,11 +105,15 @@ if (!globalThis.SvelteServer) {
 if (!globalThis.$) {
     throw new Error('Failed to load Svelte server runtime');
 }
+
 """
     
     def _get_render_svelte5_function(self) -> str:
         """Get the renderSvelte5 function using utility templates"""
-        error_fallback = get_error_fallback_html("' + error.message + '")
+        # Get the server wrapper template and prepare it for JavaScript injection
+        server_wrapper_template = get_server_runtime_wrapper("COMPONENT_NAME_PLACEHOLDER", "FILENAME_PLACEHOLDER")
+        # Escape the template for JavaScript string literal and fix the component code placeholder
+        escaped_template = server_wrapper_template.replace('`', '\\`').replace('${COMPONENT_CODE}', '${componentCode}')
         
         return """
 // Additional setup for real Svelte server runtime
@@ -159,51 +163,13 @@ function extractComponentInfo(componentCode) {
 }
 
 function createServerWrapper(componentName, filename, componentCode) {
-    const template = `
-const $ = globalThis.$ || globalThis.SvelteServer;
-
-if (!$) {
-    throw new Error('Svelte server runtime not found');
+    return createServerWrapperTemplate(componentName, filename, componentCode);
 }
 
-${componentCode}
-
-if ('${filename}' && '${componentName}' && $.FILENAME) {
-    ${componentName}[$.FILENAME] = '${filename}';
-}
-
-globalThis.renderComponent = function(props) {
-    try {
-        const result = $.render(${componentName}, { 
-            props: props || {},
-            context: new Map()
-        });
-        return result;
-    } catch (error) {
-        const wrappedComponent = function(payload, props, slots, context) {
-            if (!${componentName}[$.FILENAME]) {
-                ${componentName}[$.FILENAME] = '${filename}';
-            }
-            return ${componentName}(payload, props, slots, context);
-        };
-        wrappedComponent[$.FILENAME] = '${filename}';
-        
-        try {
-            const result = $.render(wrappedComponent, {
-                props: props || {},
-                context: new Map()
-            });
-            return result;
-        } catch (wrapError) {
-            return {
-                html: '<div class="ssr-error">SSR Error: ' + error.message + '</div>',
-                head: '',
-                css: { code: '' }
-            };
-        }
-    }
-};`;
-    return template;
+function createServerWrapperTemplate(componentName, filename, componentCode) {
+    const template = `""" + escaped_template + """`;
+    return template.replace(/COMPONENT_NAME_PLACEHOLDER/g, componentName)
+                  .replace(/FILENAME_PLACEHOLDER/g, filename);
 }
 """
     
