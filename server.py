@@ -85,7 +85,7 @@ def render_svelte_template(path):
     <title>FyMo - Svelte SSR</title>
 {css_links}</head>
 <body>
-    <div id="svelte-app">{html}</div>
+    <div id="app">{html}</div>
     <script id="svelte-props" type="application/json">{json.dumps(props)}</script>
     <script type="module">
         // Use actual compiled Svelte client code for hydration
