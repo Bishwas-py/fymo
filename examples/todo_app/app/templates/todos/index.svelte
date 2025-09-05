@@ -2,6 +2,9 @@
   // Get data from props (populated by getContext() on server)
   let { todos: initialTodos = [], user = {}, stats = {} } = $props();
   
+  // Get document metadata
+  const docData = getDoc();
+  
   let todos = $state([...initialTodos]);
   let newTodoText = $state('');
   let filter = $state('all'); // all, active, completed
@@ -63,6 +66,7 @@
     <div class="user-info">
       <p>Welcome, {user.name || 'Guest'}! Theme: {user.theme || 'light'}</p>
       <p>Projects: {stats.total_projects || 0} | Active Todos: {stats.active_todos || 0}</p>
+      <p>Document Title: {docData.title || 'Default Title'}</p>
     </div>
     <input
       class="new-todo"
