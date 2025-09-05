@@ -24,8 +24,7 @@ class Router:
         if routes_file and routes_file.exists():
             self._load_routes_from_file(routes_file)
         else:
-            # Default routes
-            self._setup_default_routes()
+            raise ValueError("Routes file not found")
     
     def _load_routes_from_file(self, routes_file: Path):
         """Load routes from a Python or YAML file"""
@@ -78,16 +77,6 @@ class Router:
                 }
             elif key not in ['root', 'resources'] and isinstance(value, dict):
                 self.routes[key] = value
-    
-    def _setup_default_routes(self):
-        """Setup default routes"""
-        self.routes = {
-            '/': {
-                'controller': 'home',
-                'action': 'index',
-                'template': 'home/index.svelte'
-            }
-        }
     
     def _expand_resources(self):
         """Expand resource routes (RESTful routing)"""
