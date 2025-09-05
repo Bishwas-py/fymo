@@ -10,8 +10,6 @@ from .utils import (
     # JS Transform Utils
     extract_filename_from_component,
     remove_es_module_imports,
-    extract_component_function_name,
-    remove_export_default,
     
     # JSON Utils
     safe_json_dumps,
