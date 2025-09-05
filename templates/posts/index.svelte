@@ -1,4 +1,6 @@
 <script>
+    import Test from "./TEST.svelte";
+
   // Svelte 5 runes syntax
   let { id, content } = $props();
   
@@ -14,6 +16,7 @@
   });
 </script>
 
+<Test />
 <div class="post">
   <h1>Post #{id}</h1>
   <p>{content}</p>
