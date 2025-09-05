@@ -192,6 +192,13 @@ class FymoApp:
                         return self.compiled_components[component_file], "200 OK", "application/javascript"
                 
                 # Serve Svelte runtime
+                elif asset_path == 'svelte-runtime.js':
+                    runtime_path = self.project_root / 'dist' / 'svelte-runtime.js'
+                    if runtime_path.exists():
+                        with open(runtime_path, 'r', encoding='utf-8') as f:
+                            return f.read(), "200 OK", "application/javascript"
+                    else:
+                        return "console.error('Svelte runtime not found');", "200 OK", "application/javascript"
                 elif asset_path.startswith('svelte/'):
                     return self._serve_svelte_runtime(asset_path), "200 OK", "application/javascript"
                 
