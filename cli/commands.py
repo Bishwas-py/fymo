@@ -10,7 +10,6 @@ from typing import Optional
 # Add the parent directory to sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from embeds import copy_directory, copy_template_with_substitution
 from cli.utils import spinner, confirm, input_prompt, success, info, error
 
 
