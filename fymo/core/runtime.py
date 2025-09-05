@@ -20,26 +20,17 @@ class JSRuntime:
             # Use the real Svelte server runtime
             # Setup a module.exports object for CommonJS
             self.runtime_code = """
-// Setup console for logging
+// Setup minimal console for error tracking
 const console = {
-    log: function(...args) {
-        const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-        if (!globalThis.__logs) globalThis.__logs = [];
-        globalThis.__logs.push('[LOG] ' + msg);
-    },
+    log: function() {},  // Suppress logs in production
     error: function(...args) {
         const msg = args.map(a => String(a)).join(' ');
-        if (!globalThis.__logs) globalThis.__logs = [];
-        globalThis.__logs.push('[ERROR] ' + msg);
+        if (!globalThis.__errors) globalThis.__errors = [];
+        globalThis.__errors.push(msg);
     },
-    warn: function(...args) {
-        const msg = args.map(a => String(a)).join(' ');
-        if (!globalThis.__logs) globalThis.__logs = [];
-        globalThis.__logs.push('[WARN] ' + msg);
-    }
+    warn: function() {}  // Suppress warnings in production
 };
 globalThis.console = console;
-globalThis.__logs = [];
 
 // Setup CommonJS environment for the server runtime
 const module = { exports: {} };
@@ -187,19 +178,13 @@ globalThis.renderComponent = function(props) {
 };`;
         
         // Execute the transformed component code
-        console.log('Executing transformed component code...');
         eval(transformedCode);
         
         // Call the render function with props
-        console.log('Calling renderComponent...');
         const result = globalThis.renderComponent(props);
-        
-        console.log('=== renderSvelte5 completed successfully ===');
         return result;
     } catch (error) {
-        console.error('=== renderSvelte5 error ===');
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
+        // SSR rendering error
         return {
             error: error.message,
             stack: error.stack,
@@ -409,20 +394,18 @@ if (typeof console === 'undefined') {
 }
 """
     
-    def _get_and_print_logs(self, ctx):
-        """Retrieve and print logs from V8 context"""
+    def _get_errors_if_any(self, ctx):
+        """Retrieve any errors from V8 context for debugging"""
         try:
-            logs = ctx.eval("globalThis.__logs || []")
-            if logs:
-                print("\n=== V8 JavaScript Logs ===")
-                for i in range(len(logs)):
-                    log = ctx.eval(f"globalThis.__logs[{i}]")
-                    print(log)
-                print("=== End V8 Logs ===\n")
-                # Clear logs after printing
-                ctx.eval("globalThis.__logs = []")
-        except Exception as e:
-            print(f"Could not retrieve logs: {e}")
+            errors = ctx.eval("globalThis.__errors || []")
+            if errors:
+                for i in range(len(errors)):
+                    error = ctx.eval(f"globalThis.__errors[{i}]")
+                    print(f"[JS Error] {error}")
+                # Clear errors after printing
+                ctx.eval("globalThis.__errors = []")
+        except:
+            pass  # Silently ignore if we can't get errors
     
     def render_component(self, compiled_js: str, props: Dict[str, Any], template_path: str) -> Dict[str, Any]:
         """Execute compiled Svelte SSR component using STPyV8"""
@@ -432,9 +415,6 @@ if (typeof console === 'undefined') {
                 # Setup the runtime environment
                 ctx.eval(self.runtime_code)
                 
-                # Print any logs from setup
-                self._get_and_print_logs(ctx)
-                
                 # Prepare props as JSON string for safe injection
                 props_json = json.dumps(props, ensure_ascii=False, separators=(',', ':'))
                 
@@ -443,8 +423,8 @@ if (typeof console === 'undefined') {
                 script = f"renderSvelte5({json.dumps(compiled_js)}, {props_json})"
                 result = ctx.eval(script)
                 
-                # Print any logs from rendering
-                self._get_and_print_logs(ctx)
+                # Check for any errors (only in development/debugging)
+                self._get_errors_if_any(ctx)
                 
                 # Convert JSObject to Python dict if needed
                 if hasattr(result, '__dict__') or str(type(result)) == "<class '_STPyV8.JSObject'>":
@@ -490,10 +470,10 @@ if (typeof console === 'undefined') {
             print(f"\n=== SSR Error ===")
             print(f"Unexpected error in SSR: {error_msg}")
             
-            # Try to get any logs before the error
+            # Try to get any errors before the exception
             try:
                 if 'ctx' in locals():
-                    self._get_and_print_logs(ctx)
+                    self._get_errors_if_any(ctx)
             except:
                 pass
             
