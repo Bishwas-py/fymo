@@ -34,7 +34,7 @@ def render_svelte_template(path):
         return f"<div>Svelte Compilation Error: {error_msg}</div>"
     
     # Render with JavaScript runtime
-    render_result = js_runtime.render_component(compiled['js'], props)
+    render_result = js_runtime.render_component(compiled['js'], props, str(template_path))
     
     if 'error' in render_result:
         return f"<div>SSR Error: {render_result['error']}</div>"
@@ -42,6 +42,16 @@ def render_svelte_template(path):
     # Generate full HTML with hydration support
     html = render_result.get('html', '')
     css = render_result.get('css', {}).get('code', '') or compiled.get('css', '')
+    
+    # Compile client-side version for hydration
+    client_compiled = svelte_compiler.compile_dom(svelte_source, str(template_path))
+    
+    if client_compiled.get('success'):
+        client_js = client_compiled.get('js', '')
+        # Transform the client JS to work with our hydration approach
+        hydration_js = js_runtime.transform_client_js_for_hydration(client_js, props)
+    else:
+        hydration_js = "console.log('Client compilation failed');"
     
     full_html = f"""<!DOCTYPE html>
 <html>
@@ -53,9 +63,9 @@ def render_svelte_template(path):
 <body>
     <div id="svelte-app">{html}</div>
     <script id="svelte-props" type="application/json">{json.dumps(props)}</script>
-    <script>
-        // Basic hydration placeholder
-        console.log('Svelte SSR rendered with props:', JSON.parse(document.getElementById('svelte-props').textContent));
+    <script type="module">
+        // Use actual compiled Svelte client code for hydration
+        {hydration_js}
     </script>
 </body>
 </html>"""
