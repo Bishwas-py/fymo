@@ -179,6 +179,15 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
                 ctx.eval(self.runtime_code)
                 
                 # Note: getContext() is now handled server-side and passed as props
+                # Setup getDoc() function for components
+                if controller and hasattr(controller, 'getDoc') and callable(getattr(controller, 'getDoc')):
+                    try:
+                        doc_data = controller.getDoc()
+                        doc_json = json.dumps(doc_data)
+                        ctx.eval(f"globalThis.getDoc = function() {{ return {doc_json}; }};")
+                    except Exception as e:
+                        print(f"Error setting up getDoc: {e}")
+                        ctx.eval("globalThis.getDoc = function() { return {}; };")
                 
                 # Clean ES module imports before passing to JavaScript
                 cleaned_js = remove_es_module_imports(compiled_js)
