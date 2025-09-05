@@ -229,20 +229,6 @@ try {{
 }}
 """
 
-
-def get_error_fallback_html(error_msg: str) -> str:
-    """
-    Get HTML for SSR error fallback
-    
-    Args:
-        error_msg: Error message to display
-        
-    Returns:
-        HTML string for error display
-    """
-    return f'<div class="ssr-error">SSR Error: {error_msg}</div>'
-
-
 def get_render_svelte5_function() -> str:
     """
     Get the main renderSvelte5 function template
