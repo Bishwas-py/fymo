@@ -3,7 +3,8 @@ Todos controller - Provides dynamic data for the todo app
 """
 
 def getContext():
-    """Dynamic context function called from Svelte components"""
+    """Dynamic context function called from server to populate props"""
+    print("getContext called")
     return {
         'todos': [
             {'id': 1, 'text': 'Learn Fymo framework', 'completed': True},
@@ -22,7 +23,7 @@ def getContext():
     }
 
 def getDoc():
-    """Dynamic document metadata function called from Svelte components"""
+    """Dynamic document metadata function called from server"""
     return {
         'title': 'Fymo Todo App - Dynamic SSR',
         'head': {
