@@ -93,11 +93,11 @@ class FymoApp:
             try:
                 controller = importlib.import_module(controller_module)
                 
-                # Try dynamic getContext() function first, fallback to static context
+                # Get dynamic context from getContext() function
                 if hasattr(controller, 'getContext') and callable(getattr(controller, 'getContext')):
                     props = controller.getContext()
                 else:
-                    props = getattr(controller, 'context', {})
+                    props = {}
                 
                 # Get document metadata if available
                 doc_meta = {}
