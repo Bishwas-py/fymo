@@ -91,7 +91,7 @@ globalThis.renderComponent = function(props) {{
 }};"""
 
 
-def get_hydration_template(component_name: str, filename: str, escaped_code: str) -> str:
+def get_hydration_template(component_name: str, filename: str, escaped_code: str, context_data: dict = None, doc_data: dict = None) -> str:
     """
     Get the hydration template for client-side
     
@@ -99,13 +99,32 @@ def get_hydration_template(component_name: str, filename: str, escaped_code: str
         component_name: Name of the component
         filename: Path to the component file
         escaped_code: Escaped JavaScript code
+        context_data: Context data from server
+        doc_data: Document metadata from server
         
     Returns:
         Complete hydration JavaScript code
     """
+    # Prepare context and doc data as JSON
+    import json
+    context_json = "null" if context_data is None else json.dumps(context_data)
+    doc_json = "null" if doc_data is None else json.dumps(doc_data)
+    
     return f"""
 // Production-ready Svelte 5 hydration with real runtime
 import * as SvelteRuntime from '/assets/svelte-runtime.js';
+
+// Setup client-side getContext and getDoc functions
+const contextData = {context_json};
+const docData = {doc_json};
+
+globalThis.getContext = function() {{
+    return contextData || {{}};
+}};
+
+globalThis.getDoc = function() {{
+    return docData || {{}};
+}};
 
 // Get target and props
 const target = document.getElementById('svelte-app');

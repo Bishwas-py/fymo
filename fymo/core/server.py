@@ -89,13 +89,25 @@ class FymoApp:
             with open(template_path, 'r') as f:
                 svelte_source = f.read()
             
-            # Get controller context
+            # Get controller context and document metadata
             try:
                 controller = importlib.import_module(controller_module)
-                props = getattr(controller, 'context', {})
+                
+                # Try dynamic getContext() function first, fallback to static context
+                if hasattr(controller, 'getContext') and callable(getattr(controller, 'getContext')):
+                    props = controller.getContext()
+                else:
+                    props = getattr(controller, 'context', {})
+                
+                # Get document metadata if available
+                doc_meta = {}
+                if hasattr(controller, 'getDoc') and callable(getattr(controller, 'getDoc')):
+                    doc_meta = controller.getDoc()
+                
             except (ImportError, AttributeError) as e:
                 print(f"{Color.FAIL}Controller error: {e}{Color.ENDC}")
                 props = {}
+                doc_meta = {}
             
             # Compile for SSR
             compiled = self.compiler.compile_ssr(svelte_source, str(template_path))
@@ -104,8 +116,8 @@ class FymoApp:
                 error_msg = compiled.get('error', 'Unknown compilation error')
                 return f"<div>Svelte Compilation Error: {error_msg}</div>", "500 INTERNAL SERVER ERROR"
             
-            # Render with JavaScript runtime
-            render_result = self.runtime.render_component(compiled['js'], props, str(template_path))
+            # Render with JavaScript runtime, passing controller for dynamic calls
+            render_result = self.runtime.render_component(compiled['js'], props, str(template_path), controller)
             
             if 'error' in render_result:
                 return f"<div>SSR Error: {render_result['error']}</div>", "500 INTERNAL SERVER ERROR"
@@ -129,16 +141,16 @@ class FymoApp:
                 component_name = template_path.stem
                 self.compiled_components[f"{component_name}.js"] = client_js
                 
-                # Transform for hydration
+                # Transform for hydration with context and doc data
                 relative_template_path = str(template_path).replace(str(self.project_root) + '/', '')
                 hydration_js = self.runtime.transform_client_js_for_hydration(
-                    client_js, relative_template_path
+                    client_js, relative_template_path, props, doc_meta
                 )
             else:
                 hydration_js = "console.error('Client compilation failed');"
             
-            # Generate full HTML page
-            full_html = self._generate_html_page(html, props, hydration_js)
+            # Generate full HTML page with document metadata
+            full_html = self._generate_html_page(html, props, hydration_js, doc_meta)
             
             return full_html, "200 OK"
             
@@ -146,21 +158,31 @@ class FymoApp:
             print(f"{Color.FAIL}Render error: {e}{Color.ENDC}")
             return f"<div>Server Error: {str(e)}</div>", "500 INTERNAL SERVER ERROR"
     
-    def _generate_html_page(self, content: str, props: Dict, hydration_js: str) -> str:
-        """Generate full HTML page with hydration"""
+    def _generate_html_page(self, content: str, props: Dict, hydration_js: str, doc_meta: Dict = None) -> str:
+        """Generate full HTML page with hydration and dynamic document metadata"""
+        
+        if doc_meta is None:
+            doc_meta = {}
         
         # Generate CSS links
         css_links = ""
         for css_file in self.extracted_css.keys():
             css_links += f'    <link rel="stylesheet" href="/assets/css/{css_file}">\n'
         
+        # Get title from doc metadata or config
+        title = doc_meta.get('title', self.config.get('name', 'Fymo App'))
+        
+        # Generate structured head content safely
+        head_content = self._generate_head_content(doc_meta.get('head', {}))
+        
         return f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{self.config.get('name', 'Fymo App')}</title>
-{css_links}</head>
+    <title>{title}</title>
+{css_links}{head_content}
+</head>
 <body>
     <div id="svelte-app">{content}</div>
     <script id="svelte-props" type="application/json">{json.dumps(props)}</script>
@@ -169,6 +191,117 @@ class FymoApp:
     </script>
 </body>
 </html>"""
+    
+    def _generate_head_content(self, head_data: Dict) -> str:
+        """
+        Generate safe HTML head content from structured data
+        
+        Args:
+            head_data: Dictionary containing 'meta' and 'script' data
+            
+        Returns:
+            Formatted HTML string for head content
+        """
+        if not head_data:
+            return ""
+        
+        head_parts = []
+        
+        # Generate meta tags
+        meta_data = head_data.get('meta', [])
+        if meta_data and isinstance(meta_data, list):
+            for meta in meta_data:
+                if isinstance(meta, dict):
+                    meta_attrs = []
+                    for key, value in meta.items():
+                        # Escape HTML attributes safely
+                        safe_key = self._escape_html_attr(str(key))
+                        safe_value = self._escape_html_attr(str(value))
+                        meta_attrs.append(f'{safe_key}="{safe_value}"')
+                    
+                    if meta_attrs:
+                        head_parts.append(f'    <meta {" ".join(meta_attrs)}>')
+        
+        # Generate script tags
+        script_data = head_data.get('script', {})
+        if script_data and isinstance(script_data, dict):
+            
+            # Google Analytics
+            analytics_id = script_data.get('analyticsID')
+            if analytics_id:
+                safe_analytics_id = self._escape_html_attr(str(analytics_id))
+                head_parts.extend([
+                    f'    <script async src="https://www.googletagmanager.com/gtag/js?id={safe_analytics_id}"></script>',
+                    '    <script>',
+                    '        window.dataLayer = window.dataLayer || [];',
+                    '        function gtag(){dataLayer.push(arguments);}',
+                    '        gtag("js", new Date());',
+                    f'        gtag("config", "{safe_analytics_id}");',
+                    '    </script>'
+                ])
+            
+            # Hotjar
+            hotjar_id = script_data.get('hotjar')
+            if hotjar_id:
+                safe_hotjar_id = self._escape_html_attr(str(hotjar_id))
+                head_parts.extend([
+                    '    <script>',
+                    f'        (function(h,o,t,j,a,r){{',
+                    f'            h.hj=h.hj||function(){{(h.hj.q=h.hj.q||[]).push(arguments)}};',
+                    f'            h._hjSettings={{hjid:{safe_hotjar_id},hjsv:6}};',
+                    f'            a=o.getElementsByTagName("head")[0];',
+                    f'            r=o.createElement("script");r.async=1;',
+                    f'            r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;',
+                    f'            a.appendChild(r);',
+                    f'        }})(window,document,"https://static.hotjar.com/c/hotjar-",".js?sv=");',
+                    '    </script>'
+                ])
+            
+            # Custom scripts
+            custom_scripts = script_data.get('custom', [])
+            if custom_scripts and isinstance(custom_scripts, list):
+                if custom_scripts:
+                    head_parts.append('    <script>')
+                    for script in custom_scripts:
+                        if isinstance(script, str) and script.strip():
+                            # Basic JS safety - remove dangerous patterns
+                            safe_script = self._sanitize_js(script.strip())
+                            head_parts.append(f'        {safe_script}')
+                    head_parts.append('    </script>')
+        
+        return '\n' + '\n'.join(head_parts) + '\n' if head_parts else ""
+    
+    def _escape_html_attr(self, value: str) -> str:
+        """Escape HTML attribute values"""
+        return (value.replace('&', '&amp;')
+                     .replace('<', '&lt;')
+                     .replace('>', '&gt;')
+                     .replace('"', '&quot;')
+                     .replace("'", '&#x27;'))
+    
+    def _sanitize_js(self, js_code: str) -> str:
+        """Basic JavaScript sanitization - remove dangerous patterns"""
+        # Remove potentially dangerous patterns
+        dangerous_patterns = [
+            'eval(',
+            'Function(',
+            'setTimeout(',
+            'setInterval(',
+            'document.write(',
+            'innerHTML',
+            'outerHTML',
+            'document.cookie',
+            'localStorage',
+            'sessionStorage'
+        ]
+        
+        sanitized = js_code
+        for pattern in dangerous_patterns:
+            if pattern.lower() in sanitized.lower():
+                # Replace with safe comment
+                sanitized = sanitized.replace(pattern, f'/* BLOCKED: {pattern} */')
+        
+        return sanitized
     
     def _render_404(self) -> str:
         """Render 404 page"""

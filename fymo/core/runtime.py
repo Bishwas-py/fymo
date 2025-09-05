@@ -83,6 +83,37 @@ class JSRuntime:
         
         return '\n'.join(runtime_parts)
     
+    def _setup_controller_functions(self, ctx, controller):
+        """Setup getContext() and getDoc() functions in JavaScript runtime"""
+        
+        # Setup getContext function
+        if hasattr(controller, 'getContext') and callable(getattr(controller, 'getContext')):
+            def js_get_context():
+                try:
+                    result = controller.getContext()
+                    return json.dumps(result)
+                except Exception as e:
+                    print(f"Error in getContext(): {e}")
+                    return "{}"
+            
+            # Create a Python callable that can be called from JavaScript
+            ctx.locals.pyGetContext = js_get_context
+            ctx.eval("globalThis.getContext = function() { return JSON.parse(pyGetContext()); };")
+        
+        # Setup getDoc function  
+        if hasattr(controller, 'getDoc') and callable(getattr(controller, 'getDoc')):
+            def js_get_doc():
+                try:
+                    result = controller.getDoc()
+                    return json.dumps(result)
+                except Exception as e:
+                    print(f"Error in getDoc(): {e}")
+                    return "{}"
+            
+            # Create a Python callable that can be called from JavaScript
+            ctx.locals.pyGetDoc = js_get_doc
+            ctx.eval("globalThis.getDoc = function() { return JSON.parse(pyGetDoc()); };")
+    
     def _get_runtime_initialization(self) -> str:
         """Get the runtime initialization code"""
         return """
@@ -169,13 +200,17 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
 }
 """
     
-    def render_component(self, compiled_js: str, props: Dict[str, Any], template_path: str) -> Dict[str, Any]:
+    def render_component(self, compiled_js: str, props: Dict[str, Any], template_path: str, controller=None) -> Dict[str, Any]:
         """Execute compiled Svelte SSR component using STPyV8"""
         try:
             # Use STPyV8's context manager for proper resource management
             with STPyV8.JSContext() as ctx:
                 # Setup the runtime environment
                 ctx.eval(self.runtime_code)
+                
+                # Add dynamic context functions if controller is provided
+                if controller:
+                    self._setup_controller_functions(ctx, controller)
                 
                 # Clean ES module imports before passing to JavaScript
                 cleaned_js = remove_es_module_imports(compiled_js)
@@ -215,7 +250,7 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
             
             return format_ssr_error(e)
 
-    def transform_client_js_for_hydration(self, compiled_js: str, template_path: str) -> str:
+    def transform_client_js_for_hydration(self, compiled_js: str, template_path: str, context_data: Dict = None, doc_data: Dict = None) -> str:
         """
         Transform compiled Svelte client JS for browser hydration.
         This version uses the actual Svelte runtime bundled with esbuild.
@@ -239,5 +274,5 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
         # Escape the cleaned JS for JSON embedding
         client_js_escaped = escape_js_for_embedding(cleaned_js)
         
-        # Generate hydration code using template
-        return get_hydration_template(component_name, component_filename, client_js_escaped)
+        # Generate hydration code using template with context data
+        return get_hydration_template(component_name, component_filename, client_js_escaped, context_data, doc_data)
