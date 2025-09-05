@@ -21,6 +21,9 @@
   <div class="counter">
     <p>Count: {count} (doubled: {doubled})</p>
     <button onclick={increment}>Increment</button>
+    {#if count > 30}
+      <p>Count is greater than 10</p>
+    {/if}
   </div>
 </div>
 
