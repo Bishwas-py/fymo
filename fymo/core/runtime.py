@@ -12,7 +12,6 @@ from .utils import (
     remove_es_module_imports,
     extract_component_function_name,
     remove_export_default,
-    clean_svelte_client_imports,
     
     # JSON Utils
     safe_json_dumps,
@@ -150,7 +149,7 @@ function extractComponentInfo(componentCode) {
         transformedCode = transformedCode.replace(filenameMatch[0], '');
     }
     
-    transformedCode = transformedCode.replace(/import \\* as \\$ from ['"](svelte\\/internal\\/server)['"];?/g, '');
+    // ES module imports are now cleaned in Python before reaching here
     
     const functionMatch = transformedCode.match(/function\\s+(\\w+)\\s*\\(/);
     if (!componentName && functionMatch) {
@@ -181,11 +180,14 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
                 # Setup the runtime environment
                 ctx.eval(self.runtime_code)
                 
+                # Clean ES module imports before passing to JavaScript
+                cleaned_js = remove_es_module_imports(compiled_js)
+                
                 # Prepare props as JSON string for safe injection
                 props_json = prepare_props_json(props)
                 
                 # Call the Svelte 5 render function
-                script = f"renderSvelte5({safe_json_dumps(compiled_js)}, {props_json})"
+                script = f"renderSvelte5({safe_json_dumps(cleaned_js)}, {props_json})"
                 result = ctx.eval(script)
                 
                 # Print any JavaScript errors
@@ -222,7 +224,7 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
         This version uses the actual Svelte runtime bundled with esbuild.
         """
         # Clean the JavaScript code
-        cleaned_js = clean_svelte_client_imports(compiled_js)
+        cleaned_js = remove_es_module_imports(compiled_js)
         
         # Extract component information using utility
         component_name, component_filename, _ = extract_filename_from_component(cleaned_js)

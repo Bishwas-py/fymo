@@ -87,28 +87,6 @@ def remove_export_default(code: str) -> str:
     return re.sub(r'export default \w+;?', '', code)
 
 
-def clean_svelte_client_imports(code: str) -> str:
-    """
-    Remove Svelte client-specific imports for hydration
-    
-    Args:
-        code: Compiled Svelte client code
-        
-    Returns:
-        Code with client imports removed
-    """
-    cleaned_code = code
-    
-    # Remove specific client imports
-    imports_to_remove = [
-        "import 'svelte/internal/disclose-version';",
-        "import * as $ from 'svelte/internal/client';"
-    ]
-    
-    for import_stmt in imports_to_remove:
-        cleaned_code = cleaned_code.replace(import_stmt, '')
-    
-    return cleaned_code
 
 
 def transform_export_for_hydration(code: str) -> str:
