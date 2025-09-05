@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fymo"
+version = "0.1.0"
+description = "Production-ready Python SSR framework for Svelte 5"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Fymo Contributors", email = "fymo@example.com"}
+]
+requires-python = ">=3.8"
+dependencies = [
+    "stpyv8>=13.1.201.22",
+    "pyyaml>=6.0",
+    "gunicorn>=23.0.0",
+    "click>=8.0.0",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Framework :: Fymo",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
+[project.scripts]
+fymo = "fymo.cli.main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "flake8>=5.0",
+    "mypy>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/fymo"
+Documentation = "https://fymo.readthedocs.io"
+Repository = "https://github.com/yourusername/fymo.git"
+Issues = "https://github.com/yourusername/fymo/issues"
+
+[tool.setuptools.packages.find]
+include = ["fymo*"]
+exclude = ["tests*", "examples*"]
+
+[tool.setuptools.package-data]
+fymo = [
+    "cli/templates/**/*",
+    "bundler/js/*.js",
+]

@@ -1,0 +1,10 @@
+stpyv8>=13.1.201.22
+pyyaml>=6.0
+gunicorn>=23.0.0
+click>=8.0.0
+
+[dev]
+pytest>=7.0
+black>=22.0
+flake8>=5.0
+mypy>=1.0

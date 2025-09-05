@@ -1,0 +1,33 @@
+Metadata-Version: 2.4
+Name: fymo
+Version: 0.1.0
+Summary: Production-ready Python SSR framework for Svelte 5
+Author-email: Fymo Contributors <fymo@example.com>
+License: MIT
+Project-URL: Homepage, https://github.com/yourusername/fymo
+Project-URL: Documentation, https://fymo.readthedocs.io
+Project-URL: Repository, https://github.com/yourusername/fymo.git
+Project-URL: Issues, https://github.com/yourusername/fymo/issues
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Framework :: Fymo
+Classifier: Topic :: Internet :: WWW/HTTP :: WSGI :: Application
+Classifier: Topic :: Software Development :: Libraries :: Application Frameworks
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: stpyv8>=13.1.201.22
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: gunicorn>=23.0.0
+Requires-Dist: click>=8.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: black>=22.0; extra == "dev"
+Requires-Dist: flake8>=5.0; extra == "dev"
+Requires-Dist: mypy>=1.0; extra == "dev"
