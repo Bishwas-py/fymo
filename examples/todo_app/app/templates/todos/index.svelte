@@ -9,7 +9,7 @@
   let newTodoText = $state('');
   let filter = $state('all'); // all, active, completed
   
-  let filteredTodos = $derived(() => {
+  let filteredTodos = $derived.by(() => {
     switch(filter) {
       case 'active':
         return todos.filter(t => !t.completed);
@@ -20,11 +20,11 @@
     }
   });
   
-  let activeTodoCount = $derived(() => {
+  let activeTodoCount = $derived.by(() => {
     return todos.filter(t => !t.completed).length;
   });
   
-  let completedCount = $derived(() => {
+  let completedCount = $derived.by(() => {
     return todos.filter(t => t.completed).length;
   });
   
@@ -60,6 +60,7 @@
   }
 </script>
 
+
 <div class="todo-app">
   <header class="header">
     <h1>todos</h1>
@@ -80,16 +81,17 @@
   {#if todos.length > 0}
     <section class="main">
       <ul class="todo-list">
-        {#each filteredTodos() as todo (todo.id)}
+        {#each filteredTodos as todo (todo.id)}
           <li class:completed={todo.completed}>
             <div class="view">
               <input
+                id="todo-{todo.id}"
                 class="toggle"
                 type="checkbox"
                 checked={todo.completed}
                 onchange={() => toggleTodo(todo.id)}
               />
-              <label>{todo.text}</label>
+              <label for="todo-{todo.id}">{todo.text}</label>
               <button class="destroy" onclick={() => deleteTodo(todo.id)}>×</button>
             </div>
           </li>
@@ -99,7 +101,7 @@
     
     <footer class="footer">
       <span class="todo-count">
-        <strong>{activeTodoCount()}</strong> {activeTodoCount() === 1 ? 'item' : 'items'} left
+        <strong>{activeTodoCount}</strong> {activeTodoCount === 1 ? 'item' : 'items'} left
       </span>
       
       <ul class="filters">
@@ -126,7 +128,7 @@
         </li>
       </ul>
       
-      {#if completedCount() > 0}
+      {#if completedCount > 0}
         <button class="clear-completed" onclick={clearCompleted}>
           Clear completed
         </button>
