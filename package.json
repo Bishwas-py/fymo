@@ -1,0 +1,11 @@
+{
+  "name": "fymo",
+  "version": "1.0.0",
+  "description": "Full-stack monolith Python web framework with Svelte SSR",
+  "dependencies": {
+    "svelte": "^5.38.6"
+  },
+  "scripts": {
+    "dev": "echo 'Development server'"
+  }
+}
