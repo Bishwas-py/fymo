@@ -1,0 +1,16 @@
+{
+  "name": "todo_app",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A Fymo project",
+  "scripts": {
+    "dev": "fymo serve",
+    "build": "fymo build"
+  },
+  "dependencies": {
+    "svelte": "^5.38.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

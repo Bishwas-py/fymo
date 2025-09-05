@@ -22,7 +22,6 @@ async function bundleSvelteRuntime() {
             stdin: {
                 contents: `
                     // Export everything from Svelte's internal client runtime
-                    // This includes all DOM manipulation functions, state management, etc.
                     export * from 'svelte/internal/client';
                     
                     // Also export mount and hydrate from main svelte package

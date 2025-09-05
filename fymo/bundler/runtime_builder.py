@@ -24,15 +24,21 @@ def ensure_svelte_runtime(project_root: Optional[Path] = None):
         dist_dir = project_root / 'dist'
         dist_dir.mkdir(exist_ok=True)
         
-        # Find build script
-        build_script = project_root / 'build_runtime.js'
+        # Always use the framework's build script
+        package_dir = Path(__file__).resolve().parent.parent.parent
+        build_script = package_dir / 'fymo' / 'bundler' / 'js' / 'build_runtime.js'
+        
         if not build_script.exists():
-            # Try package location
-            package_dir = Path(__file__).resolve().parent.parent.parent
-            build_script = package_dir / 'build_runtime.js'
+            # Fallback to package root
+            build_script = package_dir / 'bundler' / 'js' / 'build_runtime.js'
+        
+        if not build_script.exists():
+            print(f"❌ Build script not found at {build_script}")
+            print("Please ensure Fymo is properly installed")
+            return False
         
         try:
-            # Run the build script
+            # Run the build script with project root as working directory
             result = subprocess.run(
                 ['node', str(build_script)],
                 cwd=project_root,
