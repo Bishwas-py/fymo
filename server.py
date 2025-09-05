@@ -8,8 +8,12 @@ from svelte_compiler import SvelteCompiler
 from js_runtime import JSRuntime
 import mimetypes
 import os
+from ensure_runtime import ensure_svelte_runtime
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# Ensure Svelte runtime is built
+ensure_svelte_runtime()
 
 # Initialize Svelte compiler and runtime
 svelte_compiler = SvelteCompiler()
