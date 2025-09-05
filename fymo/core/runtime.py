@@ -40,7 +40,6 @@ from .utils import (
     # Error Utils
     format_ssr_error,
     print_ssr_error,
-    create_error_reesponse,
     create_js_error_response
 )
 
@@ -109,29 +108,24 @@ if (!globalThis.$) {
 """
     
     def _get_render_svelte5_function(self) -> str:
-        """Get the renderSvelte5 function"""
+        """Get the renderSvelte5 function using utility templates"""
+        error_fallback = get_error_fallback_html("' + error.message + '")
+        
         return """
 // Additional setup for real Svelte server runtime
 globalThis.renderSvelte5 = function(componentCode, props) {
     try {
-        // Extract component info and clean code
         const [componentName, filename, cleanedCode] = extractComponentInfo(componentCode);
         
-        // Verify server runtime is available
         if (!globalThis.$) {
             throw new Error('Svelte server runtime not available');
         }
         
-        // Create wrapper with server runtime
         const wrapperCode = createServerWrapper(componentName, filename, cleanedCode);
-        
-        // Execute the transformed component code
         eval(wrapperCode);
         
-        // Call the render function with props
         return globalThis.renderComponent(props);
     } catch (error) {
-        // SSR rendering error
         return {
             error: error.message,
             stack: error.stack,
@@ -140,78 +134,58 @@ globalThis.renderSvelte5 = function(componentCode, props) {
     }
 };
 
-// Helper functions for renderSvelte5
 function extractComponentInfo(componentCode) {
     let transformedCode = componentCode;
-    
-    // Handle the FILENAME assignment
-    const filenameMatch = transformedCode.match(/^(.+?)\\[\\$\\.FILENAME\\]\\s*=\\s*['"]([^'"]+)['"];?\\n/);
     let componentName = '';
     let filename = '';
+    
+    const filenameMatch = transformedCode.match(/^(.+?)\\[\\$\\.FILENAME\\]\\s*=\\s*['"]([^'"]+)['"];?\\n/);
     if (filenameMatch) {
         componentName = filenameMatch[1].trim();
         filename = filenameMatch[2];
         transformedCode = transformedCode.replace(filenameMatch[0], '');
     }
     
-    // Remove import statement
     transformedCode = transformedCode.replace(/import \\* as \\$ from ['"](svelte\\/internal\\/server)['"];?/g, '');
     
-    // Extract component function name
     const functionMatch = transformedCode.match(/function\\s+(\\w+)\\s*\\(/);
     if (!componentName && functionMatch) {
         componentName = functionMatch[1];
     }
     
-    // Remove export default
     transformedCode = transformedCode.replace(/export default \\w+;?/, '');
     
     return [componentName, filename, transformedCode];
 }
 
 function createServerWrapper(componentName, filename, componentCode) {
-    return `
-// Use the real Svelte server runtime
+    const template = `
 const $ = globalThis.$ || globalThis.SvelteServer;
 
-// Verify $ is available
 if (!$) {
     throw new Error('Svelte server runtime not found');
 }
 
-// Define the component
 ${componentCode}
 
-// Set FILENAME if we have it
 if ('${filename}' && '${componentName}' && $.FILENAME) {
     ${componentName}[$.FILENAME] = '${filename}';
 }
 
-// Use the real Svelte render function
 globalThis.renderComponent = function(props) {
     try {
-        // First try the standard render approach
         const result = $.render(${componentName}, { 
             props: props || {},
             context: new Map()
         });
-        
         return result;
     } catch (error) {
-        // Standard render failed, trying fallback
-        
-        // Create a wrapper that sets up the component properly
         const wrappedComponent = function(payload, props, slots, context) {
-            // Ensure the component has the FILENAME symbol
             if (!${componentName}[$.FILENAME]) {
                 ${componentName}[$.FILENAME] = '${filename}';
             }
-            
-            // Call the original component
             return ${componentName}(payload, props, slots, context);
         };
-        
-        // Copy over the FILENAME property
         wrappedComponent[$.FILENAME] = '${filename}';
         
         try {
@@ -219,10 +193,8 @@ globalThis.renderComponent = function(props) {
                 props: props || {},
                 context: new Map()
             });
-            
             return result;
         } catch (wrapError) {
-            // Both render approaches failed, using fallback
             return {
                 html: '<div class="ssr-error">SSR Error: ' + error.message + '</div>',
                 head: '',
@@ -231,6 +203,7 @@ globalThis.renderComponent = function(props) {
         }
     }
 };`;
+    return template;
 }
 """
     
@@ -285,7 +258,7 @@ globalThis.renderComponent = function(props) {
         # Clean the JavaScript code
         cleaned_js = clean_svelte_client_imports(compiled_js)
         
-        # Extract component information
+        # Extract component information using utility
         component_name, component_filename, _ = extract_filename_from_component(cleaned_js)
         
         # Use template path as fallback for filename
