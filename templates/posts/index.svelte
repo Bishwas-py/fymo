@@ -2,12 +2,16 @@
   // Svelte 5 runes syntax
   let { id, content } = $props();
   
-  let count = $state(0);
+  let count = $state(12);
   let doubled = $derived(count * 2);
   
   function increment() {
     count++;
   }
+
+  $effect(() => {
+    console.log('count', count);
+  });
 </script>
 
 <div class="post">
