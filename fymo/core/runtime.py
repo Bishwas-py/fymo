@@ -27,7 +27,6 @@ from .utils import (
     get_commonjs_setup,
     get_server_runtime_wrapper,
     get_hydration_template,
-    get_error_fallback_html,
     
     # Path Utils
     get_server_runtime_path,

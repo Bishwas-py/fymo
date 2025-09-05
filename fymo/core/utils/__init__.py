@@ -25,8 +25,7 @@ from .v8_context_utils import (
 from .runtime_templates import (
     get_commonjs_setup,
     get_server_runtime_wrapper,
-    get_hydration_template,
-    get_error_fallback_html
+    get_hydration_template
 )
 
 from .path_utils import (
@@ -64,7 +63,6 @@ __all__ = [
     'get_commonjs_setup',
     'get_server_runtime_wrapper',
     'get_hydration_template',
-    'get_error_fallback_html',
     
     # Path Utils
     'get_server_runtime_path',
