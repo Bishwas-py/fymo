@@ -5,8 +5,6 @@ Utility modules for Fymo framework
 from .js_transform_utils import (
     extract_filename_from_component,
     remove_es_module_imports,
-    extract_component_function_name,
-    remove_export_default
 )
 
 from .json_utils import (
@@ -48,8 +46,6 @@ __all__ = [
     # JS Transform Utils
     'extract_filename_from_component',
     'remove_es_module_imports', 
-    'extract_component_function_name',
-    'remove_export_default',
     
     # JSON Utils
     'safe_json_dumps',

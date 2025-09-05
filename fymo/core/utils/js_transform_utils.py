@@ -52,61 +52,6 @@ def remove_es_module_imports(code: str) -> str:
     return cleaned_code
 
 
-def extract_component_function_name(code: str) -> Optional[str]:
-    """
-    Extract component function name from function declaration
-    
-    Args:
-        code: JavaScript code containing function declaration
-        
-    Returns:
-        Function name if found, None otherwise
-    """
-    function_match = re.search(r'function\s+(\w+)\s*\(', code)
-    if function_match:
-        return function_match.group(1)
-    
-    # Also try export default function pattern
-    export_match = re.search(r'export default function\s+(\w+)', code)
-    if export_match:
-        return export_match.group(1)
-    
-    return None
-
-
-def remove_export_default(code: str) -> str:
-    """
-    Remove export default statement from code
-    
-    Args:
-        code: JavaScript code with export default
-        
-    Returns:
-        Code with export default removed
-    """
-    return re.sub(r'export default \w+;?', '', code)
-
-
-
-
-def transform_export_for_hydration(code: str) -> str:
-    """
-    Transform export default function for hydration use
-    
-    Args:
-        code: JavaScript code with export default function
-        
-    Returns:
-        Code with export transformed to const assignment
-    """
-    # Transform: export default function ComponentName -> const ComponentExport = function ComponentName
-    return re.sub(
-        r'export default function (\w+)', 
-        r'const ComponentExport = function \1', 
-        code
-    )
-
-
 def extract_component_name_from_export(code: str) -> Optional[str]:
     """
     Extract component name from transformed export
