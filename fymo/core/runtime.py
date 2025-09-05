@@ -271,6 +271,10 @@ if (typeof console === 'undefined') {
         # Replace export default with a variable assignment
         component_source = component_source.replace('export default function', 'const ComponentExport = function')
         
+        # Use JSON.stringify to properly escape the component source
+        import json
+        component_source_json = json.dumps(component_source)
+        
         # Build the hydration script that uses the bundled Svelte runtime
         hydration_script = f"""
 (async function() {{
@@ -278,16 +282,19 @@ if (typeof console === 'undefined') {
         // Wait for the Svelte runtime to be loaded
         const SvelteRuntime = await import('/assets/svelte-runtime.js');
         
+        // Get the component source from JSON (properly escaped)
+        const componentSource = {component_source_json};
+        
         // Create component factory
-        const createComponent = new Function('SvelteRuntime', 'target', '$$props', `
+        const createComponent = new Function('SvelteRuntime', 'target', '$$props', 'componentSource', `
             const $ = SvelteRuntime;
             
             // Set the filename for debugging
             const {component_name} = {{}};
             {component_name}[$.FILENAME] = '{component_filename}';
             
-            // Component source (with imports removed)
-            {component_source}
+            // Evaluate the component source
+            eval(componentSource);
             
             // Use Svelte's mount function for hydration
             return $.mount(ComponentExport, {{
@@ -311,7 +318,7 @@ if (typeof console === 'undefined') {
         console.log('Found component:', '{component_name}');
         
         // Create and hydrate the component
-        const app = createComponent(SvelteRuntime, target, props);
+        const app = createComponent(SvelteRuntime, target, props, componentSource);
         
         // Store reference globally for debugging
         window.{component_name}App = app;
