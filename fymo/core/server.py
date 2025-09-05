@@ -35,7 +35,16 @@ class FymoApp:
         # Initialize core components
         self.compiler = SvelteCompiler()
         self.runtime = JSRuntime()
-        self.router = Router(self.project_root / "config" / "routes.py")
+        # Try fymo.yml first, fallback to config/routes.py
+        fymo_yml = self.project_root / "fymo.yml"
+        routes_py = self.project_root / "config" / "routes.py"
+        
+        if fymo_yml.exists():
+            self.router = Router(fymo_yml)
+        elif routes_py.exists():
+            self.router = Router(routes_py)
+        else:
+            self.router = Router()
         
         # Storage for compiled assets
         self.compiled_components = {}

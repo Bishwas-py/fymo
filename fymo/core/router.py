@@ -52,29 +52,32 @@ class Router:
         with open(routes_file, 'r') as f:
             config = yaml.safe_load(f)
         
-        if 'root' in config:
-            controller, action = config['root'].split('.')
+        # Handle nested routes structure (fymo.yml format)
+        routes_config = config.get('routes', config)
+        
+        if 'root' in routes_config:
+            controller, action = routes_config['root'].split('.')
             self.routes['/'] = {
                 'controller': controller,
                 'action': action,
                 'template': f"{controller}/{action}.svelte"
             }
         
-        if 'resources' in config:
-            self.resources = config['resources']
+        if 'resources' in routes_config:
+            self.resources = routes_config['resources']
             self._expand_resources()
         
-        if 'routes' in config:
-            for path, handler in config['routes'].items():
-                if isinstance(handler, str):
-                    controller, action = handler.split('.')
-                    self.routes[path] = {
-                        'controller': controller,
-                        'action': action,
-                        'template': f"{controller}/{action}.svelte"
-                    }
-                else:
-                    self.routes[path] = handler
+        # Handle explicit route definitions
+        for key, value in routes_config.items():
+            if key not in ['root', 'resources'] and isinstance(value, str):
+                controller, action = value.split('.')
+                self.routes[key] = {
+                    'controller': controller,
+                    'action': action,
+                    'template': f"{controller}/{action}.svelte"
+                }
+            elif key not in ['root', 'resources'] and isinstance(value, dict):
+                self.routes[key] = value
     
     def _setup_default_routes(self):
         """Setup default routes"""
