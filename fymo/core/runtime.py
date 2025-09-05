@@ -54,33 +54,21 @@ if (!globalThis.SvelteServer) {
     globalThis.SvelteServer = SvelteServer;
     globalThis.$ = SvelteServer;
     
-    console.log('=== Loaded Svelte server runtime from module.exports ===');
-    console.log('Type of SvelteServer:', typeof SvelteServer);
-    console.log('SvelteServer keys (first 20):', SvelteServer ? Object.keys(SvelteServer).slice(0, 20).join(', ') : 'null');
-    console.log('Has render:', !!SvelteServer?.render);
-    console.log('Has FILENAME:', !!SvelteServer?.FILENAME);
+    // Server runtime loaded successfully
 } else {
     // Already loaded, just ensure $ is set
     globalThis.$ = globalThis.SvelteServer;
-    console.log('=== Svelte server runtime already loaded, reusing existing instance ===');
 }
 
 // Verify the runtime loaded correctly
 if (!globalThis.$) {
-    console.error('Failed to load Svelte server runtime!');
-    console.error('globalThis.SvelteServer:', globalThis.SvelteServer);
-    console.error('module.exports:', module.exports);
     throw new Error('Failed to load Svelte server runtime');
 }
-
-console.log('=== Server runtime verification passed ===');
-console.log('$.render type:', typeof globalThis.$.render);
-console.log('$.FILENAME type:', typeof globalThis.$.FILENAME);
 
 // Additional setup for real Svelte server runtime
 globalThis.renderSvelte5 = function(componentCode, props) {
     try {
-        console.log('=== Starting renderSvelte5 with real server runtime ===');
+        // Starting renderSvelte5 with real server runtime
         
         // Transform ES module import to use global $
         let transformedCode = componentCode;
@@ -93,7 +81,7 @@ globalThis.renderSvelte5 = function(componentCode, props) {
             componentName = filenameMatch[1].trim();
             filename = filenameMatch[2];
             transformedCode = transformedCode.replace(filenameMatch[0], '');
-            console.log('Found component:', componentName, 'from file:', filename);
+            // Found component and filename
         }
         
         // Remove import statement
@@ -103,21 +91,15 @@ globalThis.renderSvelte5 = function(componentCode, props) {
         const functionMatch = transformedCode.match(/function\\s+(\\w+)\\s*\\(/);
         if (!componentName && functionMatch) {
             componentName = functionMatch[1];
-            console.log('Extracted component name from function:', componentName);
+            // Extracted component name from function
         }
         
         // Remove export default
         transformedCode = transformedCode.replace(/export default \\w+;?/, '');
         
-        // Debug: Check what server runtime functions are available
-        console.log('Checking server runtime availability...');
-        console.log('globalThis.$ exists:', !!globalThis.$);
-        console.log('globalThis.SvelteServer exists:', !!globalThis.SvelteServer);
-        
-        if (globalThis.$) {
-            console.log('Available $ functions:', Object.keys(globalThis.$).slice(0, 10).join(', ') + '...');
-            console.log('$.render exists:', !!globalThis.$.render);
-            console.log('$.FILENAME exists:', !!globalThis.$.FILENAME);
+        // Verify server runtime is available
+        if (!globalThis.$) {
+            throw new Error('Svelte server runtime not available');
         }
         
         // Create wrapper that uses the real Svelte server runtime render function
@@ -125,14 +107,10 @@ globalThis.renderSvelte5 = function(componentCode, props) {
 // Use the real Svelte server runtime
 const $ = globalThis.$ || globalThis.SvelteServer;
 
-// Debug: Check if $ is available
+// Verify $ is available
 if (!$) {
-    console.error('Svelte server runtime not found!');
-    console.log('Available globals:', Object.keys(globalThis).filter(k => !k.startsWith('_')).join(', '));
-    throw new Error('Svelte server runtime not found. Available globals: ' + Object.keys(globalThis).join(', '));
+    throw new Error('Svelte server runtime not found');
 }
-
-console.log('Using real Svelte server runtime, render function exists:', !!$.render);
 
 // Define the component
 ${transformedCode}
@@ -140,13 +118,12 @@ ${transformedCode}
 // Set FILENAME if we have it
 if ('${filename}' && '${componentName}' && $.FILENAME) {
     ${componentName}[$.FILENAME] = '${filename}';
-    console.log('Set FILENAME for component ${componentName}');
+    // FILENAME set for component
 }
 
 // Use the real Svelte render function
 globalThis.renderComponent = function(props) {
-    console.log('Calling $.render with component ${componentName}');
-    console.log('Props:', JSON.stringify(props));
+    // Calling $.render with component and props
     
     try {
         // First try the standard render approach
@@ -155,21 +132,17 @@ globalThis.renderComponent = function(props) {
             context: new Map()  // Add context map
         });
         
-        console.log('Render result keys:', result ? Object.keys(result) : 'null');
-        console.log('HTML length:', result?.html?.length || 0);
+        // Render successful
         
         return result;
     } catch (error) {
-        console.error('Standard render failed:', error.message);
-        console.log('Error details:', error.stack);
+        // Standard render failed, trying fallback
         
         // The error is happening because push_element is trying to read
         // component[$.FILENAME] but the component context isn't set up properly
         // Let's try to debug what's happening
         
-        console.log('Checking component properties:');
-        console.log('Component has FILENAME symbol:', $.FILENAME in ${componentName});
-        console.log('Component FILENAME value:', ${componentName}[$.FILENAME]);
+        // Check component properties for debugging
         
         // The real issue is that the render function expects the component
         // to have certain internal properties set up. Let's try a different approach:
@@ -190,7 +163,7 @@ globalThis.renderComponent = function(props) {
         // Copy over the FILENAME property
         wrappedComponent[$.FILENAME] = '${filename}';
         
-        console.log('Trying render with wrapped component...');
+        // Try render with wrapped component
         
         try {
             const result = $.render(wrappedComponent, {
@@ -198,10 +171,10 @@ globalThis.renderComponent = function(props) {
                 context: new Map()
             });
             
-            console.log('Wrapped render successful, HTML length:', result?.html?.length || 0);
+            // Wrapped render successful
             return result;
         } catch (wrapError) {
-            console.error('Wrapped render also failed:', wrapError.message);
+            // Both render approaches failed, using fallback
             
             // Final fallback: return an error message
             return {
