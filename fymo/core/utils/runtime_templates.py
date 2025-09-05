@@ -114,18 +114,6 @@ def get_hydration_template(component_name: str, filename: str, escaped_code: str
 // Production-ready Svelte 5 hydration with real runtime
 import * as SvelteRuntime from '/assets/svelte-runtime.js';
 
-// Setup client-side getContext and getDoc functions
-const contextData = {context_json};
-const docData = {doc_json};
-
-globalThis.getContext = function() {{
-    return contextData || {{}};
-}};
-
-globalThis.getDoc = function() {{
-    return docData || {{}};
-}};
-
 // Get target and props
 const target = document.getElementById('svelte-app');
 const propsElement = document.getElementById('svelte-props');

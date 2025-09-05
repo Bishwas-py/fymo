@@ -1,10 +1,6 @@
 <script>
-  // Get dynamic context from server
-  const contextData = getContext();
-  let { todos: initialTodos = [], user = {}, stats = {} } = contextData;
-  
-  // Get document metadata
-  const docData = getDoc();
+  // Get data from props (populated by getContext() on server)
+  let { todos: initialTodos = [], user = {}, stats = {} } = $props();
   
   let todos = $state([...initialTodos]);
   let newTodoText = $state('');
@@ -67,7 +63,6 @@
     <div class="user-info">
       <p>Welcome, {user.name || 'Guest'}! Theme: {user.theme || 'light'}</p>
       <p>Projects: {stats.total_projects || 0} | Active Todos: {stats.active_todos || 0}</p>
-      <p>Document Title: {docData.title || 'Default Title'}</p>
     </div>
     <input
       class="new-todo"

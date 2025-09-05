@@ -83,36 +83,6 @@ class JSRuntime:
         
         return '\n'.join(runtime_parts)
     
-    def _setup_controller_functions(self, ctx, controller):
-        """Setup getContext() and getDoc() functions in JavaScript runtime"""
-        
-        # Setup getContext function
-        if hasattr(controller, 'getContext') and callable(getattr(controller, 'getContext')):
-            def js_get_context():
-                try:
-                    result = controller.getContext()
-                    return json.dumps(result)
-                except Exception as e:
-                    print(f"Error in getContext(): {e}")
-                    return "{}"
-            
-            # Create a Python callable that can be called from JavaScript
-            ctx.locals.pyGetContext = js_get_context
-            ctx.eval("globalThis.getContext = function() { return JSON.parse(pyGetContext()); };")
-        
-        # Setup getDoc function  
-        if hasattr(controller, 'getDoc') and callable(getattr(controller, 'getDoc')):
-            def js_get_doc():
-                try:
-                    result = controller.getDoc()
-                    return json.dumps(result)
-                except Exception as e:
-                    print(f"Error in getDoc(): {e}")
-                    return "{}"
-            
-            # Create a Python callable that can be called from JavaScript
-            ctx.locals.pyGetDoc = js_get_doc
-            ctx.eval("globalThis.getDoc = function() { return JSON.parse(pyGetDoc()); };")
     
     def _get_runtime_initialization(self) -> str:
         """Get the runtime initialization code"""
@@ -208,9 +178,7 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
                 # Setup the runtime environment
                 ctx.eval(self.runtime_code)
                 
-                # Add dynamic context functions if controller is provided
-                if controller:
-                    self._setup_controller_functions(ctx, controller)
+                # Note: getContext() is now handled server-side and passed as props
                 
                 # Clean ES module imports before passing to JavaScript
                 cleaned_js = remove_es_module_imports(compiled_js)
