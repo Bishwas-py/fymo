@@ -8,6 +8,7 @@ routes:
   root: todos.index
   resources:
     - todos
+    - home
 
 # Build configuration
 build:
