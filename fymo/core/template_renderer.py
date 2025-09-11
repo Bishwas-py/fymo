@@ -34,7 +34,7 @@ class TemplateRenderer:
         self.config_manager = config_manager
         self.asset_manager = asset_manager
         self.router = router
-        self.compiler = SvelteCompiler()
+        self.compiler = SvelteCompiler(project_root)
         self.runtime = JSRuntime()
     
     def render_template(self, route_path: str) -> Tuple[str, str]:
@@ -77,9 +77,10 @@ class TemplateRenderer:
                 error_msg = compiled.get('error', 'Unknown compilation error')
                 raise CompilationError(f"Svelte compilation failed: {error_msg}")
             
-            # Render with JavaScript runtime
+            # Render with JavaScript runtime, including imported components and bundled packages
             render_result = self.runtime.render_component(
-                compiled['js'], props, str(template_path), controller
+                compiled['js'], props, str(template_path), controller, 
+                compiled.get('components', {}), compiled.get('bundled_packages', {})
             )
             
             if 'error' in render_result:
@@ -93,6 +94,12 @@ class TemplateRenderer:
             if css:
                 component_name = template_path.stem
                 self.asset_manager.store_extracted_css(f"{component_name}.css", css)
+            
+            # Store compiled imported components
+            imported_components = compiled.get('components', {})
+            for comp_name, comp_data in imported_components.items():
+                if comp_data.get('css'):
+                    self.asset_manager.store_extracted_css(f"{comp_name}.css", comp_data['css'])
             
             # Compile client-side version for hydration
             hydration_js = self._compile_for_hydration(
@@ -151,10 +158,17 @@ class TemplateRenderer:
             component_name = template_path.stem
             self.asset_manager.store_compiled_component(f"{component_name}.js", client_js)
             
-            # Transform for hydration with context and doc data
+            # Store compiled imported components for client-side
+            imported_components = client_compiled.get('components', {})
+            for comp_name, comp_data in imported_components.items():
+                if comp_data.get('js'):
+                    self.asset_manager.store_compiled_component(f"{comp_name}.js", comp_data['js'])
+            
+            # Transform for hydration with context and doc data, including imported components and bundled packages
             relative_template_path = str(template_path).replace(str(self.project_root) + '/', '')
             return self.runtime.transform_client_js_for_hydration(
-                client_js, relative_template_path, props, doc_meta
+                client_js, relative_template_path, props, doc_meta, imported_components, 
+                client_compiled.get('bundled_packages', {})
             )
         else:
             return "console.error('Client compilation failed');"

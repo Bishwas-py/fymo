@@ -8,9 +8,10 @@
     "build": "fymo build"
   },
   "dependencies": {
+    "date-fns": "^4.1.0",
     "svelte": "^5.38.0"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.9"
   }
 }

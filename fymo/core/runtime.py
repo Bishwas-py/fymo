@@ -170,13 +170,41 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
 }
 """
     
-    def render_component(self, compiled_js: str, props: Dict[str, Any], template_path: str, controller=None) -> Dict[str, Any]:
+    def render_component(self, compiled_js: str, props: Dict[str, Any], template_path: str, controller=None, imported_components: Dict[str, Any] = None, bundled_packages: Dict[str, str] = None) -> Dict[str, Any]:
         """Execute compiled Svelte SSR component using STPyV8"""
         try:
             # Use STPyV8's context manager for proper resource management
             with STPyV8.JSContext() as ctx:
                 # Setup the runtime environment
                 ctx.eval(self.runtime_code)
+                
+                # Inject bundled NPM packages first
+                if bundled_packages:
+                    from fymo.core.bundler import NPMBundler
+                    from pathlib import Path
+                    bundler = NPMBundler(Path.cwd())  # Temporary bundler for loader generation
+                    package_loader = bundler.generate_bundle_loader(bundled_packages)
+                    if package_loader:
+                        try:
+                            ctx.eval(package_loader)
+                            print(f"✅ Loaded NPM packages for SSR: {list(bundled_packages.keys())}")
+                        except Exception as e:
+                            print(f"Warning: Could not load NPM packages for SSR: {e}")
+                
+                # Inject imported components into the runtime if any
+                if imported_components:
+                    for comp_name, comp_data in imported_components.items():
+                        comp_js = comp_data.get('js', '')
+                        if comp_js:
+                            # Clean and inject the component
+                            cleaned_comp_js = remove_es_module_imports(comp_js)
+                            # Remove export default statements that cause syntax errors
+                            cleaned_comp_js = cleaned_comp_js.replace('export default ', '').replace(';', '')
+                            try:
+                                # Store the component in global scope for access
+                                ctx.eval(f"globalThis.{comp_name} = (function() {{ {cleaned_comp_js}; return {comp_name}; }})();")
+                            except Exception as e:
+                                print(f"Warning: Could not inject component {comp_name}: {e}")
                 
                 # Note: getContext() is now handled server-side and passed as props
                 # Setup getDoc() function for components
@@ -227,7 +255,7 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
             
             return format_ssr_error(e)
 
-    def transform_client_js_for_hydration(self, compiled_js: str, template_path: str, context_data: Dict = None, doc_data: Dict = None) -> str:
+    def transform_client_js_for_hydration(self, compiled_js: str, template_path: str, context_data: Dict = None, doc_data: Dict = None, imported_components: Dict[str, Any] = None, bundled_packages: Dict[str, str] = None) -> str:
         """
         Transform compiled Svelte client JS for browser hydration.
         This version uses the actual Svelte runtime bundled with esbuild.
@@ -251,5 +279,5 @@ function createServerWrapperTemplate(componentName, filename, componentCode) {
         # Escape the cleaned JS for JSON embedding
         client_js_escaped = escape_js_for_embedding(cleaned_js)
         
-        # Generate hydration code using template with context data
-        return get_hydration_template(component_name, component_filename, client_js_escaped, context_data, doc_data)
+        # Generate hydration code using template with context data, imported components, and bundled packages
+        return get_hydration_template(component_name, component_filename, client_js_escaped, context_data, doc_data, imported_components, bundled_packages)

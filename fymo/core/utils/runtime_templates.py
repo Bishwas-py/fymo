@@ -91,7 +91,7 @@ globalThis.renderComponent = function(props) {{
 }};"""
 
 
-def get_hydration_template(component_name: str, filename: str, escaped_code: str, context_data: dict = None, doc_data: dict = None) -> str:
+def get_hydration_template(component_name: str, filename: str, escaped_code: str, context_data: dict = None, doc_data: dict = None, imported_components: dict = None, bundled_packages: dict = None) -> str:
     """
     Get the hydration template for client-side
     
@@ -110,6 +110,61 @@ def get_hydration_template(component_name: str, filename: str, escaped_code: str
     context_json = "null" if context_data is None else json.dumps(context_data)
     doc_json = "null" if doc_data is None else json.dumps(doc_data)
     
+    # Prepare bundled packages code
+    bundled_packages_code = ""
+    if bundled_packages:
+        from fymo.core.bundler import NPMBundler
+        from pathlib import Path
+        bundler = NPMBundler(Path.cwd())  # Temporary bundler for loader generation
+        bundled_packages_code = bundler.generate_bundle_loader(bundled_packages)
+    
+    # Prepare imported components code
+    imported_components_code = ""
+    if imported_components:
+        for comp_name, comp_data in imported_components.items():
+            comp_js = comp_data.get('js', '')
+            if comp_js:
+                # Clean and escape the component JS
+                from fymo.core.utils.js_transform_utils import remove_es_module_imports
+                from fymo.core.utils.json_utils import escape_js_for_embedding
+                
+                cleaned_comp_js = remove_es_module_imports(comp_js)
+                escaped_comp_js = escape_js_for_embedding(cleaned_comp_js)
+                
+                imported_components_code += f"""
+// Imported component: {comp_name}
+const {comp_name}Source = {escaped_comp_js};
+let {comp_name}ModuleCode = {comp_name}Source
+    .replace(/export default function (\\w+)/, 'const $1Component = function $1')
+    .trim();
+
+const {comp_name}Match = {comp_name}ModuleCode.match(/const (\\w+)Component = function/);
+if ({comp_name}Match) {{
+    const {comp_name}ComponentName = {comp_name}Match[1];
+    
+    const create{comp_name}Module = new Function('SvelteRuntime', `
+        const $ = SvelteRuntime;
+        const {{
+            state, derived, get, update, tag,
+            template_effect, user_effect,
+            from_html, add_locations, child, sibling, append, set_text,
+            check_target, push, pop, reset, delegate,
+            log_if_contains_state, legacy_api, FILENAME
+        }} = SvelteRuntime;
+        
+        const ${{{comp_name}ComponentName}} = {{}};
+        ${{{comp_name}ComponentName}}[FILENAME] = '{comp_name}.svelte';
+        
+        ${{{comp_name}ModuleCode}}
+        
+        return ${{{comp_name}ComponentName}}Component;
+    `);
+    
+    const {comp_name} = create{comp_name}Module(SvelteRuntime);
+    globalThis.{comp_name} = {comp_name};
+}}
+"""
+    
     return f"""
 // Production-ready Svelte 5 hydration with real runtime
 import * as SvelteRuntime from '/assets/svelte-runtime.js';
@@ -124,6 +179,16 @@ globalThis.getDoc = function() {{
 const target = document.getElementById('svelte-app');
 const propsElement = document.getElementById('svelte-props');
 const $$props = propsElement ? JSON.parse(propsElement.textContent) : {{}};
+
+// Load bundled NPM packages first
+console.log('Loading bundled packages...');
+{bundled_packages_code}
+console.log('Bundled packages loaded');
+
+// Load imported components
+console.log('Loading imported components...');
+{imported_components_code}
+console.log('Imported components loaded');
 
 // Component source code (with imports already removed and properly escaped)
 const componentSource = {escaped_code};
