@@ -1,4 +1,6 @@
 <script>
+  import Test from './test.svelte';
+
   // Get data from props (populated by getContext() on server)
   let { todos: initialTodos = [], user = {}, stats = {} } = $props();
   
@@ -60,7 +62,7 @@
   }
 </script>
 
-
+<Test message="Component imports are working! 🎉" />
 <div class="todo-app">
   <header class="header">
     <h1>todos</h1>

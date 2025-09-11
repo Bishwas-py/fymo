@@ -7,6 +7,7 @@ from fymo.core.router import Router
 from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
 from fymo.core.template_renderer import TemplateRenderer
+from fymo.core.component_resolver import ComponentResolver
 from fymo.core.exceptions import (
     FymoError, ConfigurationError, TemplateError, 
     CompilationError, RenderingError, AssetError, 
@@ -22,6 +23,7 @@ __all__ = [
     "ConfigManager",
     "AssetManager", 
     "TemplateRenderer",
+    "ComponentResolver",
     "FymoError",
     "ConfigurationError",
     "TemplateError",
