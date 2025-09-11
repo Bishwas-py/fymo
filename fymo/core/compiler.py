@@ -3,12 +3,14 @@ import json
 import tempfile
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class SvelteCompiler:
-    def __init__(self):
-        self.base_dir = Path(__file__).parent
-        self.compiler_script = """
+    """Compiles Svelte components using Node.js subprocess"""
+    
+    def __init__(self) -> None:
+        self.base_dir: Path = Path(__file__).parent
+        self.compiler_script: str = """
 import { compile } from 'svelte/compiler';
 
 const input = JSON.parse(process.argv[2]);
