@@ -3,30 +3,36 @@ Routing system for Fymo
 """
 
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any, Union
 import yaml
 import re
+
+from fymo.core.exceptions import RouterError, ConfigurationError
 
 
 class Router:
     """Handle routing for Fymo applications"""
     
-    def __init__(self, routes_file: Optional[Path] = None):
+    def __init__(self, routes_file: Optional[Path] = None) -> None:
         """
         Initialize router
         
         Args:
             routes_file: Path to routes configuration file
         """
-        self.routes = {}
-        self.resources = []
+        self.routes: Dict[str, Dict[str, Any]] = {}
+        self.resources: List[str] = []
         
         if routes_file and routes_file.exists():
-            self._load_routes_from_file(routes_file)
-        else:
-            raise ValueError("Routes file not found")
+            try:
+                self._load_routes_from_file(routes_file)
+            except Exception as e:
+                raise ConfigurationError(f"Failed to load routes from {routes_file}: {str(e)}")
+        elif routes_file:
+            raise RouterError(f"Routes file not found: {routes_file}")
+        # If no routes file provided, start with empty routes (will be populated dynamically)
     
-    def _load_routes_from_file(self, routes_file: Path):
+    def _load_routes_from_file(self, routes_file: Path) -> None:
         """Load routes from a Python or YAML file"""
         if routes_file.suffix == '.py':
             self._load_python_routes(routes_file)
@@ -48,8 +54,13 @@ class Router:
     
     def _load_yaml_routes(self, routes_file: Path):
         """Load routes from a YAML file"""
-        with open(routes_file, 'r') as f:
-            config = yaml.safe_load(f)
+        try:
+            with open(routes_file, 'r') as f:
+                config = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise ConfigurationError(f"Invalid YAML in routes file: {str(e)}")
+        except IOError as e:
+            raise RouterError(f"Could not read routes file: {str(e)}")
         
         # Handle nested routes structure (fymo.yml format)
         routes_config = config.get('routes', config)
@@ -109,7 +120,7 @@ class Router:
                 'template': f'{resource}/new.svelte'
             }
     
-    def match(self, path: str) -> Optional[Dict]:
+    def match(self, path: str) -> Optional[Dict[str, Any]]:
         """
         Match a path to a route
         
@@ -155,9 +166,10 @@ class Router:
                     'template': f'{resource}/index.svelte'
                 }
         
-        return None
+        # If no explicit routes found, try convention-based routing
+        return self._try_convention_based_routing(path)
     
-    def add_route(self, path: str, controller: str, action: str, template: Optional[str] = None):
+    def add_route(self, path: str, controller: str, action: str, template: Optional[str] = None) -> None:
         """Add a route dynamically"""
         if not template:
             template = f"{controller}/{action}.svelte"
@@ -167,3 +179,42 @@ class Router:
             'action': action,
             'template': template
         }
+    
+    def _try_convention_based_routing(self, path: str) -> Optional[Dict[str, Any]]:
+        """
+        Try to match path using convention-based routing
+        
+        Convention:
+        - / -> home.index
+        - /controller -> controller.index  
+        - /controller/action -> controller.action
+        """
+        # Normalize path
+        if path == '/':
+            return {
+                'controller': 'home',
+                'action': 'index',
+                'template': 'home/index.svelte'
+            }
+        
+        # Remove leading slash and split
+        parts = path.strip('/').split('/')
+        
+        if len(parts) == 1:
+            # /controller -> controller.index
+            controller = parts[0]
+            return {
+                'controller': controller,
+                'action': 'index',
+                'template': f'{controller}/index.svelte'
+            }
+        elif len(parts) == 2:
+            # /controller/action -> controller.action
+            controller, action = parts
+            return {
+                'controller': controller,
+                'action': action,
+                'template': f'{controller}/{action}.svelte'
+            }
+        
+        return None
