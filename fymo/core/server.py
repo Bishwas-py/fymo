@@ -40,6 +40,9 @@ class FymoApp:
             self.router
         )
 
+        # Dev mode: SSE reload support
+        self.dev_orchestrator = None
+
         # New pipeline: sidecar + manifest cache
         self.sidecar = None
         self.manifest_cache = None
@@ -100,10 +103,38 @@ class FymoApp:
         return self.asset_manager.serve_asset(path)
     
     
+    def _dev_sse(self, start_response):
+        """Server-sent events: push 'reload' on rebuild events from DevOrchestrator."""
+        if self.dev_orchestrator is None:
+            start_response("404 NOT FOUND", [("Content-Type", "text/plain")])
+            return [b"not running in dev mode"]
+        start_response("200 OK", [
+            ("Content-Type", "text/event-stream"),
+            ("Cache-Control", "no-cache"),
+        ])
+        from queue import Queue, Empty
+        q: Queue = Queue()
+        def listener(event):
+            if event.get("type") in ("client-rebuild", "server-rebuild"):
+                q.put("reload")
+        self.dev_orchestrator.add_listener(listener)
+        def stream():
+            yield b"data: hello\n\n"
+            while True:
+                try:
+                    msg = q.get(timeout=15)
+                    yield f"data: {msg}\n\n".encode()
+                except Empty:
+                    yield b": keepalive\n\n"
+        return stream()
+
     def __call__(self, environ, start_response):
         """WSGI application callable"""
         path = environ.get("PATH_INFO", "/")
-        
+
+        if path == "/_dev/reload":
+            return self._dev_sse(start_response)
+
         # Handle dist asset requests (content-hashed bundles with immutable caching)
         if path.startswith("/dist/"):
             rest = path[len("/dist/"):]

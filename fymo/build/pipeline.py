@@ -40,7 +40,7 @@ class BuildPipeline:
         if not routes:
             raise BuildError(f"no routes found under {templates_dir}")
 
-        client_entry_paths = write_client_entries(routes, self.cache_dir, self.project_root)
+        client_entry_paths = write_client_entries(routes, self.cache_dir, self.project_root, dev=dev)
 
         config = {
             "projectRoot": str(self.project_root),

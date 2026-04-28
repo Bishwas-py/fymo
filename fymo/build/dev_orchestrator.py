@@ -34,7 +34,7 @@ class DevOrchestrator:
             raise RuntimeError("node not found on PATH")
         templates = self.project_root / "app" / "templates"
         self._routes = discover_routes(templates)
-        client_entries = write_client_entries(self._routes, self.cache_dir, self.project_root)
+        client_entries = write_client_entries(self._routes, self.cache_dir, self.project_root, dev=True)
 
         config = {
             "projectRoot": str(self.project_root),
