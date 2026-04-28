@@ -143,13 +143,12 @@ class TemplateRenderer:
         """New pipeline: render via Node sidecar with prebuilt SSR module."""
         from fymo.core.sidecar import SidecarError
         from fymo.core.manifest_cache import ManifestUnavailable
+        from fymo.core.html import build_html
 
         route_info = self.router.match(route_path)
         if not route_info:
             return self._render_404(), "404 NOT FOUND"
 
-        # Map route_info to manifest key. The controller field is e.g. "todos";
-        # if it contains a dot (e.g. "todos.index"), take the part before the dot.
         controller_key = route_info["controller"]
         route_name = controller_key.split(".")[0]
         controller_module = f"app.controllers.{controller_key}"
@@ -161,16 +160,29 @@ class TemplateRenderer:
             return f"<div>Build error: {e}</div>", "500 INTERNAL SERVER ERROR"
 
         if route_name not in manifest.routes:
-            return f"<div>Route '{route_name}' not in manifest. Run `fymo build`.</div>", "500 INTERNAL SERVER ERROR"
+            return (
+                f"<div>Route '{route_name}' not in manifest. Run `fymo build`.</div>",
+                "500 INTERNAL SERVER ERROR",
+            )
 
         try:
             ssr = self.sidecar.render(route_name, props, doc=doc_meta)
         except SidecarError as e:
             return f"<div>SSR Error: {e}</div>", "500 INTERNAL SERVER ERROR"
 
-        # Reuse existing _generate_html_page for now (Phase 3 replaces this)
-        full_html = self._generate_html_page(ssr["body"], props, "/* sidecar mode: hydration TBD in phase 3 */", doc_meta)
-        return full_html, "200 OK"
+        title = doc_meta.get("title", self.config_manager.get_app_name())
+        head_extra = self._generate_head_content(doc_meta.get("head", {}))
+        # Prepend Svelte's own <head> output
+        head_extra = (ssr["head"] or "") + head_extra
+
+        html = build_html(
+            body=ssr["body"],
+            head_extra=head_extra,
+            props=props,
+            assets=manifest.routes[route_name],
+            title=title,
+        )
+        return html, "200 OK"
 
     def _load_controller_data(self, controller_module: str) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
         """Load controller and extract context and document metadata"""
