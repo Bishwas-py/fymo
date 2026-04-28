@@ -61,10 +61,13 @@ def write_client_entries(
 ) -> Dict[str, Path]:
     """Write a client entry per route, returning {route_name: entry_path}."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Resolve out_dir to a canonical path so that os.path.relpath works correctly
+    # even on macOS where /var is a symlink to /private/var.
+    out_dir_resolved = out_dir.resolve()
     written: Dict[str, Path] = {}
     sse_snippet = SSE_SNIPPET if dev else ""
     for route in routes:
-        rel = os.path.relpath(route.entry_path, out_dir)
+        rel = os.path.relpath(route.entry_path, out_dir_resolved)
         # esbuild needs forward slashes in import paths
         component_import = rel.replace(os.sep, "/")
         if not component_import.startswith("."):

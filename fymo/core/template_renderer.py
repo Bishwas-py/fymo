@@ -88,7 +88,12 @@ class TemplateRenderer:
             )
 
         try:
-            ssr = self.sidecar.render(route_name, props, doc=doc_meta)
+            from fymo.core.html import _safe_json
+            import json
+            # Serialize props through _safe_json first so remote callables become
+            # their marker dicts before being JSON-encoded for the IPC message.
+            serialized_props = json.loads(_safe_json(props))
+            ssr = self.sidecar.render(route_name, serialized_props, doc=doc_meta)
         except SidecarError as e:
             return f"<div>SSR Error: {e}</div>", "500 INTERNAL SERVER ERROR"
 
