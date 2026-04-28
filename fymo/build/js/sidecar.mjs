@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import { render } from 'svelte/server';
 
+// Provide a no-op getDoc stub for SSR context.
+// Components that call getDoc() on the client side will receive an empty
+// object during server rendering; the real implementation is injected by
+// the Python runtime on the browser side.
+globalThis.getDoc = function getDoc() { return {}; };
+
 const cache = new Map();
 const stdout = process.stdout;
 const stdin = process.stdin;
