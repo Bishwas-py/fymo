@@ -12,13 +12,20 @@
  *   { ok: true, server: { ... metafile ... } } on stdout
  */
 import { build } from 'esbuild';
-import sveltePlugin from 'esbuild-svelte';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+import { fymoRemotePlugin } from './plugins/remote.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(process.argv[2]);
+
+// Resolve esbuild-svelte and svelte-preprocess from the project's own node_modules
+// so that the Svelte version used for compilation matches the one used at SSR runtime.
+const projectRequire = createRequire(path.join(config.projectRoot, 'package.json'));
+const sveltePlugin = (await import(pathToFileURL(projectRequire.resolve('esbuild-svelte')).href)).default;
+const sveltePreprocess = (await import(pathToFileURL(projectRequire.resolve('svelte-preprocess')).href)).default;
 
 async function buildServer() {
     const entryPoints = Object.fromEntries(
@@ -35,7 +42,9 @@ async function buildServer() {
         minify: !config.dev,
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
+        external: ['$remote/*'],
         plugins: [sveltePlugin({
+            preprocess: sveltePreprocess(),
             compilerOptions: { generate: 'server', dev: false },
         })],
         logLevel: 'silent',
@@ -59,9 +68,13 @@ async function buildClient() {
         minify: !config.dev,
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
-        plugins: [sveltePlugin({
-            compilerOptions: { generate: 'client', dev: false },
-        })],
+        plugins: [
+            fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
+            sveltePlugin({
+                preprocess: sveltePreprocess(),
+                compilerOptions: { generate: 'client', dev: false },
+            }),
+        ],
         logLevel: 'silent',
     });
 }

@@ -1,0 +1,6 @@
+dist/
+.fymo/
+.venv/
+node_modules/
+app/data/blog.db
+__pycache__/

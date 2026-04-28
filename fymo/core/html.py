@@ -4,6 +4,15 @@ from typing import Any, Dict
 from fymo.build.manifest import RouteAssets
 
 
+def _remote_marker(obj):
+    """If obj is a callable from app.remote.*, return its marker dict; else raise."""
+    mod = getattr(obj, "__module__", None)
+    if mod and mod.startswith("app.remote.") and callable(obj):
+        module_name = mod[len("app.remote."):]
+        return {"__fymo_remote": f"{module_name}/{obj.__name__}"}
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def _safe_json(obj: Any) -> str:
     """JSON serialize and escape for safe embedding in <script type=application/json>.
 
@@ -11,7 +20,7 @@ def _safe_json(obj: Any) -> str:
     We escape `<`, `>`, `&` to their \\uXXXX equivalents — JSON-compatible and safe.
     """
     return (
-        json.dumps(obj)
+        json.dumps(obj, default=_remote_marker)
         .replace("<", "\\u003c")
         .replace(">", "\\u003e")
         .replace("&", "\\u0026")

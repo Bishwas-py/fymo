@@ -1,0 +1,18 @@
+{
+  "name": "blog_app",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "fymo dev",
+    "build": "fymo build"
+  },
+  "dependencies": {
+    "svelte": "^5.38.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9",
+    "esbuild-svelte": "^0.9.0",
+    "svelte-preprocess": "^6.0.3",
+    "typescript": "^5.5.0"
+  }
+}

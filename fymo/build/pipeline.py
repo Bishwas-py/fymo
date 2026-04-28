@@ -10,6 +10,8 @@ from typing import Optional
 from fymo.build.discovery import discover_routes
 from fymo.build.entry_generator import write_client_entries
 from fymo.build.manifest import Manifest, RouteAssets
+from fymo.remote.discovery import discover_remote_modules
+from fymo.remote.codegen import emit_module, emit_runtime
 
 
 class BuildError(RuntimeError):
@@ -41,6 +43,25 @@ class BuildPipeline:
             raise BuildError(f"no routes found under {templates_dir}")
 
         client_entry_paths = write_client_entries(routes, self.cache_dir, self.project_root, dev=dev)
+
+        # Codegen for app/remote/*.py — produces dist/client/_remote/<name>.{js,d.ts}
+        remote_out = self.dist_dir / "client" / "_remote"
+        project_root_str = str(self.project_root)
+        import sys as _sys
+        _added = project_root_str not in _sys.path
+        if _added:
+            _sys.path.insert(0, project_root_str)
+        try:
+            remote_modules = discover_remote_modules(self.project_root)
+        except ValueError as e:
+            raise BuildError(f"remote module discovery failed: {e}")
+        finally:
+            if _added and project_root_str in _sys.path:
+                _sys.path.remove(project_root_str)
+        if remote_modules:
+            emit_runtime(remote_out)
+            for module_name, fns in remote_modules.items():
+                emit_module(module_name, fns, remote_out)
 
         config = {
             "projectRoot": str(self.project_root),

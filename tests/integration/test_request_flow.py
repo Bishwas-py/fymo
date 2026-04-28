@@ -10,7 +10,6 @@ from fymo.build.pipeline import BuildPipeline
 @pytest.mark.usefixtures("node_available")
 def test_request_renders_via_sidecar_when_flag_set(example_app, monkeypatch):
     BuildPipeline(project_root=example_app).build(dev=False)
-    monkeypatch.setenv("FYMO_NEW_PIPELINE", "1")
     monkeypatch.chdir(example_app)
 
     from fymo import create_app
@@ -44,7 +43,6 @@ def test_request_renders_via_sidecar_when_flag_set(example_app, monkeypatch):
 @pytest.mark.usefixtures("node_available")
 def test_response_html_under_10kb(example_app, monkeypatch):
     BuildPipeline(project_root=example_app).build(dev=False)
-    monkeypatch.setenv("FYMO_NEW_PIPELINE", "1")
 
     from fymo import create_app
     app = create_app(example_app)
@@ -151,6 +149,44 @@ def test_response_includes_doc_island_and_client_assigns_getDoc(example_app, mon
         assert responses2[0][0].startswith("200")
         assert b"svelte-doc" in bundle_body, "client bundle does not read svelte-doc island"
         assert b"getDoc" in bundle_body, "client bundle does not assign globalThis.getDoc"
+    finally:
+        if app.sidecar:
+            app.sidecar.stop()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_client_entry_calls_resolve_remote_props(example_app, monkeypatch):
+    # Add a remote module so the client entry is generated with resolution code
+    remote = example_app / "app" / "remote"
+    remote.mkdir(parents=True, exist_ok=True)
+    (remote / "__init__.py").write_text("")
+    (remote / "x.py").write_text("def fn(s: str) -> str: return s\n")
+
+    BuildPipeline(project_root=example_app).build(dev=False)
+
+    from fymo import create_app
+    app = create_app(example_app)
+    try:
+        import re, io, sys
+        responses = []
+        def sr(s, h): responses.append((s, h))
+        body = b"".join(app({
+            "REQUEST_METHOD": "GET", "PATH_INFO": "/", "QUERY_STRING": "",
+            "SERVER_NAME": "x", "SERVER_PORT": "0", "SERVER_PROTOCOL": "HTTP/1.1",
+            "wsgi.input": io.BytesIO(), "wsgi.errors": sys.stderr, "wsgi.url_scheme": "http",
+        }, sr))
+        m = re.search(rb'src="(/dist/client/todos\.[A-Z0-9]+\.js)"', body)
+        assert m is not None
+        bundle_url = m.group(1).decode()
+        b2 = []
+        def sr2(s, h): b2.append((s, h))
+        bundle = b"".join(app({
+            "REQUEST_METHOD": "GET", "PATH_INFO": bundle_url, "QUERY_STRING": "",
+            "SERVER_NAME": "x", "SERVER_PORT": "0", "SERVER_PROTOCOL": "HTTP/1.1",
+            "wsgi.input": io.BytesIO(), "wsgi.errors": sys.stderr, "wsgi.url_scheme": "http",
+        }, sr2))
+        # The marker name must appear so the runtime can resolve {__fymo_remote: ...} props
+        assert b"__fymo_remote" in bundle
     finally:
         if app.sidecar:
             app.sidecar.stop()

@@ -3,6 +3,7 @@ Template rendering for Fymo applications
 """
 
 import importlib
+import inspect
 from pathlib import Path
 from typing import Dict, Any, Tuple
 
@@ -72,7 +73,8 @@ class TemplateRenderer:
         controller_key = route_info["controller"]
         route_name = controller_key.split(".")[0]
         controller_module = f"app.controllers.{controller_key}"
-        _, props, doc_meta = self._load_controller_data(controller_module)
+        params = route_info.get("params", {})
+        _, props, doc_meta = self._load_controller_data(controller_module, params=params)
 
         try:
             manifest = self.manifest_cache.get()
@@ -86,7 +88,12 @@ class TemplateRenderer:
             )
 
         try:
-            ssr = self.sidecar.render(route_name, props, doc=doc_meta)
+            from fymo.core.html import _safe_json
+            import json
+            # Serialize props through _safe_json first so remote callables become
+            # their marker dicts before being JSON-encoded for the IPC message.
+            serialized_props = json.loads(_safe_json(props))
+            ssr = self.sidecar.render(route_name, serialized_props, doc=doc_meta)
         except SidecarError as e:
             return f"<div>SSR Error: {e}</div>", "500 INTERNAL SERVER ERROR"
 
@@ -105,26 +112,25 @@ class TemplateRenderer:
         )
         return html, "200 OK"
 
-    def _load_controller_data(self, controller_module: str) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
+    def _load_controller_data(
+        self, controller_module: str, params: dict | None = None
+    ) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
         """Load controller and extract context and document metadata"""
+        params = params or {}
         try:
             controller = importlib.import_module(controller_module)
-            
-            # Get dynamic context from getContext() function
-            props = {}
-            if hasattr(controller, 'getContext') and callable(getattr(controller, 'getContext')):
-                props = controller.getContext()
-            
-            # Get document metadata if available
-            doc_meta = {}
-            if hasattr(controller, 'getDoc') and callable(getattr(controller, 'getDoc')):
+            props: dict = {}
+            if hasattr(controller, "getContext") and callable(getattr(controller, "getContext")):
+                getContext = getattr(controller, "getContext")
+                sig = inspect.signature(getContext)
+                accepted = {k: v for k, v in params.items() if k in sig.parameters}
+                props = getContext(**accepted)
+            doc_meta: dict = {}
+            if hasattr(controller, "getDoc") and callable(getattr(controller, "getDoc")):
                 doc_meta = controller.getDoc()
-            
             return controller, props, doc_meta
-            
         except (ImportError, AttributeError) as e:
             print(f"{Color.FAIL}Controller error: {e}{Color.ENDC}")
-            # Don't raise here, just return empty data - controllers are optional
             return None, {}, {}
     
     def _generate_head_content(self, head_data: Dict[str, Any]) -> str:
