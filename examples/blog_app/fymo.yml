@@ -1,0 +1,17 @@
+name: blog_app
+version: 1.0.0
+description: "A blog app example for the Fymo framework — showcases remote functions"
+
+routes:
+  root: index.index
+  resources:
+    - posts
+    - tags
+
+build:
+  output_dir: dist
+  minify: false
+
+server:
+  host: 127.0.0.1
+  port: 8000

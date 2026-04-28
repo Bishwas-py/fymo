@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "paths": {
+      "$remote/*": ["./dist/client/_remote/*"]
+    }
+  },
+  "include": ["app/**/*.svelte", "app/**/*.ts"]
+}
