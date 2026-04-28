@@ -1,6 +1,6 @@
 """Seed posts from app/posts/*.md into SQLite on first run."""
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import mistune
 from pygments import highlight
@@ -54,7 +54,7 @@ def ensure_seeded(project_root: Path) -> None:
         title = meta.get("title") or slug.replace("-", " ").title()
         summary = meta.get("summary") or ""
         tags = meta.get("tags") or ""
-        published_at = meta.get("published_at") or datetime.utcnow().isoformat()
+        published_at = meta.get("published_at") or datetime.now(timezone.utc).isoformat()
         content_html = _md(body)
         db.execute(
             "INSERT OR REPLACE INTO posts (slug, title, summary, content_html, tags, published_at) VALUES (?, ?, ?, ?, ?, ?)",

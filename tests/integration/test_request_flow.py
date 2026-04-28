@@ -10,7 +10,6 @@ from fymo.build.pipeline import BuildPipeline
 @pytest.mark.usefixtures("node_available")
 def test_request_renders_via_sidecar_when_flag_set(example_app, monkeypatch):
     BuildPipeline(project_root=example_app).build(dev=False)
-    monkeypatch.setenv("FYMO_NEW_PIPELINE", "1")
     monkeypatch.chdir(example_app)
 
     from fymo import create_app
@@ -44,7 +43,6 @@ def test_request_renders_via_sidecar_when_flag_set(example_app, monkeypatch):
 @pytest.mark.usefixtures("node_available")
 def test_response_html_under_10kb(example_app, monkeypatch):
     BuildPipeline(project_root=example_app).build(dev=False)
-    monkeypatch.setenv("FYMO_NEW_PIPELINE", "1")
 
     from fymo import create_app
     app = create_app(example_app)

@@ -8,7 +8,6 @@ from fymo.build.pipeline import BuildPipeline
 @pytest.mark.usefixtures("node_available")
 def test_dist_assets_served_with_immutable_caching(example_app, monkeypatch):
     BuildPipeline(project_root=example_app).build(dev=False)
-    monkeypatch.setenv("FYMO_NEW_PIPELINE", "1")
 
     from fymo import create_app
     app = create_app(example_app)
@@ -45,7 +44,6 @@ def test_dist_assets_served_with_immutable_caching(example_app, monkeypatch):
 @pytest.mark.usefixtures("node_available")
 def test_dist_path_traversal_rejected(example_app, monkeypatch):
     BuildPipeline(project_root=example_app).build(dev=False)
-    monkeypatch.setenv("FYMO_NEW_PIPELINE", "1")
 
     from fymo import create_app
     app = create_app(example_app)

@@ -1,5 +1,5 @@
 """Remote functions for the blog: reads + comment/reaction mutations."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TypedDict, Literal
 from pydantic import BaseModel, Field
 
@@ -73,7 +73,7 @@ def create_comment(slug: str, input: NewComment) -> Comment:
     uid = current_uid()
     cid = get_db().execute(
         "INSERT INTO comments (post_slug, uid, name, body, created_at) VALUES (?, ?, ?, ?, ?)",
-        [slug, uid, input.name, input.body, datetime.utcnow().isoformat()],
+        [slug, uid, input.name, input.body, datetime.now(timezone.utc).isoformat()],
     )
     return get_db().fetchone(
         "SELECT id, name, body, created_at FROM comments WHERE id = ?", [cid]
