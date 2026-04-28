@@ -2,7 +2,6 @@
 Fymo Server - Core WSGI application
 """
 
-import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -43,21 +42,25 @@ class FymoApp:
         # Dev mode: SSE reload support
         self.dev_orchestrator = None
 
-        # New pipeline: sidecar + manifest cache
-        self.sidecar = None
-        self.manifest_cache = None
-        if os.environ.get("FYMO_NEW_PIPELINE") == "1":
-            from fymo.core.sidecar import Sidecar
-            from fymo.core.manifest_cache import ManifestCache
-            dist_dir = self.project_root / "dist"
-            if (dist_dir / "sidecar.mjs").is_file():
-                self.sidecar = Sidecar(dist_dir=dist_dir)
-                self.sidecar.start()
-                self.sidecar.ping()  # warm
-                self.manifest_cache = ManifestCache(dist_dir=dist_dir)
-                # Pass to template renderer
-                self.template_renderer.sidecar = self.sidecar
-                self.template_renderer.manifest_cache = self.manifest_cache
+        # Sidecar + manifest cache. Always on now; legacy path remains for any
+        # caller that bypasses TemplateRenderer's sidecar branch.
+        from fymo.core.sidecar import Sidecar
+        from fymo.core.manifest_cache import ManifestCache
+        dist_dir = self.project_root / "dist"
+        if (dist_dir / "sidecar.mjs").is_file():
+            self.sidecar = Sidecar(dist_dir=dist_dir)
+            self.sidecar.start()
+            self.sidecar.ping()
+            self.manifest_cache = ManifestCache(dist_dir=dist_dir)
+            self.template_renderer.sidecar = self.sidecar
+            self.template_renderer.manifest_cache = self.manifest_cache
+        else:
+            # Fail fast at startup with a clear message; the legacy template
+            # renderer path will not work either without manifest+sidecar in
+            # the new world. Tell the user what to do.
+            raise RuntimeError(
+                f"dist/ not found at {dist_dir}. Run `fymo build` first."
+            )
 
     def __del__(self):
         if getattr(self, 'sidecar', None) is not None:
