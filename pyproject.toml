@@ -1,62 +1,71 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "fymo"
 version = "0.1.0"
-description = "Production-ready Python SSR framework for Svelte 5"
+description = "Python SSR framework for Svelte 5 — esbuild pipeline, Node sidecar, SvelteKit-style remote functions"
 readme = "README.md"
-license = {text = "MIT"}
+license = { text = "MIT" }
 authors = [
-    {name = "Fymo Contributors", email = "fymo@example.com"}
+    { name = "Bishwas Bhandari", email = "bishwasbh@gmail.com" },
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 dependencies = [
-    "pyyaml>=6.0",
-    "gunicorn>=23.0.0",
     "click>=8.0.0",
+    "gunicorn>=23.0.0",
+    "pyyaml>=6.0",
 ]
+keywords = ["svelte", "ssr", "python", "framework", "wsgi", "esbuild"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Framework :: Fymo",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 
+[project.optional-dependencies]
+pydantic = ["pydantic>=2.5"]
+
 [project.scripts]
 fymo = "fymo.cli.main:main"
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "black>=22.0",
-    "flake8>=5.0",
-    "mypy>=1.0",
-]
-pydantic = ["pydantic>=2.5"]
-
 [project.urls]
-Homepage = "https://github.com/yourusername/fymo"
-Documentation = "https://fymo.readthedocs.io"
-Repository = "https://github.com/yourusername/fymo.git"
-Issues = "https://github.com/yourusername/fymo/issues"
+Homepage = "https://github.com/Bishwas-py/fymo"
+Repository = "https://github.com/Bishwas-py/fymo"
+Issues = "https://github.com/Bishwas-py/fymo/issues"
 
-[tool.setuptools.packages.find]
-include = ["fymo*"]
-exclude = ["tests*", "examples*"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools.package-data]
-fymo = [
-    "cli/templates/**/*",
+[tool.hatch.build.targets.wheel]
+packages = ["fymo"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "fymo/**",
+    "tests/**",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "fymo/bundler/js/node_modules",
+    "fymo/build/js/node_modules",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pydantic>=2.5",
+    "mistune>=3.0",
+    "pygments>=2.0",
 ]
 
 [tool.pytest.ini_options]
@@ -64,6 +73,4 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-# Default norecursedirs includes "build" which would skip tests/build/.
-# Override with the rest of pytest's defaults except "build".
 norecursedirs = ["*.egg", ".*", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"]
