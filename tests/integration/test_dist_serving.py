@@ -34,7 +34,9 @@ def test_dist_assets_served_with_immutable_caching(example_app, monkeypatch):
         assert "Cache-Control" in headers
         assert "immutable" in headers["Cache-Control"]
         assert headers.get("Content-Type", "").startswith("application/javascript")
-        assert b"hydrate" in body
+        # With code splitting on, hydrate may live in a shared chunk imported by
+        # this entry. Either inline OR a side-effect import to a chunk-*.js is OK.
+        assert b"hydrate" in body or b"chunk-" in body
     finally:
         if app.sidecar:
             app.sidecar.stop()

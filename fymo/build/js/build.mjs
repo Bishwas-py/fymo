@@ -52,7 +52,7 @@ async function buildClient() {
         format: 'esm',
         platform: 'browser',
         bundle: true,
-        splitting: false,
+        splitting: true,
         entryNames: '[name].[hash]',
         chunkNames: 'chunk-[name].[hash]',
         assetNames: '[name].[hash]',
