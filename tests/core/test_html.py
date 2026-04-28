@@ -67,7 +67,7 @@ def test_total_size_for_typical_page_under_5kb():
 
 
 def test_remote_callable_serialized_as_marker(monkeypatch):
-    """A callable from app.remote.* in props should appear as a {__fymo_remote: ...} marker."""
+    """A callable from app.remote.* in props is serialized as {__fymo_remote: '<hash>/<fn>'}."""
     import sys, types
     fake_module = types.ModuleType("app.remote.posts")
     def create_post(title: str) -> str: return title
@@ -77,9 +77,13 @@ def test_remote_callable_serialized_as_marker(monkeypatch):
     sys.modules.setdefault("app.remote", types.ModuleType("app.remote"))
     sys.modules["app.remote.posts"] = fake_module
 
+    # Stub out the manifest cache hash lookup
+    from fymo.core import html as html_mod
+    monkeypatch.setattr(html_mod, "_lookup_remote_hash", lambda mod_name: "abc123def456")
+
     from fymo.build.manifest import RouteAssets
     assets = RouteAssets(ssr="ssr/x.mjs", client="client/x.js", css=None, preload=[])
-    html = build_html(
+    out = html_mod.build_html(
         body="",
         head_extra="",
         props={"create_post": create_post},
@@ -87,5 +91,4 @@ def test_remote_callable_serialized_as_marker(monkeypatch):
         title="t",
         asset_prefix="/dist",
     )
-    # The marker should appear in the JSON props island
-    assert '"__fymo_remote":"posts/create_post"' in html or '"__fymo_remote": "posts/create_post"' in html
+    assert '"__fymo_remote":"abc123def456/create_post"' in out or '"__fymo_remote": "abc123def456/create_post"' in out
