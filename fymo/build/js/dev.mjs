@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as esbuild from 'esbuild';
 import sveltePlugin from 'esbuild-svelte';
+import sveltePreprocess from 'svelte-preprocess';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -24,7 +25,7 @@ async function makeServerCtx() {
         sourcemap: 'linked',
         metafile: true,
         plugins: [
-            sveltePlugin({ compilerOptions: { generate: 'server', dev: false } }),
+            sveltePlugin({ preprocess: sveltePreprocess(), compilerOptions: { generate: 'server', dev: false } }),
             { name: 'fymo-emit', setup(build) { build.onEnd(r => emit({ type: 'server-rebuild', errors: r.errors.map(e => e.text) })); } },
         ],
         logLevel: 'silent',
@@ -47,7 +48,7 @@ async function makeClientCtx() {
         sourcemap: 'linked',
         metafile: true,
         plugins: [
-            sveltePlugin({ compilerOptions: { generate: 'client', dev: false } }),
+            sveltePlugin({ preprocess: sveltePreprocess(), compilerOptions: { generate: 'client', dev: false } }),
             { name: 'fymo-emit', setup(build) { build.onEnd(r => emit({ type: 'client-rebuild', errors: r.errors.map(e => e.text), metafile: r.metafile })); } },
         ],
         logLevel: 'silent',

@@ -13,6 +13,7 @@
  */
 import { build } from 'esbuild';
 import sveltePlugin from 'esbuild-svelte';
+import sveltePreprocess from 'svelte-preprocess';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,7 @@ async function buildServer() {
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
         plugins: [sveltePlugin({
+            preprocess: sveltePreprocess(),
             compilerOptions: { generate: 'server', dev: false },
         })],
         logLevel: 'silent',
@@ -60,6 +62,7 @@ async function buildClient() {
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
         plugins: [sveltePlugin({
+            preprocess: sveltePreprocess(),
             compilerOptions: { generate: 'client', dev: false },
         })],
         logLevel: 'silent',
