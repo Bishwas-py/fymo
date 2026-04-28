@@ -2,6 +2,7 @@
 Fymo Server - Core WSGI application
 """
 
+import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -23,6 +24,12 @@ class FymoApp:
             config: Configuration dictionary
         """
         self.project_root = Path(project_root) if project_root else Path.cwd()
+
+        # Ensure project_root is on sys.path so that app.* packages are importable
+        # (needed for remote function dispatch and convention-based routing)
+        project_root_str = str(self.project_root)
+        if project_root_str not in sys.path:
+            sys.path.insert(0, project_root_str)
 
         # Initialize core components
         self.config_manager = ConfigManager(self.project_root, config)
@@ -130,6 +137,10 @@ class FymoApp:
     def __call__(self, environ, start_response):
         """WSGI application callable"""
         path = environ.get("PATH_INFO", "/")
+
+        if path.startswith("/__remote/"):
+            from fymo.remote.router import handle_remote
+            return handle_remote(environ, start_response)
 
         if path == "/_dev/reload":
             return self._dev_sse(start_response)
