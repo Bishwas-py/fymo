@@ -1,14 +1,29 @@
-"""devalue serialization — primitives + sentinels.
+"""devalue serialization — wire-compatible with the JS `devalue` package (v5+).
 
-Format reference: https://github.com/Rich-Harris/devalue
-- Output is a JSON array of values.
-- Index 0 holds the root reference.
-- Subsequent indices hold values referenced by other entries.
-- Negative integers are sentinels (-1=undefined, -2=null, -3=NaN, -4=Inf, -5=-Inf, -6=0).
+Format:
+- Sentinels at root produce bare numbers: '-1' (undefined), '-3' (NaN),
+  '-4' (Infinity), '-5' (-Infinity), '-6' (-0).
+- All other roots produce a JSON array. Index 0 holds the encoded ROOT.
+  Subsequent indices hold referenced values.
+- An "encoded" value is one of:
+    * a plain scalar (str/number/bool/null),
+    * an array of ints `[i,...]` (a list, each int is a slot index),
+    * an object `{k:i}` (a dict),
+    * a tagged form like `["Date", iso]` or `["Set", i, ...]`.
 """
+import base64
 import json
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from enum import Enum
+from uuid import UUID
+
+from pydantic import BaseModel
+
 from fymo.remote import devalue
 
+
+# ---------- scalars ----------
 
 def test_strings():
     assert devalue.parse(devalue.stringify("hello")) == "hello"
@@ -29,23 +44,43 @@ def test_none_round_trips_as_null():
     assert devalue.parse(devalue.stringify(None)) is None
 
 
-def test_string_root_at_index_one():
-    """Output shape: '[1,"hello"]' — root reference is index 1."""
-    out = devalue.stringify("hello")
-    arr = json.loads(out)
-    assert arr[0] == 1
-    assert arr[1] == "hello"
+def test_string_root_inline():
+    """'hello' at root → ['hello'] (length-1 array, scalar at slot 0)."""
+    assert json.loads(devalue.stringify("hello")) == ["hello"]
 
 
-def test_undefined_uses_sentinel_minus_one():
-    """A field with the sentinel UNDEFINED encodes to -1, not present-as-null."""
-    out = devalue.stringify(devalue.UNDEFINED)
-    assert json.loads(out) == [-1]
+def test_number_root_inline():
+    assert json.loads(devalue.stringify(42)) == [42]
 
+
+def test_null_root_inline():
+    assert json.loads(devalue.stringify(None)) == [None]
+
+
+def test_undefined_root_is_bare_sentinel():
+    """undefined → bare '-1' (NOT in an array)."""
+    assert devalue.stringify(devalue.UNDEFINED) == "-1"
+    assert devalue.parse("-1") is devalue.UNDEFINED
+
+
+def test_nan_root_is_bare_sentinel():
+    out = devalue.stringify(float("nan"))
+    assert out == "-3"
+    parsed = devalue.parse(out)
+    assert parsed != parsed  # NaN
+
+
+def test_inf_root_is_bare_sentinel():
+    assert devalue.stringify(float("inf")) == "-4"
+    assert devalue.parse("-4") == float("inf")
+    assert devalue.stringify(float("-inf")) == "-5"
+    assert devalue.parse("-5") == float("-inf")
+
+
+# ---------- containers ----------
 
 def test_list_of_strings():
-    out = devalue.stringify(["a", "b", "c"])
-    assert devalue.parse(out) == ["a", "b", "c"]
+    assert devalue.parse(devalue.stringify(["a", "b", "c"])) == ["a", "b", "c"]
 
 
 def test_nested_list():
@@ -64,35 +99,48 @@ def test_nested_dict():
 
 
 def test_tuple_round_trips_as_list():
-    """devalue has no tuple type; tuples encode as arrays and round-trip as lists."""
     assert devalue.parse(devalue.stringify((1, 2, 3))) == [1, 2, 3]
 
 
 def test_empty_list():
     assert devalue.parse(devalue.stringify([])) == []
+    # Wire shape: [[]]
+    assert json.loads(devalue.stringify([])) == [[]]
 
 
 def test_empty_dict():
     assert devalue.parse(devalue.stringify({})) == {}
+    assert json.loads(devalue.stringify({})) == [{}]
 
 
-def test_list_root_indices():
-    """A list at root: arr[0]=1, arr[1]=[idx_of_a, idx_of_b], arr[2]='a', arr[3]='b'."""
-    out = devalue.stringify(["a", "b"])
-    arr = json.loads(out)
-    assert arr[0] == 1
-    # arr[1] is a list of indices pointing to "a" and "b"
-    indices = arr[1]
+def test_list_root_structural():
+    """['a','b'] → [[1,2],'a','b'] — slot 0 is structural form (list of indices)."""
+    arr = json.loads(devalue.stringify(["a", "b"]))
+    indices = arr[0]
     assert isinstance(indices, list) and len(indices) == 2
     assert arr[indices[0]] == "a"
     assert arr[indices[1]] == "b"
 
 
-from datetime import datetime, date, timezone
-from decimal import Decimal
-from enum import Enum
-from uuid import UUID
+def test_dict_root_structural():
+    """{x:1} → [{x:1},1] — slot 0 has the dict's structural form, slot 1 has the value 1."""
+    arr = json.loads(devalue.stringify({"x": 1}))
+    structural = arr[0]
+    assert isinstance(structural, dict) and "x" in structural
+    assert arr[structural["x"]] == 1
 
+
+def test_dedup_repeated_scalar():
+    """[1,1,1] → [[1,1,1],1] — primitive 1 is stored once, referenced thrice."""
+    arr = json.loads(devalue.stringify([1, 1, 1]))
+    indices = arr[0]
+    assert indices == [1, 1, 1]
+    assert arr[1] == 1
+    # Round-trip
+    assert devalue.parse(devalue.stringify([1, 1, 1])) == [1, 1, 1]
+
+
+# ---------- tagged types ----------
 
 class Color(Enum):
     RED = "red"
@@ -100,14 +148,10 @@ class Color(Enum):
 
 
 def test_datetime_round_trip_as_date():
-    """datetime → ['Date', '<iso>']; client receives a JS Date.
-    We round-trip it to a Python datetime."""
     val = datetime(2026, 4, 28, 12, 0, 0, tzinfo=timezone.utc)
-    out = devalue.stringify(val)
-    # Tagged shape: arr[1] should be ["Date", "<iso>"]
-    arr = json.loads(out)
-    assert arr[arr[0]][0] == "Date"
-    parsed = devalue.parse(out)
+    arr = json.loads(devalue.stringify(val))
+    assert arr[0][0] == "Date"
+    parsed = devalue.parse(devalue.stringify(val))
     assert isinstance(parsed, datetime)
     assert parsed == val
 
@@ -120,29 +164,26 @@ def test_date_round_trips_as_iso_date():
 
 
 def test_decimal_encodes_as_number():
-    """Decimal becomes a number on the JS side; we lose Decimal precision but match SvelteKit."""
     parsed = devalue.parse(devalue.stringify(Decimal("3.14")))
     assert parsed == 3.14
 
 
 def test_uuid_round_trips_as_string():
     val = UUID("12345678-1234-5678-1234-567812345678")
-    parsed = devalue.parse(devalue.stringify(val))
-    assert parsed == str(val)
+    assert devalue.parse(devalue.stringify(val)) == str(val)
 
 
 def test_bytes_round_trip_as_base64_string():
     val = b"hello world"
     parsed = devalue.parse(devalue.stringify(val))
-    # Bytes go over the wire as base64 strings; caller decodes if needed.
-    import base64
     assert parsed == base64.b64encode(val).decode("ascii")
 
 
 def test_str_enum_encodes_as_value():
-    parsed = devalue.parse(devalue.stringify(Color.RED))
-    assert parsed == "red"
+    assert devalue.parse(devalue.stringify(Color.RED)) == "red"
 
+
+# ---------- sets ----------
 
 def test_set_round_trip():
     val = {"a", "b", "c"}
@@ -154,18 +195,20 @@ def test_set_round_trip():
 def test_frozenset_round_trip():
     val = frozenset([1, 2, 3])
     parsed = devalue.parse(devalue.stringify(val))
-    assert isinstance(parsed, set)  # Decodes back as plain set
+    assert isinstance(parsed, set)
     assert parsed == set(val)
 
 
 def test_set_tagged_format():
-    out = devalue.stringify({"x"})
-    arr = json.loads(out)
-    assert arr[arr[0]][0] == "Set"
+    """{x:1,y:2,z:3} → [['Set',i,i,i],1,2,3] — first slot is the tagged form."""
+    arr = json.loads(devalue.stringify({1, 2, 3}))
+    assert arr[0][0] == "Set"
+    indices = arr[0][1:]
+    decoded = sorted(arr[i] for i in indices)
+    assert decoded == [1, 2, 3]
 
 
-from pydantic import BaseModel
-
+# ---------- pydantic + dedup + cycles ----------
 
 class Item(BaseModel):
     sku: str
@@ -173,29 +216,26 @@ class Item(BaseModel):
 
 
 def test_pydantic_model_round_trips_as_dict():
-    """Pydantic models go through model_dump and round-trip as plain dicts."""
     item = Item(sku="abc", qty=3)
     parsed = devalue.parse(devalue.stringify(item))
     assert parsed == {"sku": "abc", "qty": 3}
 
 
 def test_dedup_repeated_dict_reference():
-    """Same dict referenced twice should encode once and be deduplicated."""
+    """{a:i, b:i} where i is shared — inner dict appears once on the wire."""
     inner = {"x": 1}
     outer = {"a": inner, "b": inner}
     parsed = devalue.parse(devalue.stringify(outer))
     assert parsed == {"a": {"x": 1}, "b": {"x": 1}}
-    # And on the wire, the inner dict only appears once
-    out = devalue.stringify(outer)
-    arr = json.loads(out)
-    inner_dicts = [v for v in arr[1:] if isinstance(v, dict) and "x" in v]
+    arr = json.loads(devalue.stringify(outer))
+    inner_dicts = [v for v in arr if isinstance(v, dict) and "x" in v]
     assert len(inner_dicts) == 1
 
 
 def test_cyclic_reference_does_not_infinite_loop():
-    """A self-referencing structure should encode without recursion error."""
+    """{self: itself} → [{self:0}] (slot 0 references itself)."""
     a: dict = {}
     a["self"] = a
     out = devalue.stringify(a)
     parsed = devalue.parse(out)
-    assert parsed["self"] is parsed  # Reconstructed cycle
+    assert parsed["self"] is parsed

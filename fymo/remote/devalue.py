@@ -1,21 +1,29 @@
 """Python port of devalue's tagged JSON serialization.
 
-Compatible with the JS `devalue` package on the wire. Used by Fymo Remote
-Functions to round-trip Date/Map/Set/BigInt/undefined/repeated-refs across
-the Python<->JS boundary without lossy JSON conversion.
+Wire-compatible with Rich Harris's `devalue` npm package (v5+). Used by Fymo
+Remote Functions to round-trip Date/Set/undefined/repeated-refs across the
+Python<->JS boundary without lossy JSON conversion.
 
-Format: a JSON array. Index 0 is the root reference. Subsequent indices
-hold values. Tagged forms are 2-element arrays like ["Date","..."].
-Negative integers are sentinels.
+Format:
+- Sentinels at root produce bare JSON numbers: "-1" (undefined), "-3" (NaN),
+  "-4" (Infinity), "-5" (-Infinity), "-6" (-0). These do NOT wrap in an array.
+- All other roots produce a JSON array. Index 0 holds the encoded ROOT.
+  Subsequent indices hold referenced values.
+- An "encoded" value is one of:
+    * a plain scalar (str/number/bool/null) — represents itself,
+    * an array of integers `[i, i, ...]` — a list, each int is a slot index,
+    * an object `{k: i, ...}` — a dict, each value is a slot index,
+    * a tagged form like `["Date", iso]` or `["Set", i, i, ...]`.
+- Cycles are encoded by self-referencing the slot index (e.g. a slot pointing
+  to itself).
 """
+import base64
 import json
 import math
-from typing import Any
-
-import base64
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from typing import Any
 from uuid import UUID
 
 try:
@@ -25,8 +33,9 @@ except ImportError:
     _has_pydantic = False
 
 
-# Sentinel values. The JS counterparts:
-#   -1 → undefined,  -2 → null,  -3 → NaN,  -4 → Infinity,  -5 → -Infinity,  -6 → 0
+# Sentinel indices used by devalue at root (and as references inside containers).
+#   -1 = undefined, -2 = null (only when referenced; null at root is `[null]`),
+#   -3 = NaN, -4 = +Infinity, -5 = -Infinity, -6 = -0
 class _Undefined:
     _instance = None
     def __new__(cls):
@@ -41,134 +50,181 @@ UNDEFINED = _Undefined()
 
 
 def stringify(value: Any) -> str:
+    """Encode `value` to a devalue wire string."""
+    # Bare-sentinel root forms (output is just the sentinel number, no array).
     if value is UNDEFINED:
-        return json.dumps([-1])
+        return "-1"
+    if isinstance(value, float):
+        if math.isnan(value): return "-3"
+        if value == math.inf: return "-4"
+        if value == -math.inf: return "-5"
+        if value == 0.0 and math.copysign(1.0, value) == -1.0: return "-6"
 
-    refs: list[Any] = []          # encoded slots (1-indexed in output array)
-    seen: dict[int, int] = {}     # id(obj) → index for cycle / dedup
+    # Otherwise: array form. Slot 0 holds the encoded root.
+    slots: list[Any] = [None]
+    seen: dict[int, int] = {}              # id(obj) → slot, for non-primitive dedup + cycles
+    scalar_seen: dict[tuple, int] = {}     # (type, value) → slot, for primitive dedup
 
     def _encode(v: Any) -> int:
-        # Sentinels (return value < 0 means "use this sentinel directly")
+        """Encode `v` into a slot, return the slot index (a positive integer)."""
+        # Sentinel references inside containers
         if v is UNDEFINED: return -1
-        if v is None:      return -2
         if isinstance(v, float):
             if math.isnan(v): return -3
             if v == math.inf: return -4
             if v == -math.inf: return -5
 
-        # Dedup by id
+        # Dedup primitives by (type, value) so [1,1,1] emits one slot
+        if v is None or isinstance(v, (bool, int, str, float)):
+            key = (type(v).__name__, v)
+            if key in scalar_seen:
+                return scalar_seen[key]
+            idx = len(slots)
+            slots.append(_encode_value(v, _encode))
+            scalar_seen[key] = idx
+            return idx
+
+        # Dedup non-primitive identity-equal values
         if id(v) in seen:
             return seen[id(v)]
 
-        # Reserve slot now (cycle-safe)
-        idx = len(refs) + 1
-        refs.append(None)
+        idx = len(slots)
+        slots.append(None)  # reserve cycle-safe slot
         seen[id(v)] = idx
+        slots[idx] = _encode_value(v, _encode)
+        return idx
 
-        if isinstance(v, (str, int, bool)) or (isinstance(v, float) and not (math.isnan(v) or math.isinf(v))):
-            refs[idx - 1] = v
-            return idx
+    # Register the root at slot 0 BEFORE encoding so children can dedup back to it.
+    if value is not None and not isinstance(value, (bool, int, str, float)):
+        seen[id(value)] = 0
+    elif value is None or isinstance(value, (bool, int, str, float)):
+        scalar_seen[(type(value).__name__, value)] = 0
+    slots[0] = _encode_value(value, _encode)
+    return json.dumps(slots)
 
-        if isinstance(v, (list, tuple)):
-            refs[idx - 1] = [_encode(item) for item in v]
-            return idx
 
-        if isinstance(v, dict):
-            refs[idx - 1] = {k: _encode(val) for k, val in v.items()}
-            return idx
+def _encode_value(v: Any, enc) -> Any:
+    """Produce the encoded form for a value (scalar, structural, or tagged)."""
+    # Direct scalars
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, str)):
+        return v
+    if isinstance(v, float):
+        # NaN/Inf already handled by enc(); plain floats are scalar.
+        return v
 
-        if isinstance(v, Decimal):
-            refs[idx - 1] = float(v)
-            return idx
+    # Tagged types
+    if isinstance(v, datetime):
+        return ["Date", v.isoformat()]
+    if isinstance(v, date):
+        return ["Date", v.isoformat()]
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, UUID):
+        return str(v)
+    if isinstance(v, bytes):
+        return base64.b64encode(v).decode("ascii")
+    if isinstance(v, Enum):
+        return v.value
+    if isinstance(v, (set, frozenset)):
+        return ["Set"] + [enc(item) for item in v]
 
-        if isinstance(v, UUID):
-            refs[idx - 1] = str(v)
-            return idx
+    # Pydantic models — flatten to dict
+    if _has_pydantic and isinstance(v, pydantic.BaseModel):
+        d = v.model_dump(mode="python")
+        return {k: enc(val) for k, val in d.items()}
 
-        if isinstance(v, bytes):
-            refs[idx - 1] = base64.b64encode(v).decode("ascii")
-            return idx
+    # Containers (encode children, return structural form of indices)
+    if isinstance(v, (list, tuple)):
+        return [enc(item) for item in v]
+    if isinstance(v, dict):
+        return {k: enc(val) for k, val in v.items()}
 
-        if isinstance(v, Enum):
-            refs[idx - 1] = v.value
-            return idx
-
-        if isinstance(v, datetime):
-            refs[idx - 1] = ["Date", v.isoformat()]
-            return idx
-
-        if isinstance(v, date):
-            refs[idx - 1] = ["Date", v.isoformat()]
-            return idx
-
-        if isinstance(v, (set, frozenset)):
-            # Encode items first, then store the tagged form
-            indices = [_encode(item) for item in v]
-            refs[idx - 1] = ["Set", indices]
-            return idx
-
-        if _has_pydantic and isinstance(v, pydantic.BaseModel):
-            # Convert to dict, then encode as a dict
-            d = v.model_dump(mode="python")
-            refs[idx - 1] = {k: _encode(val) for k, val in d.items()}
-            return idx
-
-        raise TypeError(f"devalue cannot stringify {type(v).__name__}")
-
-    root_idx = _encode(value)
-    return json.dumps([root_idx] + refs)
+    raise TypeError(f"devalue cannot stringify {type(v).__name__}")
 
 
 def parse(s: str) -> Any:
-    arr = json.loads(s)
-    if not isinstance(arr, list) or len(arr) == 0:
+    """Decode a devalue wire string back to a Python value."""
+    parsed = json.loads(s)
+
+    # Bare sentinel at root
+    if isinstance(parsed, int) and not isinstance(parsed, bool):
+        if parsed == -1: return UNDEFINED
+        if parsed == -3: return float("nan")
+        if parsed == -4: return math.inf
+        if parsed == -5: return -math.inf
+        if parsed == -6: return 0.0
+        # Other bare ints aren't legal devalue; fall through.
+
+    if not isinstance(parsed, list) or len(parsed) == 0:
         raise ValueError("invalid devalue payload")
 
+    arr = parsed
     decoded: dict[int, Any] = {}
 
-    def _decode(idx_or_sentinel: int) -> Any:
-        if idx_or_sentinel == -1: return UNDEFINED
-        if idx_or_sentinel == -2: return None
-        if idx_or_sentinel == -3: return float("nan")
-        if idx_or_sentinel == -4: return math.inf
-        if idx_or_sentinel == -5: return -math.inf
-        if idx_or_sentinel == -6: return 0.0
-        if idx_or_sentinel in decoded:
-            return decoded[idx_or_sentinel]
-        if idx_or_sentinel < 1 or idx_or_sentinel >= len(arr):
-            raise ValueError(f"invalid reference: {idx_or_sentinel}")
+    def _decode(ref: Any) -> Any:
+        # Sentinels referenced from a container
+        if isinstance(ref, int) and not isinstance(ref, bool):
+            if ref == -1: return UNDEFINED
+            if ref == -2: return None  # rarely used; null is usually inline
+            if ref == -3: return float("nan")
+            if ref == -4: return math.inf
+            if ref == -5: return -math.inf
+            if ref == -6: return 0.0
+            if ref < 0:
+                raise ValueError(f"unknown sentinel: {ref}")
+            return _decode_slot(ref)
+        # A non-int ref shouldn't appear inside a structural form, but tolerate.
+        return ref
 
-        slot = arr[idx_or_sentinel]
-        # Place a placeholder before recursing (cycle-safe for containers)
-        if isinstance(slot, list) and len(slot) == 2 and slot[0] == "Date":
-            iso = slot[1]
-            # date.isoformat() produces "YYYY-MM-DD" (no 'T'); datetime always has 'T'.
-            if "T" in iso:
-                value = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-            else:
-                value = date.fromisoformat(iso)
-            decoded[idx_or_sentinel] = value
-            return value
-        if isinstance(slot, list) and len(slot) == 2 and slot[0] == "Set":
-            placeholder_s: set = set()
-            decoded[idx_or_sentinel] = placeholder_s
-            for ref in slot[1]:
-                placeholder_s.add(_decode(ref))
-            return placeholder_s
+    def _decode_slot(idx: int) -> Any:
+        if idx in decoded:
+            return decoded[idx]
+        if idx < 0 or idx >= len(arr):
+            raise ValueError(f"invalid slot index: {idx}")
+
+        slot = arr[idx]
+
+        # Tagged forms (lists with a leading string tag)
+        if isinstance(slot, list) and slot and isinstance(slot[0], str):
+            tag = slot[0]
+            if tag == "Date":
+                iso = slot[1]
+                if "T" in iso:
+                    value = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+                else:
+                    value = date.fromisoformat(iso)
+                decoded[idx] = value
+                return value
+            if tag == "Set":
+                placeholder: set = set()
+                decoded[idx] = placeholder
+                for ref in slot[1:]:
+                    placeholder.add(_decode(ref))
+                return placeholder
+            # Unknown tag — fall through to plain-list decoding (keeps the tag string)
+
+        # Plain list of refs
         if isinstance(slot, list):
-            placeholder: list = []
-            decoded[idx_or_sentinel] = placeholder
+            out: list = []
+            decoded[idx] = out
             for ref in slot:
-                placeholder.append(_decode(ref))
-            return placeholder
+                out.append(_decode(ref))
+            return out
+
+        # Plain dict of refs
         if isinstance(slot, dict):
-            placeholder_d: dict = {}
-            decoded[idx_or_sentinel] = placeholder_d
+            out_d: dict = {}
+            decoded[idx] = out_d
             for k, ref in slot.items():
-                placeholder_d[k] = _decode(ref)
-            return placeholder_d
+                out_d[k] = _decode(ref)
+            return out_d
+
         # Scalar
-        decoded[idx_or_sentinel] = slot
+        decoded[idx] = slot
         return slot
 
-    return _decode(arr[0])
+    return _decode_slot(0)
