@@ -86,3 +86,59 @@ def test_list_root_indices():
     assert isinstance(indices, list) and len(indices) == 2
     assert arr[indices[0]] == "a"
     assert arr[indices[1]] == "b"
+
+
+from datetime import datetime, date, timezone
+from decimal import Decimal
+from enum import Enum
+from uuid import UUID
+
+
+class Color(Enum):
+    RED = "red"
+    BLUE = "blue"
+
+
+def test_datetime_round_trip_as_date():
+    """datetime → ['Date', '<iso>']; client receives a JS Date.
+    We round-trip it to a Python datetime."""
+    val = datetime(2026, 4, 28, 12, 0, 0, tzinfo=timezone.utc)
+    out = devalue.stringify(val)
+    # Tagged shape: arr[1] should be ["Date", "<iso>"]
+    arr = json.loads(out)
+    assert arr[arr[0]][0] == "Date"
+    parsed = devalue.parse(out)
+    assert isinstance(parsed, datetime)
+    assert parsed == val
+
+
+def test_date_round_trips_as_iso_date():
+    val = date(2026, 4, 28)
+    parsed = devalue.parse(devalue.stringify(val))
+    assert isinstance(parsed, date)
+    assert parsed == val
+
+
+def test_decimal_encodes_as_number():
+    """Decimal becomes a number on the JS side; we lose Decimal precision but match SvelteKit."""
+    parsed = devalue.parse(devalue.stringify(Decimal("3.14")))
+    assert parsed == 3.14
+
+
+def test_uuid_round_trips_as_string():
+    val = UUID("12345678-1234-5678-1234-567812345678")
+    parsed = devalue.parse(devalue.stringify(val))
+    assert parsed == str(val)
+
+
+def test_bytes_round_trip_as_base64_string():
+    val = b"hello world"
+    parsed = devalue.parse(devalue.stringify(val))
+    # Bytes go over the wire as base64 strings; caller decodes if needed.
+    import base64
+    assert parsed == base64.b64encode(val).decode("ascii")
+
+
+def test_str_enum_encodes_as_value():
+    parsed = devalue.parse(devalue.stringify(Color.RED))
+    assert parsed == "red"

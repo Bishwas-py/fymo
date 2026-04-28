@@ -12,6 +12,12 @@ import json
 import math
 from typing import Any
 
+import base64
+from datetime import date, datetime
+from decimal import Decimal
+from enum import Enum
+from uuid import UUID
+
 
 # Sentinel values. The JS counterparts:
 #   -1 → undefined,  -2 → null,  -3 → NaN,  -4 → Infinity,  -5 → -Infinity,  -6 → 0
@@ -65,6 +71,30 @@ def stringify(value: Any) -> str:
             refs[idx - 1] = {k: _encode(val) for k, val in v.items()}
             return idx
 
+        if isinstance(v, Decimal):
+            refs[idx - 1] = float(v)
+            return idx
+
+        if isinstance(v, UUID):
+            refs[idx - 1] = str(v)
+            return idx
+
+        if isinstance(v, bytes):
+            refs[idx - 1] = base64.b64encode(v).decode("ascii")
+            return idx
+
+        if isinstance(v, Enum):
+            refs[idx - 1] = v.value
+            return idx
+
+        if isinstance(v, datetime):
+            refs[idx - 1] = ["Date", v.isoformat()]
+            return idx
+
+        if isinstance(v, date):
+            refs[idx - 1] = ["Date", v.isoformat()]
+            return idx
+
         raise TypeError(f"devalue cannot stringify {type(v).__name__}")
 
     root_idx = _encode(value)
@@ -92,6 +122,15 @@ def parse(s: str) -> Any:
 
         slot = arr[idx_or_sentinel]
         # Place a placeholder before recursing (cycle-safe for containers)
+        if isinstance(slot, list) and len(slot) == 2 and slot[0] == "Date":
+            iso = slot[1]
+            # date.isoformat() produces "YYYY-MM-DD" (no 'T'); datetime always has 'T'.
+            if "T" in iso:
+                value = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            else:
+                value = date.fromisoformat(iso)
+            decoded[idx_or_sentinel] = value
+            return value
         if isinstance(slot, list):
             placeholder: list = []
             decoded[idx_or_sentinel] = placeholder
