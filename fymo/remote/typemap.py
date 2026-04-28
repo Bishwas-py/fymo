@@ -1,4 +1,5 @@
 """Map Python types to TypeScript types."""
+import dataclasses
 import types
 import typing
 from datetime import date, datetime
@@ -21,6 +22,79 @@ _PRIMITIVES: dict[Any, str] = {
     date: "string",
     UUID: "string",
 }
+
+
+def _is_typed_dict(py) -> bool:
+    return (
+        isinstance(py, type)
+        and issubclass(py, dict)
+        and hasattr(py, "__annotations__")
+        and hasattr(py, "__required_keys__")
+    )
+
+
+def _is_dataclass(py) -> bool:
+    return dataclasses.is_dataclass(py) and isinstance(py, type)
+
+
+def _is_named_tuple(py) -> bool:
+    return (
+        isinstance(py, type)
+        and issubclass(py, tuple)
+        and hasattr(py, "_fields")
+        and hasattr(py, "__annotations__")
+    )
+
+
+def _is_enum(py) -> bool:
+    return isinstance(py, type) and issubclass(py, Enum)
+
+
+def _emit_interface(name: str, fields: list[tuple[str, str, bool]], type_defs: dict[str, str]) -> str:
+    """fields = [(field_name, ts_type, optional)]. Writes type_defs[name]."""
+    body_lines = []
+    for fname, ftype, optional in fields:
+        suffix = "?" if optional else ""
+        body_lines.append(f"  {fname}{suffix}: {ftype};")
+    type_defs[name] = "{\n" + "\n".join(body_lines) + "\n}"
+    return name
+
+
+def _emit_typed_dict(py, type_defs: dict[str, str]) -> str:
+    name = py.__name__
+    if name in type_defs and not type_defs[name].startswith("<placeholder"):
+        return name
+    type_defs[name] = "<placeholder>"  # cycle guard
+    fields = []
+    hints = typing.get_type_hints(py)
+    required = getattr(py, "__required_keys__", set(hints.keys()))
+    for fname, ftype in hints.items():
+        ts = python_type_to_ts(ftype, type_defs=type_defs)
+        fields.append((fname, ts, fname not in required))
+    return _emit_interface(name, fields, type_defs)
+
+
+def _emit_dataclass_or_namedtuple(py, type_defs: dict[str, str]) -> str:
+    name = py.__name__
+    if name in type_defs and not type_defs[name].startswith("<placeholder"):
+        return name
+    type_defs[name] = "<placeholder>"
+    hints = typing.get_type_hints(py)
+    fields = [(fname, python_type_to_ts(ftype, type_defs=type_defs), False) for fname, ftype in hints.items()]
+    return _emit_interface(name, fields, type_defs)
+
+
+def _emit_enum(py, type_defs: dict[str, str]) -> str:
+    name = py.__name__
+    if name in type_defs:
+        return name
+    members = list(py)
+    if all(isinstance(m.value, str) for m in members):
+        rendered = " | ".join(f'"{m.value}"' for m in members)
+    else:
+        rendered = " | ".join(repr(m.value) for m in members)
+    type_defs[name] = rendered
+    return name
 
 
 def python_type_to_ts(py: Any, *, type_defs: dict[str, str]) -> str:
@@ -74,7 +148,13 @@ def python_type_to_ts(py: Any, *, type_defs: dict[str, str]) -> str:
                 rendered.append(repr(a))
         return " | ".join(rendered)
 
-    # TypedDict / dataclass / NamedTuple / pydantic.BaseModel — handled in Task 5–6
-    # Enum — handled in Task 5
+    if _is_typed_dict(py):
+        return _emit_typed_dict(py, type_defs)
+    if _is_dataclass(py):
+        return _emit_dataclass_or_namedtuple(py, type_defs)
+    if _is_named_tuple(py):
+        return _emit_dataclass_or_namedtuple(py, type_defs)
+    if _is_enum(py):
+        return _emit_enum(py, type_defs)
 
     return "unknown"
