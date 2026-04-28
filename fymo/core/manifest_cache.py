@@ -37,3 +37,16 @@ class ManifestCache:
         with self._lock:
             self._cached = None
             self._cached_mtime = None
+
+    def module_for_hash(self, hash: str) -> Optional[str]:
+        """Return the remote-module name owning this hash, or None."""
+        manifest = self.get()
+        for name, asset in manifest.remote_modules.items():
+            if asset.hash == hash:
+                return name
+        return None
+
+    def get_remote_hash(self, module_name: str) -> Optional[str]:
+        manifest = self.get()
+        asset = manifest.remote_modules.get(module_name)
+        return asset.hash if asset else None
