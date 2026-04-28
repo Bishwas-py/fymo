@@ -33,7 +33,7 @@ def test_remote_import_resolves(example_app: Path):
     manifest = json.loads((example_app / "dist" / "manifest.json").read_text())
     bundle_path = example_app / "dist" / manifest["routes"]["todos"]["client"]
     bundle_text = bundle_path.read_text()
-    # The $remote/greeter import was resolved: the RPC runtime and route must appear.
-    # "/__remote/" is a string literal from __runtime.js that survives minification.
-    assert "/__remote/" in bundle_text
-    assert "greeter/hello" in bundle_text
+    # The $remote/greeter import was resolved: the new RPC route prefix and
+    # the function name must appear in the bundle output.
+    assert "/_fymo/remote/" in bundle_text
+    assert "'hello'" in bundle_text or '"hello"' in bundle_text

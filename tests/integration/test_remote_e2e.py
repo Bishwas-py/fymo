@@ -1,4 +1,5 @@
-"""End-to-end: an HTTP request to /__remote/<m>/<fn> through FymoApp."""
+"""End-to-end: an HTTP request to /_fymo/remote/<hash>/<fn> through FymoApp."""
+import base64
 import io
 import json
 import sys
@@ -17,7 +18,12 @@ def test_remote_call_through_fymoapp(example_app: Path, monkeypatch):
     )
 
     from fymo.build.pipeline import BuildPipeline
+    from fymo.remote import devalue
     BuildPipeline(project_root=example_app).build(dev=False)
+
+    # The build emits a content-hash for the greeter module; pull it from manifest.
+    manifest = json.loads((example_app / "dist" / "manifest.json").read_text())
+    hash_ = manifest["remote_modules"]["greeter"]["hash"]
 
     monkeypatch.chdir(example_app)
     from fymo import create_app
@@ -25,22 +31,32 @@ def test_remote_call_through_fymoapp(example_app: Path, monkeypatch):
     try:
         responses = []
         def start_response(status, headers): responses.append((status, headers))
-        body_payload = json.dumps({"args": ["alice"]}).encode()
+
+        # New wire: payload is base64url(devalue.stringify(args)).
+        payload_b64 = base64.urlsafe_b64encode(
+            devalue.stringify(["alice"]).encode("utf-8")
+        ).rstrip(b"=").decode("ascii")
+        body_payload = json.dumps({"payload": payload_b64}).encode()
+
         body = b"".join(app({
             "REQUEST_METHOD": "POST",
-            "PATH_INFO": "/__remote/greeter/hello",
+            "PATH_INFO": f"/_fymo/remote/{hash_}/hello",
             "CONTENT_LENGTH": str(len(body_payload)),
             "CONTENT_TYPE": "application/json",
             "QUERY_STRING": "",
+            "HTTP_HOST": "x",
+            "HTTP_ORIGIN": "http://x",
             "SERVER_NAME": "x", "SERVER_PORT": "0", "SERVER_PROTOCOL": "HTTP/1.1",
             "REMOTE_ADDR": "127.0.0.1",
             "wsgi.input": io.BytesIO(body_payload),
             "wsgi.errors": sys.stderr, "wsgi.url_scheme": "http",
         }, start_response))
 
+        # New envelope: ALWAYS HTTP 200; type/result drives semantics.
         assert responses[0][0].startswith("200")
-        payload = json.loads(body)
-        assert payload == {"ok": True, "data": "hi alice"}
+        env = json.loads(body)
+        assert env["type"] == "result"
+        assert devalue.parse(env["result"]) == "hi alice"
     finally:
         if app.sidecar:
             app.sidecar.stop()

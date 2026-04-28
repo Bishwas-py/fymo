@@ -153,10 +153,6 @@ class FymoApp:
                 router_mod._resolve_module_for_hash = self.manifest_cache.module_for_hash
             return router_mod.handle_remote(environ, start_response)
 
-        if path.startswith("/__remote/"):
-            from fymo.remote.router import handle_remote
-            return handle_remote(environ, start_response)
-
         if path == "/_dev/reload":
             return self._dev_sse(start_response)
 

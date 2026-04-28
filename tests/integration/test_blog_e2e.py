@@ -1,10 +1,13 @@
 """End-to-end: build the blog, hit /, hit /posts/<slug>, exercise a remote call."""
+import base64
 import io
 import json
 import shutil
 import sys
 from pathlib import Path
 import pytest
+
+from fymo.remote import devalue
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -42,6 +45,35 @@ def _wsgi_call(app, path: str, *, method: str = "GET", body: bytes = b"", cookie
     return responses[0], out
 
 
+def _b64url(s: str) -> str:
+    return base64.urlsafe_b64encode(s.encode("utf-8")).rstrip(b"=").decode("ascii")
+
+
+def _remote_call(app, hash_, fn_name, args, cookies: str = ""):
+    """Call /_fymo/remote/<hash>/<fn> using the new wire format.
+
+    Returns ((status, headers), envelope_dict).
+    """
+    body_payload = json.dumps({"payload": _b64url(devalue.stringify(args))}).encode()
+    responses = []
+    def sr(s, h): responses.append((s, h))
+    out = b"".join(app({
+        "REQUEST_METHOD": "POST",
+        "PATH_INFO": f"/_fymo/remote/{hash_}/{fn_name}",
+        "CONTENT_LENGTH": str(len(body_payload)),
+        "CONTENT_TYPE": "application/json",
+        "QUERY_STRING": "",
+        "HTTP_HOST": "x",
+        "HTTP_ORIGIN": "http://x",
+        "HTTP_COOKIE": cookies,
+        "wsgi.url_scheme": "http",
+        "SERVER_NAME": "x", "SERVER_PORT": "0", "SERVER_PROTOCOL": "HTTP/1.1",
+        "REMOTE_ADDR": "127.0.0.1",
+        "wsgi.input": io.BytesIO(body_payload), "wsgi.errors": sys.stderr,
+    }, sr))
+    return responses[0], json.loads(out)
+
+
 def _extract_uid_cookie(headers) -> str:
     for k, v in headers:
         if k.lower() == "set-cookie" and "fymo_uid=" in v:
@@ -63,6 +95,10 @@ def test_blog_e2e(blog_app: Path):
     ensure_seeded(blog_app)
     BuildPipeline(project_root=blog_app).build(dev=False)
 
+    # Pull the per-module hash from the manifest after build.
+    manifest = json.loads((blog_app / "dist" / "manifest.json").read_text())
+    hash_ = manifest["remote_modules"]["posts"]["hash"]
+
     from fymo import create_app
     app = create_app(blog_app)
     try:
@@ -77,39 +113,54 @@ def test_blog_e2e(blog_app: Path):
         assert b"Welcome to Fymo" in html
 
         # Remote call: get_posts
-        body = json.dumps({"args": []}).encode()
-        (status, _), out = _wsgi_call(app, "/__remote/posts/get_posts", method="POST", body=body)
+        (status, _), env = _remote_call(app, hash_, "get_posts", [])
         assert status.startswith("200"), status
-        payload = json.loads(out)
-        assert payload["ok"] is True
-        slugs = [p["slug"] for p in payload["data"]]
+        assert env["type"] == "result"
+        posts = devalue.parse(env["result"])
+        slugs = [p["slug"] for p in posts]
         assert "welcome-to-fymo" in slugs
 
         # Remote call: create_comment with valid input
-        body = json.dumps({"args": ["welcome-to-fymo", {"name": "Alex", "body": "Great post"}]}).encode()
-        (status, headers), out = _wsgi_call(app, "/__remote/posts/create_comment", method="POST", body=body)
+        (status, headers), env = _remote_call(
+            app, hash_, "create_comment",
+            ["welcome-to-fymo", {"name": "Alex", "body": "Great post"}],
+        )
         assert status.startswith("200"), status
-        comment = json.loads(out)["data"]
+        assert env["type"] == "result"
+        comment = devalue.parse(env["result"])
         assert comment["name"] == "Alex"
         uid_cookie = _extract_uid_cookie(headers)
 
-        # Remote call: create_comment with invalid input → 422
-        body = json.dumps({"args": ["welcome-to-fymo", {"name": "", "body": ""}]}).encode()
-        (status, _), out = _wsgi_call(app, "/__remote/posts/create_comment", method="POST", body=body)
-        assert status.startswith("422"), status
-        assert json.loads(out)["error"] == "validation"
+        # Remote call: create_comment with invalid input → envelope error 422
+        (status, _), env = _remote_call(
+            app, hash_, "create_comment",
+            ["welcome-to-fymo", {"name": "", "body": ""}],
+        )
+        assert status.startswith("200"), status
+        assert env["type"] == "error"
+        assert env["status"] == 422
+        assert env["error"] == "validation"
 
         # Remote call: toggle_reaction (with the same uid for idempotency)
-        body = json.dumps({"args": ["welcome-to-fymo", "clap"]}).encode()
-        (status, _), out = _wsgi_call(app, "/__remote/posts/toggle_reaction", method="POST", body=body, cookies=uid_cookie)
+        (status, _), env = _remote_call(
+            app, hash_, "toggle_reaction",
+            ["welcome-to-fymo", "clap"],
+            cookies=uid_cookie,
+        )
         assert status.startswith("200"), status
-        counts = json.loads(out)["data"]
+        assert env["type"] == "result"
+        counts = devalue.parse(env["result"])
         assert counts["clap"] == 1
 
         # Toggle again with same uid → 0
-        (status, _), out = _wsgi_call(app, "/__remote/posts/toggle_reaction", method="POST", body=body, cookies=uid_cookie)
+        (status, _), env = _remote_call(
+            app, hash_, "toggle_reaction",
+            ["welcome-to-fymo", "clap"],
+            cookies=uid_cookie,
+        )
         assert status.startswith("200"), status
-        counts2 = json.loads(out)["data"]
+        assert env["type"] == "result"
+        counts2 = devalue.parse(env["result"])
         assert counts2["clap"] == 0
     finally:
         if app.sidecar:
