@@ -31,6 +31,21 @@ def run_dev(host: str = "127.0.0.1", port: int = 8000):
     app = create_app(project_root)
     app.dev_orchestrator = orch
 
+    # Respawn sidecar after every successful server-rebuild so Node's ESM
+    # module cache is busted and the next request renders the fresh module.
+    def on_rebuild(event):
+        if event.get("type") != "server-rebuild" or event.get("errors"):
+            return
+        if app.sidecar is None:
+            return
+        try:
+            app.sidecar.stop()
+            app.sidecar.start()
+            app.sidecar.ping()
+        except Exception as e:
+            Color.print_error(f"sidecar respawn failed: {e}")
+    orch.add_listener(on_rebuild)
+
     from wsgiref.simple_server import make_server
     server = make_server(host, port, app)
     Color.print_info(f"Listening on http://{host}:{port}/")
