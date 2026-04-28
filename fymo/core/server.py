@@ -9,35 +9,61 @@ from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
 from fymo.core.template_renderer import TemplateRenderer
 from fymo.core.router import Router
-from fymo.bundler.runtime_builder import ensure_svelte_runtime
 
 
 class FymoApp:
     """Main Fymo application class"""
-    
+
     def __init__(self, project_root: Optional[Path] = None, config: Optional[Dict] = None):
         """
         Initialize Fymo application
-        
+
         Args:
             project_root: Root directory of the project
             config: Configuration dictionary
         """
         self.project_root = Path(project_root) if project_root else Path.cwd()
-        
-        # Ensure Svelte runtime is built
-        ensure_svelte_runtime(self.project_root)
-        
+
         # Initialize core components
         self.config_manager = ConfigManager(self.project_root, config)
         self.asset_manager = AssetManager(self.project_root)
         self.router = self._initialize_router()
         self.template_renderer = TemplateRenderer(
-            self.project_root, 
-            self.config_manager, 
-            self.asset_manager, 
+            self.project_root,
+            self.config_manager,
+            self.asset_manager,
             self.router
         )
+
+        # Dev mode: SSE reload support
+        self.dev_orchestrator = None
+
+        # Sidecar + manifest cache. Always on now; legacy path remains for any
+        # caller that bypasses TemplateRenderer's sidecar branch.
+        from fymo.core.sidecar import Sidecar
+        from fymo.core.manifest_cache import ManifestCache
+        dist_dir = self.project_root / "dist"
+        if (dist_dir / "sidecar.mjs").is_file():
+            self.sidecar = Sidecar(dist_dir=dist_dir)
+            self.sidecar.start()
+            self.sidecar.ping()
+            self.manifest_cache = ManifestCache(dist_dir=dist_dir)
+            self.template_renderer.sidecar = self.sidecar
+            self.template_renderer.manifest_cache = self.manifest_cache
+        else:
+            # Fail fast at startup with a clear message; the legacy template
+            # renderer path will not work either without manifest+sidecar in
+            # the new world. Tell the user what to do.
+            raise RuntimeError(
+                f"dist/ not found at {dist_dir}. Run `fymo build` first."
+            )
+
+    def __del__(self):
+        if getattr(self, 'sidecar', None) is not None:
+            try:
+                self.sidecar.stop()
+            except Exception:
+                pass
     
     def _initialize_router(self) -> Router:
         """Initialize router with appropriate configuration"""
@@ -76,10 +102,47 @@ class FymoApp:
         return self.asset_manager.serve_asset(path)
     
     
+    def _dev_sse(self, start_response):
+        """Server-sent events: push 'reload' on rebuild events from DevOrchestrator."""
+        if self.dev_orchestrator is None:
+            start_response("404 NOT FOUND", [("Content-Type", "text/plain")])
+            return [b"not running in dev mode"]
+        start_response("200 OK", [
+            ("Content-Type", "text/event-stream"),
+            ("Cache-Control", "no-cache"),
+        ])
+        from queue import Queue, Empty
+        q: Queue = Queue()
+        def listener(event):
+            if event.get("type") in ("client-rebuild", "server-rebuild"):
+                q.put("reload")
+        self.dev_orchestrator.add_listener(listener)
+        def stream():
+            yield b"data: hello\n\n"
+            while True:
+                try:
+                    msg = q.get(timeout=15)
+                    yield f"data: {msg}\n\n".encode()
+                except Empty:
+                    yield b": keepalive\n\n"
+        return stream()
+
     def __call__(self, environ, start_response):
         """WSGI application callable"""
         path = environ.get("PATH_INFO", "/")
-        
+
+        if path == "/_dev/reload":
+            return self._dev_sse(start_response)
+
+        # Handle dist asset requests (content-hashed bundles with immutable caching)
+        if path.startswith("/dist/"):
+            rest = path[len("/dist/"):]
+            body, status, content_type, headers = self.asset_manager.serve_dist_asset(rest)
+            response_headers = [("Content-Type", content_type), ("Content-Length", str(len(body)))]
+            response_headers.extend(headers.items())
+            start_response(status, response_headers)
+            return [body]
+
         # Handle asset requests
         if path.startswith('/assets/'):
             content, status, content_type = self.serve_asset(path)

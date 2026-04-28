@@ -1,0 +1,66 @@
+from fymo.build.manifest import RouteAssets
+from fymo.core.html import build_html
+
+
+def test_minimal_html_structure():
+    assets = RouteAssets(
+        ssr="ssr/todos.mjs",
+        client="client/todos.A1B2.js",
+        css="client/todos.A1B2.css",
+        preload=["client/chunk-datefns.X9Y8.js"],
+    )
+    html = build_html(
+        body="<div class='todo-app'>hi</div>",
+        head_extra="",
+        props={"todos": []},
+        assets=assets,
+        title="Todos",
+        asset_prefix="/dist",
+    )
+    assert "<!DOCTYPE html>" in html
+    assert "<title>Todos</title>" in html
+    assert '<link rel="stylesheet" href="/dist/client/todos.A1B2.css">' in html
+    assert '<link rel="modulepreload" href="/dist/client/todos.A1B2.js">' in html
+    assert '<link rel="modulepreload" href="/dist/client/chunk-datefns.X9Y8.js">' in html
+    assert '<div id="svelte-app"><div class=\'todo-app\'>hi</div></div>' in html
+    assert '<script type="application/json" id="svelte-props">{"todos": []}</script>' in html
+    assert '<script type="module" src="/dist/client/todos.A1B2.js">' in html
+
+
+def test_props_are_html_safe():
+    assets = RouteAssets(ssr="x", client="x.js", css=None, preload=[])
+    html = build_html(
+        body="",
+        head_extra="",
+        props={"x": "</script><script>alert(1)//"},
+        assets=assets,
+        title="t",
+        asset_prefix="/dist",
+    )
+    # The svelte-props block must not contain a literal `</script>` or `<script>`,
+    # otherwise the embedded value would break out of the JSON island.
+    start = html.index('id="svelte-props">') + len('id="svelte-props">')
+    end = html.index('</script>', start)
+    json_block = html[start:end]
+    # < and > inside the JSON value must be escaped to \\u003c / \\u003e
+    assert "<" not in json_block, f"unescaped < in JSON block: {json_block!r}"
+    assert ">" not in json_block, f"unescaped > in JSON block: {json_block!r}"
+
+
+def test_total_size_for_typical_page_under_5kb():
+    assets = RouteAssets(
+        ssr="ssr/todos.mjs",
+        client="client/todos.A1B2.js",
+        css="client/todos.A1B2.css",
+        preload=[],
+    )
+    html = build_html(
+        body="<div>" + ("a" * 1000) + "</div>",
+        head_extra="<meta name='description' content='x'>",
+        props={"a": 1},
+        assets=assets,
+        title="t",
+        asset_prefix="/dist",
+    )
+    overhead = len(html) - 1000  # body content ~1KB
+    assert overhead < 1500, f"HTML overhead {overhead}B is too large"

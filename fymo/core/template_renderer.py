@@ -2,13 +2,10 @@
 Template rendering for Fymo applications
 """
 
-import json
 import importlib
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple
 
-from fymo.core.compiler import SvelteCompiler
-from fymo.core.runtime import JSRuntime
 from fymo.core.router import Router
 from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
@@ -18,12 +15,12 @@ from fymo.utils.colors import Color
 
 class TemplateRenderer:
     """Handles Svelte template rendering with SSR"""
-    
-    def __init__(self, project_root: Path, config_manager: ConfigManager, 
+
+    def __init__(self, project_root: Path, config_manager: ConfigManager,
                  asset_manager: AssetManager, router: Router):
         """
         Initialize template renderer
-        
+
         Args:
             project_root: Root directory of the project
             config_manager: Configuration manager instance
@@ -34,83 +31,21 @@ class TemplateRenderer:
         self.config_manager = config_manager
         self.asset_manager = asset_manager
         self.router = router
-        self.compiler = SvelteCompiler(project_root)
-        self.runtime = JSRuntime()
-    
+        self.sidecar = None
+        self.manifest_cache = None
+
     def render_template(self, route_path: str) -> Tuple[str, str]:
         """
         Render a Svelte component with SSR
-        
+
         Args:
             route_path: The route path to render
-            
+
         Returns:
             Tuple of (html, status_code)
         """
         try:
-            # Get route info
-            route_info = self.router.match(route_path)
-            if not route_info:
-                return self._render_404(), "404 NOT FOUND"
-            
-            # Get template and controller paths
-            template_path = self.project_root / "app" / "templates" / route_info['template']
-            controller_module = f"app.controllers.{route_info['controller']}"
-            
-            # Read Svelte component
-            if not template_path.exists():
-                raise TemplateError(f"Template not found: {template_path}")
-                
-            try:
-                with open(template_path, 'r') as f:
-                    svelte_source = f.read()
-            except IOError as e:
-                raise TemplateError(f"Could not read template {template_path}: {str(e)}")
-            
-            # Get controller context and document metadata
-            controller, props, doc_meta = self._load_controller_data(controller_module)
-            
-            # Compile for SSR
-            compiled = self.compiler.compile_ssr(svelte_source, str(template_path))
-            
-            if not compiled.get('success'):
-                error_msg = compiled.get('error', 'Unknown compilation error')
-                raise CompilationError(f"Svelte compilation failed: {error_msg}")
-            
-            # Render with JavaScript runtime, including imported components and bundled packages
-            render_result = self.runtime.render_component(
-                compiled['js'], props, str(template_path), controller, 
-                compiled.get('components', {}), compiled.get('bundled_packages', {})
-            )
-            
-            if 'error' in render_result:
-                raise RenderingError(f"SSR rendering failed: {render_result['error']}")
-            
-            # Get rendered HTML
-            html = render_result.get('html', '')
-            
-            # Extract and store CSS
-            css = compiled.get('css', '')
-            if css:
-                component_name = template_path.stem
-                self.asset_manager.store_extracted_css(f"{component_name}.css", css)
-            
-            # Store compiled imported components
-            imported_components = compiled.get('components', {})
-            for comp_name, comp_data in imported_components.items():
-                if comp_data.get('css'):
-                    self.asset_manager.store_extracted_css(f"{comp_name}.css", comp_data['css'])
-            
-            # Compile client-side version for hydration
-            hydration_js = self._compile_for_hydration(
-                svelte_source, template_path, props, doc_meta
-            )
-            
-            # Generate full HTML page
-            full_html = self._generate_html_page(html, props, hydration_js, doc_meta)
-            
-            return full_html, "200 OK"
-            
+            return self._render_via_sidecar(route_path)
         except TemplateError as e:
             print(f"{Color.FAIL}Template error: {e.message}{Color.ENDC}")
             return f"<div>Template Error: {e.message}</div>", "404 NOT FOUND"
@@ -124,6 +59,51 @@ class TemplateRenderer:
             print(f"{Color.FAIL}Unexpected error: {str(e)}{Color.ENDC}")
             return f"<div>Server Error: {str(e)}</div>", "500 INTERNAL SERVER ERROR"
     
+    def _render_via_sidecar(self, route_path: str) -> Tuple[str, str]:
+        """New pipeline: render via Node sidecar with prebuilt SSR module."""
+        from fymo.core.sidecar import SidecarError
+        from fymo.core.manifest_cache import ManifestUnavailable
+        from fymo.core.html import build_html
+
+        route_info = self.router.match(route_path)
+        if not route_info:
+            return self._render_404(), "404 NOT FOUND"
+
+        controller_key = route_info["controller"]
+        route_name = controller_key.split(".")[0]
+        controller_module = f"app.controllers.{controller_key}"
+        _, props, doc_meta = self._load_controller_data(controller_module)
+
+        try:
+            manifest = self.manifest_cache.get()
+        except ManifestUnavailable as e:
+            return f"<div>Build error: {e}</div>", "500 INTERNAL SERVER ERROR"
+
+        if route_name not in manifest.routes:
+            return (
+                f"<div>Route '{route_name}' not in manifest. Run `fymo build`.</div>",
+                "500 INTERNAL SERVER ERROR",
+            )
+
+        try:
+            ssr = self.sidecar.render(route_name, props, doc=doc_meta)
+        except SidecarError as e:
+            return f"<div>SSR Error: {e}</div>", "500 INTERNAL SERVER ERROR"
+
+        title = doc_meta.get("title", self.config_manager.get_app_name())
+        head_extra = self._generate_head_content(doc_meta.get("head", {}))
+        # Prepend Svelte's own <head> output
+        head_extra = (ssr["head"] or "") + head_extra
+
+        html = build_html(
+            body=ssr["body"],
+            head_extra=head_extra,
+            props=props,
+            assets=manifest.routes[route_name],
+            title=title,
+        )
+        return html, "200 OK"
+
     def _load_controller_data(self, controller_module: str) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
         """Load controller and extract context and document metadata"""
         try:
@@ -145,66 +125,6 @@ class TemplateRenderer:
             print(f"{Color.FAIL}Controller error: {e}{Color.ENDC}")
             # Don't raise here, just return empty data - controllers are optional
             return None, {}, {}
-    
-    def _compile_for_hydration(self, svelte_source: str, template_path: Path, 
-                              props: Dict[str, Any], doc_meta: Dict[str, Any]) -> str:
-        """Compile client-side version for hydration"""
-        client_compiled = self.compiler.compile_dom(svelte_source, str(template_path))
-        
-        if client_compiled.get('success'):
-            client_js = client_compiled.get('js', '')
-            
-            # Store compiled component
-            component_name = template_path.stem
-            self.asset_manager.store_compiled_component(f"{component_name}.js", client_js)
-            
-            # Store compiled imported components for client-side
-            imported_components = client_compiled.get('components', {})
-            for comp_name, comp_data in imported_components.items():
-                if comp_data.get('js'):
-                    self.asset_manager.store_compiled_component(f"{comp_name}.js", comp_data['js'])
-            
-            # Transform for hydration with context and doc data, including imported components and bundled packages
-            relative_template_path = str(template_path).replace(str(self.project_root) + '/', '')
-            return self.runtime.transform_client_js_for_hydration(
-                client_js, relative_template_path, props, doc_meta, imported_components, 
-                client_compiled.get('bundled_packages', {})
-            )
-        else:
-            return "console.error('Client compilation failed');"
-    
-    def _generate_html_page(self, content: str, props: Dict[str, Any], 
-                           hydration_js: str, doc_meta: Dict[str, Any] = None) -> str:
-        """Generate full HTML page with hydration and dynamic document metadata"""
-        
-        if doc_meta is None:
-            doc_meta = {}
-        
-        # Generate CSS links
-        css_links = self.asset_manager.generate_css_links()
-        
-        # Get title from doc metadata or config
-        title = doc_meta.get('title', self.config_manager.get_app_name())
-        
-        # Generate structured head content safely
-        head_content = self._generate_head_content(doc_meta.get('head', {}))
-        
-        return f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{title}</title>
-{css_links}{head_content}
-</head>
-<body>
-    <div id="svelte-app">{content}</div>
-    <script id="svelte-props" type="application/json">{json.dumps(props)}</script>
-    <script type="module">
-        {hydration_js}
-    </script>
-</body>
-</html>"""
     
     def _generate_head_content(self, head_data: Dict[str, Any]) -> str:
         """

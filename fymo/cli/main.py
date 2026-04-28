@@ -67,6 +67,15 @@ def build_runtime_cmd():
     build_runtime()
 
 
+@cli.command(name="dev")
+@click.option("--host", default="127.0.0.1")
+@click.option("--port", default=8000, type=int)
+def dev_cmd(host, port):
+    """Start dev server with file watcher."""
+    from fymo.cli.commands.dev import run_dev
+    run_dev(host=host, port=port)
+
+
 def main():
     """Main entry point"""
     try:
