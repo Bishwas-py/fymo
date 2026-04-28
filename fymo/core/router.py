@@ -142,8 +142,9 @@ class Router:
         for route_pattern, route_info in self.routes.items():
             if ':' in route_pattern:
                 # Convert :param to regex
-                pattern = re.escape(route_pattern)
-                pattern = re.sub(r'\\:(\w+)', r'(?P<\1>[^/]+)', pattern)
+                # Substitute :param placeholders before escaping so that
+                # re.escape() doesn't interfere with them.
+                pattern = re.sub(r':(\w+)', r'(?P<\1>[^/]+)', route_pattern)
                 pattern = f'^{pattern}$'
                 
                 match = re.match(pattern, path)

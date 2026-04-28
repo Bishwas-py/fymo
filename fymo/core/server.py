@@ -31,6 +31,13 @@ class FymoApp:
         if project_root_str not in sys.path:
             sys.path.insert(0, project_root_str)
 
+        # Evict any stale app.* module cache entries so that controllers from a
+        # previous project root (e.g. a different tmp dir in tests) are not
+        # returned by importlib.import_module for this project's files.
+        for key in list(sys.modules.keys()):
+            if key == "app" or key.startswith("app."):
+                del sys.modules[key]
+
         # Initialize core components
         self.config_manager = ConfigManager(self.project_root, config)
         self.asset_manager = AssetManager(self.project_root)
