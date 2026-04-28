@@ -17,6 +17,7 @@ import sveltePreprocess from 'svelte-preprocess';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fymoRemotePlugin } from './plugins/remote.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(process.argv[2]);
@@ -36,6 +37,7 @@ async function buildServer() {
         minify: !config.dev,
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
+        external: ['$remote/*'],
         plugins: [sveltePlugin({
             preprocess: sveltePreprocess(),
             compilerOptions: { generate: 'server', dev: false },
@@ -61,10 +63,13 @@ async function buildClient() {
         minify: !config.dev,
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
-        plugins: [sveltePlugin({
-            preprocess: sveltePreprocess(),
-            compilerOptions: { generate: 'client', dev: false },
-        })],
+        plugins: [
+            fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
+            sveltePlugin({
+                preprocess: sveltePreprocess(),
+                compilerOptions: { generate: 'client', dev: false },
+            }),
+        ],
         logLevel: 'silent',
     });
 }
