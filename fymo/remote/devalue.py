@@ -18,6 +18,12 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
+try:
+    import pydantic
+    _has_pydantic = True
+except ImportError:
+    _has_pydantic = False
+
 
 # Sentinel values. The JS counterparts:
 #   -1 → undefined,  -2 → null,  -3 → NaN,  -4 → Infinity,  -5 → -Infinity,  -6 → 0
@@ -99,6 +105,12 @@ def stringify(value: Any) -> str:
             # Encode items first, then store the tagged form
             indices = [_encode(item) for item in v]
             refs[idx - 1] = ["Set", indices]
+            return idx
+
+        if _has_pydantic and isinstance(v, pydantic.BaseModel):
+            # Convert to dict, then encode as a dict
+            d = v.model_dump(mode="python")
+            refs[idx - 1] = {k: _encode(val) for k, val in d.items()}
             return idx
 
         raise TypeError(f"devalue cannot stringify {type(v).__name__}")

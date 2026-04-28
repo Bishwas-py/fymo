@@ -162,3 +162,40 @@ def test_set_tagged_format():
     out = devalue.stringify({"x"})
     arr = json.loads(out)
     assert arr[arr[0]][0] == "Set"
+
+
+from pydantic import BaseModel
+
+
+class Item(BaseModel):
+    sku: str
+    qty: int
+
+
+def test_pydantic_model_round_trips_as_dict():
+    """Pydantic models go through model_dump and round-trip as plain dicts."""
+    item = Item(sku="abc", qty=3)
+    parsed = devalue.parse(devalue.stringify(item))
+    assert parsed == {"sku": "abc", "qty": 3}
+
+
+def test_dedup_repeated_dict_reference():
+    """Same dict referenced twice should encode once and be deduplicated."""
+    inner = {"x": 1}
+    outer = {"a": inner, "b": inner}
+    parsed = devalue.parse(devalue.stringify(outer))
+    assert parsed == {"a": {"x": 1}, "b": {"x": 1}}
+    # And on the wire, the inner dict only appears once
+    out = devalue.stringify(outer)
+    arr = json.loads(out)
+    inner_dicts = [v for v in arr[1:] if isinstance(v, dict) and "x" in v]
+    assert len(inner_dicts) == 1
+
+
+def test_cyclic_reference_does_not_infinite_loop():
+    """A self-referencing structure should encode without recursion error."""
+    a: dict = {}
+    a["self"] = a
+    out = devalue.stringify(a)
+    parsed = devalue.parse(out)
+    assert parsed["self"] is parsed  # Reconstructed cycle
