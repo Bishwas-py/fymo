@@ -142,7 +142,7 @@
 <style>
   .todo-app {
     background: #fff;
-    margin: 130px auto 40px auto;
+    margin: 20px auto 40px auto;
     position: relative;
     box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.2),
                 0 25px 50px 0 rgba(0, 0, 0, 0.1);
@@ -156,10 +156,11 @@
   .user-info {
     background: #f8f9fa;
     padding: 10px 15px;
-    margin: 10px 0;
-    border-radius: 4px;
+    margin: 0;
+    border-radius: 0;
     font-size: 14px;
     color: #666;
+    border-bottom: 1px solid #ededed;
   }
 
   .user-info p {
@@ -167,15 +168,15 @@
   }
 
   h1 {
-    position: absolute;
-    top: -140px;
     width: 100%;
-    font-size: 80px;
+    font-size: 64px;
     font-weight: 200;
     text-align: center;
     color: #b83f45;
     text-rendering: optimizeLegibility;
     margin: 0;
+    padding: 24px 0 16px;
+    line-height: 1;
   }
 
   .new-todo {
