@@ -17,6 +17,7 @@
   "author": "Fymo Contributors",
   "license": "MIT",
   "dependencies": {
+    "devalue": "^5.0.0",
     "svelte": "^5.38.6"
   },
   "devDependencies": {
