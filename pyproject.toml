@@ -65,3 +65,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# Default norecursedirs includes "build" which would skip tests/build/.
+# Override with the rest of pytest's defaults except "build".
+norecursedirs = ["*.egg", ".*", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"]
