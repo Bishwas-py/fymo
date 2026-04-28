@@ -41,3 +41,48 @@ def test_undefined_uses_sentinel_minus_one():
     """A field with the sentinel UNDEFINED encodes to -1, not present-as-null."""
     out = devalue.stringify(devalue.UNDEFINED)
     assert json.loads(out) == [-1]
+
+
+def test_list_of_strings():
+    out = devalue.stringify(["a", "b", "c"])
+    assert devalue.parse(out) == ["a", "b", "c"]
+
+
+def test_nested_list():
+    val = [[1, 2], [3, 4]]
+    assert devalue.parse(devalue.stringify(val)) == val
+
+
+def test_dict_of_primitives():
+    val = {"name": "alice", "age": 30, "active": True}
+    assert devalue.parse(devalue.stringify(val)) == val
+
+
+def test_nested_dict():
+    val = {"user": {"name": "alice", "tags": ["x", "y"]}}
+    assert devalue.parse(devalue.stringify(val)) == val
+
+
+def test_tuple_round_trips_as_list():
+    """devalue has no tuple type; tuples encode as arrays and round-trip as lists."""
+    assert devalue.parse(devalue.stringify((1, 2, 3))) == [1, 2, 3]
+
+
+def test_empty_list():
+    assert devalue.parse(devalue.stringify([])) == []
+
+
+def test_empty_dict():
+    assert devalue.parse(devalue.stringify({})) == {}
+
+
+def test_list_root_indices():
+    """A list at root: arr[0]=1, arr[1]=[idx_of_a, idx_of_b], arr[2]='a', arr[3]='b'."""
+    out = devalue.stringify(["a", "b"])
+    arr = json.loads(out)
+    assert arr[0] == 1
+    # arr[1] is a list of indices pointing to "a" and "b"
+    indices = arr[1]
+    assert isinstance(indices, list) and len(indices) == 2
+    assert arr[indices[0]] == "a"
+    assert arr[indices[1]] == "b"

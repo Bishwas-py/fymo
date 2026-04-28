@@ -29,59 +29,83 @@ UNDEFINED = _Undefined()
 
 
 def stringify(value: Any) -> str:
-    """Encode `value` to a devalue string."""
     if value is UNDEFINED:
         return json.dumps([-1])
-    if value is None:
-        return json.dumps([1, None])
 
-    refs: list[Any] = []  # encoded slots, indexed
-    seen: dict[int, int] = {}  # id(obj) → index in refs
+    refs: list[Any] = []          # encoded slots (1-indexed in output array)
+    seen: dict[int, int] = {}     # id(obj) → index for cycle / dedup
 
     def _encode(v: Any) -> int:
-        # Returns the index in `refs` (>= 1) or a sentinel (< 0)
-        if v is UNDEFINED:
-            return -1
-        if v is None:
-            return -2
+        # Sentinels (return value < 0 means "use this sentinel directly")
+        if v is UNDEFINED: return -1
+        if v is None:      return -2
         if isinstance(v, float):
             if math.isnan(v): return -3
             if v == math.inf: return -4
             if v == -math.inf: return -5
-            if v == 0.0 and math.copysign(1.0, v) == -1.0: return -6  # -0
-        # Dedup hashable primitives by value
-        if isinstance(v, (str, int, bool)) and not isinstance(v, bool) is False:
-            pass  # bool falls through to id-based dedup below
-        # For now: store inline, no dedup
+
+        # Dedup by id
+        if id(v) in seen:
+            return seen[id(v)]
+
+        # Reserve slot now (cycle-safe)
         idx = len(refs) + 1
-        refs.append(v)
-        return idx
+        refs.append(None)
+        seen[id(v)] = idx
+
+        if isinstance(v, (str, int, bool)) or (isinstance(v, float) and not (math.isnan(v) or math.isinf(v))):
+            refs[idx - 1] = v
+            return idx
+
+        if isinstance(v, (list, tuple)):
+            refs[idx - 1] = [_encode(item) for item in v]
+            return idx
+
+        if isinstance(v, dict):
+            refs[idx - 1] = {k: _encode(val) for k, val in v.items()}
+            return idx
+
+        raise TypeError(f"devalue cannot stringify {type(v).__name__}")
 
     root_idx = _encode(value)
     return json.dumps([root_idx] + refs)
 
 
 def parse(s: str) -> Any:
-    """Decode a devalue string back to a Python value."""
     arr = json.loads(s)
     if not isinstance(arr, list) or len(arr) == 0:
-        raise ValueError("invalid devalue payload: not a non-empty array")
+        raise ValueError("invalid devalue payload")
 
-    root = arr[0]
-    if root == -1:
-        return UNDEFINED
-    if root == -2:
-        return None
-    if root == -3:
-        return float("nan")
-    if root == -4:
-        return math.inf
-    if root == -5:
-        return -math.inf
-    if root == -6:
-        return 0.0  # negative zero is lossy in Python; return 0.0
-    if not isinstance(root, int) or root < 1 or root >= len(arr):
-        raise ValueError(f"invalid root reference: {root}")
+    decoded: dict[int, Any] = {}
 
-    # For now: scalar values stored inline. Containers come in later tasks.
-    return arr[root]
+    def _decode(idx_or_sentinel: int) -> Any:
+        if idx_or_sentinel == -1: return UNDEFINED
+        if idx_or_sentinel == -2: return None
+        if idx_or_sentinel == -3: return float("nan")
+        if idx_or_sentinel == -4: return math.inf
+        if idx_or_sentinel == -5: return -math.inf
+        if idx_or_sentinel == -6: return 0.0
+        if idx_or_sentinel in decoded:
+            return decoded[idx_or_sentinel]
+        if idx_or_sentinel < 1 or idx_or_sentinel >= len(arr):
+            raise ValueError(f"invalid reference: {idx_or_sentinel}")
+
+        slot = arr[idx_or_sentinel]
+        # Place a placeholder before recursing (cycle-safe for containers)
+        if isinstance(slot, list):
+            placeholder: list = []
+            decoded[idx_or_sentinel] = placeholder
+            for ref in slot:
+                placeholder.append(_decode(ref))
+            return placeholder
+        if isinstance(slot, dict):
+            placeholder_d: dict = {}
+            decoded[idx_or_sentinel] = placeholder_d
+            for k, ref in slot.items():
+                placeholder_d[k] = _decode(ref)
+            return placeholder_d
+        # Scalar
+        decoded[idx_or_sentinel] = slot
+        return slot
+
+    return _decode(arr[0])
