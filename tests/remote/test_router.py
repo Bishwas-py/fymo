@@ -1,13 +1,15 @@
-"""WSGI handler for remote function calls."""
+"""WSGI handler for remote function calls — SvelteKit-style wire."""
+import base64
 import io
 import json
 import sys
 from pathlib import Path
 import pytest
 from fymo.remote.router import handle_remote
+from fymo.remote import devalue
 
 
-def _scaffold(tmp_path: Path, files: dict[str, str]) -> Path:
+def _scaffold(tmp_path, files):
     for rel, content in files.items():
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -15,92 +17,127 @@ def _scaffold(tmp_path: Path, files: dict[str, str]) -> Path:
     return tmp_path
 
 
-def _call(environ: dict):
-    responses = []
-    def start_response(status, headers):
-        responses.append((status, headers))
-    body = b"".join(handle_remote(environ, start_response))
-    return responses[0], body
+def _b64url(s: str) -> str:
+    return base64.urlsafe_b64encode(s.encode("utf-8")).rstrip(b"=").decode("ascii")
 
 
-def _make_environ(path: str, body: dict, cookies: str = "") -> dict:
-    raw = json.dumps(body).encode()
-    return {
+def _make_environ(path: str, args: list, *, cookies: str = "", origin: str | None = "http://x", host: str = "x", scheme: str = "http"):
+    body_obj = {"payload": _b64url(devalue.stringify(args))}
+    raw = json.dumps(body_obj).encode()
+    env = {
         "REQUEST_METHOD": "POST",
         "PATH_INFO": path,
         "CONTENT_LENGTH": str(len(raw)),
         "CONTENT_TYPE": "application/json",
         "HTTP_COOKIE": cookies,
+        "HTTP_HOST": host,
+        "wsgi.url_scheme": scheme,
         "REMOTE_ADDR": "127.0.0.1",
         "wsgi.input": io.BytesIO(raw),
     }
+    if origin is not None:
+        env["HTTP_ORIGIN"] = origin
+    return env
+
+
+def _call(environ):
+    responses = []
+    def sr(status, headers): responses.append((status, headers))
+    body = b"".join(handle_remote(environ, sr))
+    return responses[0], json.loads(body)
 
 
 @pytest.fixture
-def remote_project(tmp_path: Path, monkeypatch):
+def remote_project(tmp_path, monkeypatch):
     proj = _scaffold(tmp_path, {
         "app/__init__.py": "",
         "app/remote/__init__.py": "",
         "app/remote/posts.py": (
             "from fymo.remote import current_uid, NotFound\n"
-            "def hello(name: str) -> str:\n"
-            "    return f'hi {name}'\n"
-            "def whoami() -> str:\n"
-            "    return current_uid()\n"
-            "def boom() -> str:\n"
-            "    raise NotFound('nope')\n"
+            "def hello(name: str) -> str: return f'hi {name}'\n"
+            "def whoami() -> str: return current_uid()\n"
+            "def boom() -> str: raise NotFound('nope')\n"
         ),
     })
     monkeypatch.syspath_prepend(str(proj))
-    yield proj
+
+    # Stub the manifest hash lookup
+    from fymo.remote.discovery import file_hash
+    h = file_hash(proj / "app/remote/posts.py")
+    from fymo.remote import router as router_mod
+    monkeypatch.setattr(router_mod, "_resolve_module_for_hash", lambda hash_: "posts" if hash_ == h else None)
+
+    yield proj, h
     for name in list(sys.modules):
         if name.startswith("app."):
             del sys.modules[name]
 
 
-def test_calls_function_and_returns_data(remote_project):
-    env = _make_environ("/__remote/posts/hello", {"args": ["alice"]})
+def test_calls_function_returns_result_envelope(remote_project):
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/hello", ["alice"], host="x", origin="http://x")
     (status, headers), body = _call(env)
     assert status.startswith("200")
-    payload = json.loads(body)
-    assert payload == {"ok": True, "data": "hi alice"}
+    assert body["type"] == "result"
+    assert devalue.parse(body["result"]) == "hi alice"
 
 
-def test_issues_uid_on_first_call(remote_project):
-    env = _make_environ("/__remote/posts/whoami", {"args": []})
-    (status, headers), body = _call(env)
+def test_cross_origin_returns_403_envelope(remote_project):
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/hello", ["alice"], host="yoursite.com", origin="https://evil.com")
+    (status, _), body = _call(env)
     assert status.startswith("200")
+    assert body == {"type": "error", "status": 403, "error": "cross_origin"}
+
+
+def test_missing_origin_is_allowed(remote_project):
+    """Server-to-server / curl with no Origin header should not be CSRF-blocked."""
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/hello", ["alice"], host="x", origin=None)
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body["type"] == "result"
+
+
+def test_unknown_hash_returns_404_envelope(remote_project):
+    env = _make_environ("/_fymo/remote/000000000000/hello", ["alice"], host="x", origin="http://x")
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body == {"type": "error", "status": 404, "error": "unknown_module"}
+
+
+def test_unknown_function_returns_404_envelope(remote_project):
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/nope", [], host="x", origin="http://x")
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body["type"] == "error"
+    assert body["status"] == 404
+
+
+def test_validation_error_returns_422_envelope(remote_project):
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/hello", [123], host="x", origin="http://x")
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body["type"] == "error"
+    assert body["status"] == 422
+
+
+def test_domain_error_returns_envelope(remote_project):
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/boom", [], host="x", origin="http://x")
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body["type"] == "error"
+    assert body["status"] == 404
+    assert body["error"] == "not_found"
+
+
+def test_uid_cookie_issued_on_first_call(remote_project):
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/whoami", [], host="x", origin="http://x")
+    (status, headers), body = _call(env)
     set_cookie = next((v for k, v in headers if k.lower() == "set-cookie"), None)
     assert set_cookie is not None
     assert "fymo_uid=" in set_cookie
-    payload = json.loads(body)
-    assert payload["data"].startswith("u_")
-
-
-def test_reads_existing_uid_cookie(remote_project):
-    env = _make_environ("/__remote/posts/whoami", {"args": []}, cookies="fymo_uid=u_existing")
-    (status, headers), body = _call(env)
-    payload = json.loads(body)
-    assert payload["data"] == "u_existing"
-
-
-def test_unknown_function_returns_404(remote_project):
-    env = _make_environ("/__remote/posts/nope", {"args": []})
-    (status, headers), body = _call(env)
-    assert status.startswith("404")
-
-
-def test_validation_error_returns_422(remote_project):
-    env = _make_environ("/__remote/posts/hello", {"args": [123]})  # int instead of str
-    (status, headers), body = _call(env)
-    assert status.startswith("422")
-    payload = json.loads(body)
-    assert payload["ok"] is False
-
-
-def test_domain_error_returns_correct_status(remote_project):
-    env = _make_environ("/__remote/posts/boom", {"args": []})
-    (status, headers), body = _call(env)
-    assert status.startswith("404")
-    payload = json.loads(body)
-    assert payload["error"] == "not_found"

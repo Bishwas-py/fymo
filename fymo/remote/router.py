@@ -1,13 +1,15 @@
-"""WSGI handler for POST /__remote/<module>/<fn>."""
+"""WSGI handler for POST /_fymo/remote/<hash>/<fn>."""
+import base64
 import importlib
 import inspect
 import json
 import sys
 import traceback
 import typing
-from typing import Iterable
+from typing import Iterable, Callable
 
-from fymo.remote.adapters import validate_args, serialize_response
+from fymo.remote import devalue
+from fymo.remote.adapters import validate_args
 from fymo.remote.context import request_scope
 from fymo.remote.errors import RemoteError
 from fymo.remote.identity import _ensure_uid
@@ -19,21 +21,42 @@ except ImportError:
     _has_pydantic = False
 
 _MAX_BODY = 1 * 1024 * 1024
+_PATH_PREFIX = "/_fymo/remote/"
 
 
-def _json_response(start_response, status: int, payload: dict, set_cookie: str | None = None) -> Iterable[bytes]:
+# Hash → module-name lookup. Overridable in tests; production is wired via
+# fymo.core.server when ManifestCache is available.
+_resolve_module_for_hash: Callable[[str], "str | None"] = lambda h: None
+
+
+def _200(start_response, payload: dict, set_cookie: "str | None" = None) -> Iterable[bytes]:
     body = json.dumps(payload).encode("utf-8")
-    headers = [("Content-Type", "application/json"), ("Content-Length", str(len(body)))]
+    headers = [
+        ("Content-Type", "application/json"),
+        ("Content-Length", str(len(body))),
+    ]
     if set_cookie:
         headers.append(("Set-Cookie", set_cookie))
-    statuses = {
-        200: "200 OK", 400: "400 Bad Request", 401: "401 Unauthorized",
-        403: "403 Forbidden", 404: "404 Not Found", 409: "409 Conflict",
-        413: "413 Payload Too Large", 422: "422 Unprocessable Entity",
-        500: "500 Internal Server Error",
-    }
-    start_response(statuses.get(status, f"{status} Status"), headers)
+    start_response("200 OK", headers)
     return [body]
+
+
+def _b64url_decode(s: str) -> str:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad).decode("utf-8")
+
+
+def _origin_ok(environ: dict) -> bool:
+    """Reject only when Origin is present AND mismatches Host."""
+    origin = environ.get("HTTP_ORIGIN")
+    if not origin:
+        return True
+    host = environ.get("HTTP_HOST")
+    if not host:
+        return True
+    scheme = environ.get("wsgi.url_scheme", "http")
+    expected = f"{scheme}://{host}"
+    return origin == expected
 
 
 def _evict_stale_app_cache() -> None:
@@ -48,18 +71,16 @@ def _evict_stale_app_cache() -> None:
     app_paths = list(getattr(app_mod, "__path__", []))
     if not app_paths:
         return
-    # If none of the app package's paths appear in sys.path, the cached module is stale.
     if not any(p in sys.path for p in app_paths):
         for name in list(sys.modules):
             if name == "app" or name.startswith("app."):
                 del sys.modules[name]
 
 
-def _resolve(module_name: str, fn_name: str):
-    """Return (fn, signature, hints) or (None, None, None)."""
-    if not module_name.replace("_", "").isalnum() or not fn_name.replace("_", "").isalnum():
+def _resolve_fn_in_module(module_name: str, fn_name: str):
+    if not module_name.replace("_", "").isalnum():
         return None, None, None
-    if fn_name.startswith("_"):
+    if not fn_name.replace("_", "").isalnum() or fn_name.startswith("_"):
         return None, None, None
     _evict_stale_app_cache()
     full = f"app.remote.{module_name}"
@@ -70,54 +91,74 @@ def _resolve(module_name: str, fn_name: str):
     fn = getattr(mod, fn_name, None)
     if fn is None or not callable(fn) or getattr(fn, "__module__", None) != full:
         return None, None, None
-    sig = inspect.signature(fn)
-    hints = typing.get_type_hints(fn, include_extras=True)
-    return fn, sig, hints
+    return fn, inspect.signature(fn), typing.get_type_hints(fn, include_extras=True)
 
 
 def handle_remote(environ: dict, start_response) -> Iterable[bytes]:
+    # 1. CSRF: Origin === Host
+    if not _origin_ok(environ):
+        return _200(start_response, {"type": "error", "status": 403, "error": "cross_origin"})
+
+    # 2. Parse path
     path = environ.get("PATH_INFO", "")
-    parts = path[len("/__remote/"):].split("/")
-    if len(parts) != 2:
-        return _json_response(start_response, 400, {"ok": False, "error": "bad_path"})
-    module_name, fn_name = parts
+    if not path.startswith(_PATH_PREFIX):
+        return _200(start_response, {"type": "error", "status": 400, "error": "bad_path"})
+    rest = path[len(_PATH_PREFIX):]
+    parts = rest.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return _200(start_response, {"type": "error", "status": 400, "error": "bad_path"})
+    hash_, fn_name = parts
 
-    fn, sig, hints = _resolve(module_name, fn_name)
+    # 3. Hash → module
+    module_name = _resolve_module_for_hash(hash_)
+    if module_name is None:
+        return _200(start_response, {"type": "error", "status": 404, "error": "unknown_module"})
+
+    # 4. Resolve function in module
+    fn, sig, hints = _resolve_fn_in_module(module_name, fn_name)
     if fn is None:
-        return _json_response(start_response, 404, {"ok": False, "error": "unknown_function"})
+        return _200(start_response, {"type": "error", "status": 404, "error": "unknown_function"})
 
+    # 5. Body parse + payload decode
     try:
         length = int(environ.get("CONTENT_LENGTH") or 0)
     except ValueError:
         length = 0
     if length > _MAX_BODY:
-        return _json_response(start_response, 413, {"ok": False, "error": "too_large"})
-
+        return _200(start_response, {"type": "error", "status": 413, "error": "too_large"})
     raw = environ["wsgi.input"].read(length) if length else b"{}"
     try:
         body = json.loads(raw or b"{}")
-    except json.JSONDecodeError:
-        return _json_response(start_response, 400, {"ok": False, "error": "invalid_json"})
+        payload_b64 = body.get("payload", "")
+        payload_str = _b64url_decode(payload_b64) if payload_b64 else "[1,[]]"
+        args = devalue.parse(payload_str)
+        if not isinstance(args, list):
+            raise ValueError("payload must devalue-parse to a list of args")
+    except Exception as e:
+        return _200(start_response, {"type": "error", "status": 400, "error": "bad_payload", "message": str(e)})
 
-    args = body.get("args") or []
+    # 6. Validate args
     try:
         validated = validate_args(args, sig, hints)
     except Exception as e:
         if _has_pydantic and isinstance(e, pydantic.ValidationError):
-            return _json_response(start_response, 422, {"ok": False, "error": "validation", "issues": e.errors()})
-        return _json_response(start_response, 422, {"ok": False, "error": "validation", "message": str(e)})
+            return _200(start_response, {"type": "error", "status": 422, "error": "validation", "issues": e.errors()})
+        return _200(start_response, {"type": "error", "status": 422, "error": "validation", "message": str(e)})
 
+    # 7. Identity + dispatch
     uid, set_cookie = _ensure_uid(environ)
-
     try:
         with request_scope(uid=uid, environ=environ):
             result = fn(*validated)
     except RemoteError as e:
-        return _json_response(start_response, e.status, {"ok": False, "error": e.code, "message": str(e)}, set_cookie)
+        return _200(start_response, {"type": "error", "status": e.status, "error": e.code, "message": str(e)}, set_cookie)
     except Exception as e:
-        return _json_response(start_response, 500,
-                              {"ok": False, "error": "internal", "message": str(e), "traceback": traceback.format_exc()},
-                              set_cookie)
+        return _200(start_response, {"type": "error", "status": 500, "error": "internal", "message": str(e), "traceback": traceback.format_exc()}, set_cookie)
 
-    serialized = serialize_response(result, hints.get("return"))
-    return _json_response(start_response, 200, {"ok": True, "data": serialized}, set_cookie)
+    # 8. Encode response via devalue
+    try:
+        encoded = devalue.stringify(result)
+    except Exception as e:
+        return _200(start_response, {"type": "error", "status": 500, "error": "encode_failed", "message": str(e)}, set_cookie)
+
+    return _200(start_response, {"type": "result", "result": encoded}, set_cookie)
