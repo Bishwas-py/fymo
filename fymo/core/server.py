@@ -9,7 +9,6 @@ from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
 from fymo.core.template_renderer import TemplateRenderer
 from fymo.core.router import Router
-from fymo.bundler.runtime_builder import ensure_svelte_runtime
 
 
 class FymoApp:
@@ -24,9 +23,6 @@ class FymoApp:
             config: Configuration dictionary
         """
         self.project_root = Path(project_root) if project_root else Path.cwd()
-
-        # Ensure Svelte runtime is built
-        ensure_svelte_runtime(self.project_root)
 
         # Initialize core components
         self.config_manager = ConfigManager(self.project_root, config)

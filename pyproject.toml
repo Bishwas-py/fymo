@@ -13,7 +13,6 @@ authors = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "stpyv8>=13.1.201.22",
     "pyyaml>=6.0",
     "gunicorn>=23.0.0",
     "click>=8.0.0",
@@ -57,7 +56,6 @@ exclude = ["tests*", "examples*"]
 [tool.setuptools.package-data]
 fymo = [
     "cli/templates/**/*",
-    "bundler/js/*.js",
 ]
 
 [tool.pytest.ini_options]
