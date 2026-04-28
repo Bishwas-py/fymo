@@ -110,8 +110,13 @@ class BuildPipeline:
                 if Path(entry_point).name == f"{r.name}.client.js":
                     if str(rel_to_dist).endswith(".js"):
                         client_by_route[r.name] = str(rel_to_dist).replace("\\", "/")
-                    elif str(rel_to_dist).endswith(".css"):
-                        css_by_route[r.name] = str(rel_to_dist).replace("\\", "/")
+                        css_bundle = info.get("cssBundle")
+                        if css_bundle:
+                            try:
+                                css_rel = abs_out(css_bundle).relative_to(dist_dir_abs)
+                                css_by_route[r.name] = str(css_rel).replace("\\", "/")
+                            except ValueError:
+                                pass
 
         # Preload chunks: any output whose path starts with client/chunk-
         chunks = []

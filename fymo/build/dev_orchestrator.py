@@ -116,8 +116,11 @@ class DevOrchestrator:
                     if Path(entry).name == f"{r.name}.client.js":
                         if rel.endswith(".js"):
                             client_by_route[r.name] = rel
-                        elif rel.endswith(".css"):
-                            css_by_route[r.name] = rel
+                            css_bundle = info.get("cssBundle")
+                            if css_bundle:
+                                css_rel = to_rel_dist(css_bundle)
+                                if css_rel:
+                                    css_by_route[r.name] = css_rel
             elif Path(out_path).name.startswith("chunk-") and rel.endswith(".js"):
                 chunks.append(rel)
 
