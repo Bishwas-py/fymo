@@ -1,12 +1,25 @@
 """Shared pytest fixtures for fymo tests."""
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_APP = REPO_ROOT / "examples" / "todo_app"
+VENV_BIN = Path(sys.executable).parent
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _prepend_venv_bin_to_path() -> None:
+    """Ensure the active venv's bin/ is first on PATH so subprocess calls to
+    `fymo` resolve to the same installation as the test runner."""
+    current_path = os.environ.get("PATH", "")
+    venv_bin_str = str(VENV_BIN)
+    if not current_path.startswith(venv_bin_str):
+        os.environ["PATH"] = venv_bin_str + os.pathsep + current_path
 
 
 @pytest.fixture

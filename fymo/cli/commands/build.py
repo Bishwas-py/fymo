@@ -2,27 +2,32 @@
 Build command for Fymo projects
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 from fymo.utils.colors import Color
 from fymo.bundler.runtime_builder import ensure_svelte_runtime
+from fymo.build.pipeline import BuildPipeline, BuildError
 
 
 def build_project(output: str = 'dist', minify: bool = False):
-    """
-    Build the project for production
-    
-    Args:
-        output: Output directory
-        minify: Whether to minify output
-    """
-    Color.print_info(f"Building project to {output}/")
-    
-    # Ensure Svelte runtime is built
+    """Build the project for production."""
     project_root = Path.cwd()
+
+    if os.environ.get("FYMO_NEW_PIPELINE") == "1":
+        Color.print_info("Building with new pipeline (esbuild + Node sidecar)")
+        try:
+            BuildPipeline(project_root=project_root).build(dev=False)
+        except BuildError as e:
+            Color.print_error(str(e))
+            raise SystemExit(1)
+        Color.print_success(f"Built to {project_root / 'dist'}/")
+        return
+
+    # Legacy path
+    Color.print_info(f"Building project to {output}/")
     ensure_svelte_runtime(project_root)
-    
     Color.print_success("Project built successfully!")
 
 
