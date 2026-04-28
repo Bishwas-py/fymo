@@ -64,3 +64,28 @@ def test_total_size_for_typical_page_under_5kb():
     )
     overhead = len(html) - 1000  # body content ~1KB
     assert overhead < 1500, f"HTML overhead {overhead}B is too large"
+
+
+def test_remote_callable_serialized_as_marker(monkeypatch):
+    """A callable from app.remote.* in props should appear as a {__fymo_remote: ...} marker."""
+    import sys, types
+    fake_module = types.ModuleType("app.remote.posts")
+    def create_post(title: str) -> str: return title
+    create_post.__module__ = "app.remote.posts"
+    fake_module.create_post = create_post
+    sys.modules.setdefault("app", types.ModuleType("app"))
+    sys.modules.setdefault("app.remote", types.ModuleType("app.remote"))
+    sys.modules["app.remote.posts"] = fake_module
+
+    from fymo.build.manifest import RouteAssets
+    assets = RouteAssets(ssr="ssr/x.mjs", client="client/x.js", css=None, preload=[])
+    html = build_html(
+        body="",
+        head_extra="",
+        props={"create_post": create_post},
+        assets=assets,
+        title="t",
+        asset_prefix="/dist",
+    )
+    # The marker should appear in the JSON props island
+    assert '"__fymo_remote":"posts/create_post"' in html or '"__fymo_remote": "posts/create_post"' in html
