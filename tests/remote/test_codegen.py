@@ -10,7 +10,7 @@ from fymo.remote.discovery import RemoteFunction
 def _make_fn(module_name: str, fn) -> RemoteFunction:
     sig = inspect.signature(fn)
     hints = typing.get_type_hints(fn)
-    return RemoteFunction(module=module_name, name=fn.__name__, fn=fn, signature=sig, hints=hints)
+    return RemoteFunction(module=module_name, name=fn.__name__, fn=fn, signature=sig, hints=hints, module_hash="0" * 12)
 
 
 def test_emits_js_and_dts(tmp_path: Path):
