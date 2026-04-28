@@ -2,6 +2,7 @@
 Fymo Server - Core WSGI application
 """
 
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -14,30 +15,53 @@ from fymo.bundler.runtime_builder import ensure_svelte_runtime
 
 class FymoApp:
     """Main Fymo application class"""
-    
+
     def __init__(self, project_root: Optional[Path] = None, config: Optional[Dict] = None):
         """
         Initialize Fymo application
-        
+
         Args:
             project_root: Root directory of the project
             config: Configuration dictionary
         """
         self.project_root = Path(project_root) if project_root else Path.cwd()
-        
+
         # Ensure Svelte runtime is built
         ensure_svelte_runtime(self.project_root)
-        
+
         # Initialize core components
         self.config_manager = ConfigManager(self.project_root, config)
         self.asset_manager = AssetManager(self.project_root)
         self.router = self._initialize_router()
         self.template_renderer = TemplateRenderer(
-            self.project_root, 
-            self.config_manager, 
-            self.asset_manager, 
+            self.project_root,
+            self.config_manager,
+            self.asset_manager,
             self.router
         )
+
+        # New pipeline: sidecar + manifest cache
+        self.sidecar = None
+        self.manifest_cache = None
+        if os.environ.get("FYMO_NEW_PIPELINE") == "1":
+            from fymo.core.sidecar import Sidecar
+            from fymo.core.manifest_cache import ManifestCache
+            dist_dir = self.project_root / "dist"
+            if (dist_dir / "sidecar.mjs").is_file():
+                self.sidecar = Sidecar(dist_dir=dist_dir)
+                self.sidecar.start()
+                self.sidecar.ping()  # warm
+                self.manifest_cache = ManifestCache(dist_dir=dist_dir)
+                # Pass to template renderer
+                self.template_renderer.sidecar = self.sidecar
+                self.template_renderer.manifest_cache = self.manifest_cache
+
+    def __del__(self):
+        if getattr(self, 'sidecar', None) is not None:
+            try:
+                self.sidecar.stop()
+            except Exception:
+                pass
     
     def _initialize_router(self) -> Router:
         """Initialize router with appropriate configuration"""

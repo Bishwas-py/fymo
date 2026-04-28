@@ -40,3 +40,19 @@ def test_ping_warms_module_cache(example_app: Path):
         assert sidecar.ping() is True
     finally:
         sidecar.stop()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_render_passes_doc_to_getDoc(example_app: Path):
+    BuildPipeline(project_root=example_app).build(dev=False)
+    sidecar = Sidecar(dist_dir=example_app / "dist")
+    sidecar.start()
+    try:
+        result = sidecar.render(
+            route="todos",
+            props={"todos": [], "user": {}, "stats": {}},
+            doc={"title": "Hello From Doc"},
+        )
+        assert "Document Title: Hello From Doc" in result["body"]
+    finally:
+        sidecar.stop()

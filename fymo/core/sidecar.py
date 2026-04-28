@@ -59,8 +59,11 @@ class Sidecar:
         reply = self._send({"type": "ping"})
         return reply.get("ok") is True
 
-    def render(self, route: str, props: Dict[str, Any]) -> Dict[str, str]:
-        reply = self._send({"type": "render", "route": route, "props": props})
+    def render(self, route: str, props: Dict[str, Any], doc: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+        msg: Dict[str, Any] = {"type": "render", "route": route, "props": props}
+        if doc is not None:
+            msg["doc"] = doc
+        reply = self._send(msg)
         return {"body": reply["body"], "head": reply["head"]}
 
     def _send(self, msg: Dict[str, Any]) -> Dict[str, Any]:

@@ -35,7 +35,19 @@ class TemplateRenderer:
         self.asset_manager = asset_manager
         self.router = router
         self.compiler = SvelteCompiler(project_root)
-        self.runtime = JSRuntime()
+        self._runtime = None  # lazily initialized; use self.runtime property
+        self.sidecar = None
+        self.manifest_cache = None
+
+    @property
+    def runtime(self):
+        if self._runtime is None:
+            self._runtime = JSRuntime()
+        return self._runtime
+
+    @runtime.setter
+    def runtime(self, value):
+        self._runtime = value
     
     def render_template(self, route_path: str) -> Tuple[str, str]:
         """
@@ -48,6 +60,9 @@ class TemplateRenderer:
             Tuple of (html, status_code)
         """
         try:
+            if self.sidecar is not None and self.manifest_cache is not None:
+                return self._render_via_sidecar(route_path)
+
             # Get route info
             route_info = self.router.match(route_path)
             if not route_info:
@@ -124,6 +139,39 @@ class TemplateRenderer:
             print(f"{Color.FAIL}Unexpected error: {str(e)}{Color.ENDC}")
             return f"<div>Server Error: {str(e)}</div>", "500 INTERNAL SERVER ERROR"
     
+    def _render_via_sidecar(self, route_path: str) -> Tuple[str, str]:
+        """New pipeline: render via Node sidecar with prebuilt SSR module."""
+        from fymo.core.sidecar import SidecarError
+        from fymo.core.manifest_cache import ManifestUnavailable
+
+        route_info = self.router.match(route_path)
+        if not route_info:
+            return self._render_404(), "404 NOT FOUND"
+
+        # Map route_info to manifest key. The controller field is e.g. "todos";
+        # if it contains a dot (e.g. "todos.index"), take the part before the dot.
+        controller_key = route_info["controller"]
+        route_name = controller_key.split(".")[0]
+        controller_module = f"app.controllers.{controller_key}"
+        _, props, doc_meta = self._load_controller_data(controller_module)
+
+        try:
+            manifest = self.manifest_cache.get()
+        except ManifestUnavailable as e:
+            return f"<div>Build error: {e}</div>", "500 INTERNAL SERVER ERROR"
+
+        if route_name not in manifest.routes:
+            return f"<div>Route '{route_name}' not in manifest. Run `fymo build`.</div>", "500 INTERNAL SERVER ERROR"
+
+        try:
+            ssr = self.sidecar.render(route_name, props, doc=doc_meta)
+        except SidecarError as e:
+            return f"<div>SSR Error: {e}</div>", "500 INTERNAL SERVER ERROR"
+
+        # Reuse existing _generate_html_page for now (Phase 3 replaces this)
+        full_html = self._generate_html_page(ssr["body"], props, "/* sidecar mode: hydration TBD in phase 3 */", doc_meta)
+        return full_html, "200 OK"
+
     def _load_controller_data(self, controller_module: str) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
         """Load controller and extract context and document metadata"""
         try:
