@@ -3,8 +3,11 @@ virtualenv/
 __pycache__/
 node_modules/
 dist/
+!fymo/bundler/js/dist/
 venv/
 .venv/
 .worktrees/
 .fymo/
 .playwright-mcp/
+*.egg-info/
+build/

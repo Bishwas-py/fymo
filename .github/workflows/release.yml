@@ -1,0 +1,97 @@
+name: Release to PyPI
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # for creating tags
+      id-token: write  # for PyPI trusted publishing
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      - name: Install npm dependencies (root + examples)
+        run: |
+          npm install
+          (cd examples/blog_app && npm install)
+          (cd examples/todo_app && npm install)
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+      - name: Determine version bump from commit message
+        id: version
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%s)
+          CURRENT=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          if echo "$COMMIT_MSG" | grep -qiE '^feat.*!:|^BREAKING'; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            BUMP="major"
+          elif echo "$COMMIT_MSG" | grep -qiE '^feat'; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            BUMP="minor"
+          elif echo "$COMMIT_MSG" | grep -qiE '^(fix|perf|refactor)'; then
+            PATCH=$((PATCH + 1))
+            BUMP="patch"
+          else
+            echo "No version bump needed (commit: $COMMIT_MSG)"
+            echo "bump=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Bumping $CURRENT → $NEW_VERSION ($BUMP)"
+
+      - name: Update version in pyproject.toml
+        if: steps.version.outputs.bump != 'none'
+        run: |
+          sed -i "s/^version = \"${{ steps.version.outputs.current }}\"/version = \"${{ steps.version.outputs.new }}\"/" pyproject.toml
+
+      - name: Build package
+        if: steps.version.outputs.bump != 'none'
+        run: uv build
+
+      - name: Publish to PyPI
+        if: steps.version.outputs.bump != 'none'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+      - name: Tag and push version
+        if: steps.version.outputs.bump != 'none'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new }}"
+          git tag "v${{ steps.version.outputs.new }}"
+          git push origin main --tags

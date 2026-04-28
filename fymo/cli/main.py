@@ -5,7 +5,7 @@ Fymo CLI - Command line interface for Fymo framework
 
 import click
 from pathlib import Path
-from fymo.__version__ import __version__
+from fymo import __version__
 from fymo.utils.colors import Color
 
 
