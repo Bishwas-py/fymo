@@ -95,6 +95,12 @@ def stringify(value: Any) -> str:
             refs[idx - 1] = ["Date", v.isoformat()]
             return idx
 
+        if isinstance(v, (set, frozenset)):
+            # Encode items first, then store the tagged form
+            indices = [_encode(item) for item in v]
+            refs[idx - 1] = ["Set", indices]
+            return idx
+
         raise TypeError(f"devalue cannot stringify {type(v).__name__}")
 
     root_idx = _encode(value)
@@ -131,6 +137,12 @@ def parse(s: str) -> Any:
                 value = date.fromisoformat(iso)
             decoded[idx_or_sentinel] = value
             return value
+        if isinstance(slot, list) and len(slot) == 2 and slot[0] == "Set":
+            placeholder_s: set = set()
+            decoded[idx_or_sentinel] = placeholder_s
+            for ref in slot[1]:
+                placeholder_s.add(_decode(ref))
+            return placeholder_s
         if isinstance(slot, list):
             placeholder: list = []
             decoded[idx_or_sentinel] = placeholder

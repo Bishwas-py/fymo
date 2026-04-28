@@ -142,3 +142,23 @@ def test_bytes_round_trip_as_base64_string():
 def test_str_enum_encodes_as_value():
     parsed = devalue.parse(devalue.stringify(Color.RED))
     assert parsed == "red"
+
+
+def test_set_round_trip():
+    val = {"a", "b", "c"}
+    parsed = devalue.parse(devalue.stringify(val))
+    assert isinstance(parsed, set)
+    assert parsed == val
+
+
+def test_frozenset_round_trip():
+    val = frozenset([1, 2, 3])
+    parsed = devalue.parse(devalue.stringify(val))
+    assert isinstance(parsed, set)  # Decodes back as plain set
+    assert parsed == set(val)
+
+
+def test_set_tagged_format():
+    out = devalue.stringify({"x"})
+    arr = json.loads(out)
+    assert arr[arr[0]][0] == "Set"
