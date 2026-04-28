@@ -42,6 +42,7 @@ dev = [
     "flake8>=5.0",
     "mypy>=1.0",
 ]
+pydantic = ["pydantic>=2.5"]
 
 [project.urls]
 Homepage = "https://github.com/yourusername/fymo"

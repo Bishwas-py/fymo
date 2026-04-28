@@ -134,3 +134,36 @@ def test_idempotent_re_resolution():
     python_type_to_ts(Post, type_defs=defs)
     python_type_to_ts(Post, type_defs=defs)
     assert list(defs.keys()).count("Post") == 1
+
+
+from pydantic import BaseModel, Field
+
+
+class NewComment(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    body: str = Field(min_length=1, max_length=1000)
+    optional_meta: str | None = None
+
+
+def test_pydantic_emits_interface():
+    defs: dict[str, str] = {}
+    name = python_type_to_ts(NewComment, type_defs=defs)
+    assert name == "NewComment"
+    assert "name: string" in defs["NewComment"]
+    assert "body: string" in defs["NewComment"]
+    assert "optional_meta?:" in defs["NewComment"] or "optional_meta: string | null" in defs["NewComment"]
+
+
+def test_pydantic_optional_marked_optional():
+    """Fields with default values should be marked optional in TS."""
+    class Foo(BaseModel):
+        required: str
+        optional_with_default: int = 42
+
+    defs: dict[str, str] = {}
+    python_type_to_ts(Foo, type_defs=defs)
+    iface = defs["Foo"]
+    # Field with default → optional
+    assert "optional_with_default?: number" in iface
+    # Required field → no "?"
+    assert "required: string" in iface and "required?" not in iface

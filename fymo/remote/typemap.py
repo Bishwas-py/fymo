@@ -8,6 +8,13 @@ from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin
 from uuid import UUID
 
+try:
+    import pydantic
+    _has_pydantic = True
+except ImportError:
+    pydantic = None  # type: ignore
+    _has_pydantic = False
+
 
 # Primitive map
 _PRIMITIVES: dict[Any, str] = {
@@ -97,6 +104,27 @@ def _emit_enum(py, type_defs: dict[str, str]) -> str:
     return name
 
 
+def _is_pydantic_model(py) -> bool:
+    return _has_pydantic and isinstance(py, type) and issubclass(py, pydantic.BaseModel)
+
+
+def _emit_pydantic(py, type_defs: dict[str, str]) -> str:
+    name = py.__name__
+    if name in type_defs and not type_defs[name].startswith("<placeholder"):
+        return name
+    type_defs[name] = "<placeholder>"
+    fields = []
+    for fname, finfo in py.model_fields.items():
+        ftype = finfo.annotation
+        ts = python_type_to_ts(ftype, type_defs=type_defs)
+        # Required if no default and not Optional
+        optional = (
+            finfo.default is not pydantic.fields.PydanticUndefined
+        ) or (finfo.default_factory is not None)
+        fields.append((fname, ts, optional))
+    return _emit_interface(name, fields, type_defs)
+
+
 def python_type_to_ts(py: Any, *, type_defs: dict[str, str]) -> str:
     """Return a TypeScript type string for a Python type.
 
@@ -148,6 +176,8 @@ def python_type_to_ts(py: Any, *, type_defs: dict[str, str]) -> str:
                 rendered.append(repr(a))
         return " | ".join(rendered)
 
+    if _is_pydantic_model(py):
+        return _emit_pydantic(py, type_defs)
     if _is_typed_dict(py):
         return _emit_typed_dict(py, type_defs)
     if _is_dataclass(py):
