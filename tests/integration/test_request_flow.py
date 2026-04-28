@@ -107,3 +107,50 @@ def test_response_includes_stylesheet_link_and_css_serves(example_app, monkeypat
     finally:
         if app.sidecar:
             app.sidecar.stop()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_response_includes_doc_island_and_client_assigns_getDoc(example_app, monkeypatch):
+    """Hydration regression: getDoc() must be defined client-side.
+
+    Without this the example app's `<p>Document Title: {docData.title}</p>`
+    throws `ReferenceError: getDoc is not defined` during hydrate().
+    """
+    BuildPipeline(project_root=example_app).build(dev=False)
+
+    from fymo import create_app
+    app = create_app(example_app)
+    try:
+        import io, sys
+        responses = []
+        def sr(s, h):
+            responses.append((s, h))
+        body = b"".join(app({
+            "REQUEST_METHOD": "GET", "PATH_INFO": "/", "QUERY_STRING": "",
+            "SERVER_NAME": "x", "SERVER_PORT": "0", "SERVER_PROTOCOL": "HTTP/1.1",
+            "wsgi.input": io.BytesIO(), "wsgi.errors": sys.stderr, "wsgi.url_scheme": "http",
+        }, sr))
+
+        # HTML must include the doc JSON island
+        assert b'id="svelte-doc"' in body, "no <script id=svelte-doc> in HTML"
+
+        # Client entry bundle must read it and assign globalThis.getDoc
+        import re
+        m = re.search(rb'src="(/dist/client/[^"]+\.js)"', body)
+        assert m is not None
+        bundle_url = m.group(1).decode()
+
+        responses2 = []
+        def sr2(s, h):
+            responses2.append((s, h))
+        bundle_body = b"".join(app({
+            "REQUEST_METHOD": "GET", "PATH_INFO": bundle_url, "QUERY_STRING": "",
+            "SERVER_NAME": "x", "SERVER_PORT": "0", "SERVER_PROTOCOL": "HTTP/1.1",
+            "wsgi.input": io.BytesIO(), "wsgi.errors": sys.stderr, "wsgi.url_scheme": "http",
+        }, sr2))
+        assert responses2[0][0].startswith("200")
+        assert b"svelte-doc" in bundle_body, "client bundle does not read svelte-doc island"
+        assert b"getDoc" in bundle_body, "client bundle does not assign globalThis.getDoc"
+    finally:
+        if app.sidecar:
+            app.sidecar.stop()

@@ -11,6 +11,9 @@ import Component from '{component_import}';
 
 const propsEl = document.getElementById('svelte-props');
 const props = propsEl ? JSON.parse(propsEl.textContent) : {{}};
+const docEl = document.getElementById('svelte-doc');
+const doc = docEl ? JSON.parse(docEl.textContent) : {{}};
+globalThis.getDoc = () => doc;
 const target = document.getElementById('svelte-app');
 
 hydrate(Component, {{ target, props }});

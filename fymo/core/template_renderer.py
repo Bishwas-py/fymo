@@ -101,6 +101,7 @@ class TemplateRenderer:
             props=props,
             assets=manifest.routes[route_name],
             title=title,
+            doc=doc_meta,
         )
         return html, "200 OK"
 

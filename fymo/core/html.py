@@ -27,6 +27,7 @@ def build_html(
     assets: RouteAssets,
     title: str,
     asset_prefix: str = "/dist",
+    doc: Dict[str, Any] = None,
 ) -> str:
     """Render the minimal HTML envelope. Pieces are concatenated with no boilerplate."""
     css_link = (
@@ -36,6 +37,10 @@ def build_html(
     preload = "".join(
         f'<link rel="modulepreload" href="{asset_prefix}/{p}">\n'
         for p in assets.preload
+    )
+    doc_island = (
+        f'<script type="application/json" id="svelte-doc">{_safe_json(doc)}</script>\n'
+        if doc is not None else ""
     )
     return (
         "<!DOCTYPE html>\n"
@@ -52,6 +57,7 @@ def build_html(
         "<body>\n"
         f'<div id="svelte-app">{body}</div>\n'
         f'<script type="application/json" id="svelte-props">{_safe_json(props)}</script>\n'
+        f"{doc_island}"
         f'<script type="module" src="{asset_prefix}/{assets.client}"></script>\n'
         "</body>\n"
         "</html>\n"
