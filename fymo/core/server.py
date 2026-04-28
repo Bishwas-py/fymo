@@ -104,6 +104,15 @@ class FymoApp:
         """WSGI application callable"""
         path = environ.get("PATH_INFO", "/")
         
+        # Handle dist asset requests (content-hashed bundles with immutable caching)
+        if path.startswith("/dist/"):
+            rest = path[len("/dist/"):]
+            body, status, content_type, headers = self.asset_manager.serve_dist_asset(rest)
+            response_headers = [("Content-Type", content_type), ("Content-Length", str(len(body)))]
+            response_headers.extend(headers.items())
+            start_response(status, response_headers)
+            return [body]
+
         # Handle asset requests
         if path.startswith('/assets/'):
             content, status, content_type = self.serve_asset(path)
