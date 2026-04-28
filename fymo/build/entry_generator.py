@@ -14,8 +14,33 @@ const props = propsEl ? JSON.parse(propsEl.textContent) : {{}};
 const docEl = document.getElementById('svelte-doc');
 const doc = docEl ? JSON.parse(docEl.textContent) : {{}};
 globalThis.getDoc = () => doc;
-const target = document.getElementById('svelte-app');
 
+// Inline __resolveRemoteProps so the entry doesn't depend on the codegen
+// runtime existing (apps with no app/remote/ modules don't need it).
+async function __rpc(path, args) {{
+    const res = await fetch('/__remote/' + path, {{
+        method: 'POST', credentials: 'same-origin',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ args }}),
+    }});
+    const payload = await res.json().catch(() => ({{ ok: false, error: 'invalid_json' }}));
+    if (payload.ok) return payload.data;
+    const err = new Error(payload.message || payload.error);
+    err.status = res.status; err.error = payload.error; err.issues = payload.issues;
+    throw err;
+}}
+function __resolveRemoteProps(p) {{
+    for (const k in p) {{
+        const v = p[k];
+        if (v && typeof v === 'object' && v.__fymo_remote) {{
+            const path = v.__fymo_remote;
+            p[k] = (...args) => __rpc(path, args);
+        }}
+    }}
+}}
+__resolveRemoteProps(props);
+
+const target = document.getElementById('svelte-app');
 hydrate(Component, {{ target, props }});
 """
 
