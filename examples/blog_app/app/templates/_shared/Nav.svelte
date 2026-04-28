@@ -14,6 +14,24 @@
 </nav>
 
 <style>
+  /* Theme tokens — defined here so they apply to every route that includes <Nav />. */
+  :global(:root) {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e;
+    --rule: #21262d; --card: #161b22; --accent: #58a6ff;
+    --code-bg: #161b22;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  :global(:root[data-theme="light"]) {
+    --bg: #ffffff; --fg: #1f2328; --muted: #57606a;
+    --rule: #d0d7de; --card: #f6f8fa; --accent: #0969da; --code-bg: #f6f8fa;
+  }
+  :global(body) {
+    background: var(--bg); color: var(--fg);
+    margin: 0 auto; max-width: 720px; padding: 0 1.5rem 6rem;
+  }
+  :global(h1, h2, h3) { letter-spacing: -0.02em; }
+  :global(a) { color: var(--accent); text-decoration: none; }
+
   nav {
     display: flex;
     justify-content: space-between;
