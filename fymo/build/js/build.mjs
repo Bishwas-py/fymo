@@ -42,6 +42,30 @@ async function buildServer() {
     });
 }
 
+async function buildClient() {
+    const entryPoints = Object.fromEntries(
+        Object.entries(config.clientEntries).map(([name, p]) => [name, p])
+    );
+    return await build({
+        entryPoints,
+        outdir: path.join(config.distDir, 'client'),
+        format: 'esm',
+        platform: 'browser',
+        bundle: true,
+        splitting: true,
+        entryNames: '[name].[hash]',
+        chunkNames: 'chunk-[name].[hash]',
+        assetNames: '[name].[hash]',
+        minify: !config.dev,
+        sourcemap: config.dev ? 'linked' : false,
+        metafile: true,
+        plugins: [sveltePlugin({
+            compilerOptions: { generate: 'client', dev: false },
+        })],
+        logLevel: 'silent',
+    });
+}
+
 async function copySidecar() {
     const src = path.join(__dirname, 'sidecar.mjs');
     const dst = path.join(config.distDir, 'sidecar.mjs');
@@ -52,8 +76,9 @@ async function copySidecar() {
 try {
     await fs.mkdir(config.distDir, { recursive: true });
     const server = await buildServer();
+    const client = await buildClient();
     await copySidecar();
-    process.stdout.write(JSON.stringify({ ok: true, server: server.metafile }));
+    process.stdout.write(JSON.stringify({ ok: true, server: server.metafile, client: client.metafile }));
 } catch (err) {
     process.stdout.write(JSON.stringify({
         ok: false,
