@@ -6,37 +6,49 @@ from fymo.remote.typemap import python_type_to_ts
 
 
 _RUNTIME_JS = '''// AUTO-GENERATED. Do not edit. Fymo remote-functions client runtime.
+import { stringify, parse } from 'devalue';
+
 const REMOTE_MARKER = "__fymo_remote";
 
-export async function __rpc(path, args) {
-    const res = await fetch("/__remote/" + path, {
+function b64url(s) {
+    return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+export async function __rpc(hash, name, args) {
+    const url = `/_fymo/remote/${hash}/${name}`;
+    const payload = b64url(stringify(args));
+    const res = await fetch(url, {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ args }),
+        body: JSON.stringify({ payload }),
     });
-    let payload;
-    try {
-        payload = await res.json();
-    } catch (e) {
-        throw new Error("invalid JSON response from " + path);
+    let env;
+    try { env = await res.json(); }
+    catch (e) { throw new Error("invalid response from " + url); }
+    if (env.type === "redirect") {
+        window.location.href = env.location;
+        return;
     }
-    if (payload.ok) return payload.data;
-    const err = new Error(payload.message || payload.error || "remote_error");
-    err.status = res.status;
-    err.error = payload.error;
-    err.issues = payload.issues;
-    throw err;
+    if (env.type === "error") {
+        const e = new Error(env.error || "remote_error");
+        e.status = env.status;
+        e.error = env.error;
+        e.issues = env.issues;
+        throw e;
+    }
+    return parse(env.result);
 }
 
-// Replaces marker objects in props (emitted by SSR for callable props from
-// app/remote/*) with real fetch wrappers, in place.
+// Replaces marker objects in props (emitted by SSR) with real fetch wrappers.
 export function __resolveRemoteProps(props) {
     for (const key in props) {
         const v = props[key];
         if (v && typeof v === "object" && v[REMOTE_MARKER]) {
-            const path = v[REMOTE_MARKER];
-            props[key] = (...args) => __rpc(path, args);
+            const sep = v[REMOTE_MARKER].indexOf("/");
+            const hash = v[REMOTE_MARKER].slice(0, sep);
+            const name = v[REMOTE_MARKER].slice(sep + 1);
+            props[key] = (...args) => __rpc(hash, name, args);
         }
     }
     return props;
@@ -62,7 +74,7 @@ def _format_function_js(fn: RemoteFunction) -> str:
     pnames = list(fn.signature.parameters.keys())
     params = ", ".join(pnames)
     args = "[" + ", ".join(pnames) + "]"
-    return f"export const {fn.name} = ({params}) => __rpc('{fn.module}/{fn.name}', {args});"
+    return f"export const {fn.name} = ({params}) => __rpc(HASH, '{fn.name}', {args});"
 
 
 def emit_module(module_name: str, fns: dict[str, RemoteFunction], out_dir: Path) -> None:
@@ -86,9 +98,12 @@ def emit_module(module_name: str, fns: dict[str, RemoteFunction], out_dir: Path)
     dts_lines.extend(dts_fn_lines)
     (out_dir / f"{module_name}.d.ts").write_text("\n".join(dts_lines) + "\n")
 
+    # Determine the hash from any fn (they all share the same module_hash)
+    any_fn = next(iter(fns.values()))
     js_lines = [
         f"// AUTO-GENERATED. Do not edit. Source: app/remote/{module_name}.py",
         "import { __rpc } from './__runtime.js';",
+        f"const HASH = '{any_fn.module_hash}';",
         "",
     ]
     for fn in fns.values():

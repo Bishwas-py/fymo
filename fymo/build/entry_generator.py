@@ -7,6 +7,7 @@ from fymo.build.discovery import Route
 
 CLIENT_ENTRY_TEMPLATE = """\
 import {{ hydrate }} from 'svelte';
+import {{ stringify, parse }} from 'devalue';
 import Component from '{component_import}';
 
 const propsEl = document.getElementById('svelte-props');
@@ -15,26 +16,34 @@ const docEl = document.getElementById('svelte-doc');
 const doc = docEl ? JSON.parse(docEl.textContent) : {{}};
 globalThis.getDoc = () => doc;
 
-// Inline __resolveRemoteProps so the entry doesn't depend on the codegen
-// runtime existing (apps with no app/remote/ modules don't need it).
-async function __rpc(path, args) {{
-    const res = await fetch('/__remote/' + path, {{
+function b64url(s) {{
+    return btoa(s).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+}}
+async function __rpc(hash, name, args) {{
+    const res = await fetch(`/_fymo/remote/${{hash}}/${{name}}`, {{
         method: 'POST', credentials: 'same-origin',
         headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ args }}),
+        body: JSON.stringify({{ payload: b64url(stringify(args)) }}),
     }});
-    const payload = await res.json().catch(() => ({{ ok: false, error: 'invalid_json' }}));
-    if (payload.ok) return payload.data;
-    const err = new Error(payload.message || payload.error);
-    err.status = res.status; err.error = payload.error; err.issues = payload.issues;
-    throw err;
+    let env;
+    try {{ env = await res.json(); }}
+    catch (e) {{ throw new Error('invalid response'); }}
+    if (env.type === 'redirect') {{ window.location.href = env.location; return; }}
+    if (env.type === 'error') {{
+        const e = new Error(env.error);
+        e.status = env.status; e.error = env.error; e.issues = env.issues;
+        throw e;
+    }}
+    return parse(env.result);
 }}
 function __resolveRemoteProps(p) {{
     for (const k in p) {{
         const v = p[k];
         if (v && typeof v === 'object' && v.__fymo_remote) {{
-            const path = v.__fymo_remote;
-            p[k] = (...args) => __rpc(path, args);
+            const sep = v.__fymo_remote.indexOf('/');
+            const hash = v.__fymo_remote.slice(0, sep);
+            const name = v.__fymo_remote.slice(sep + 1);
+            p[k] = (...args) => __rpc(hash, name, args);
         }}
     }}
 }}

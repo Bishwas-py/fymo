@@ -40,3 +40,27 @@ def test_read_rejects_unknown_version(tmp_path: Path):
     import pytest
     with pytest.raises(ValueError, match="version"):
         Manifest.read(out)
+
+
+def test_manifest_carries_remote_modules(tmp_path: Path):
+    from fymo.build.manifest import Manifest, RouteAssets, RemoteModuleAssets
+    m = Manifest(
+        routes={"home": RouteAssets(ssr="ssr/home.mjs", client="client/home.A.js", css=None, preload=[])},
+        remote_modules={"posts": RemoteModuleAssets(hash="abc123def456", fns=["hello", "goodbye"])},
+    )
+    out = tmp_path / "manifest.json"
+    m.write(out)
+    loaded = Manifest.read(out)
+    assert loaded == m
+    assert loaded.remote_modules["posts"].hash == "abc123def456"
+    assert loaded.remote_modules["posts"].fns == ["hello", "goodbye"]
+
+
+def test_manifest_remote_modules_optional(tmp_path: Path):
+    """Apps without app/remote/ should still produce valid manifests (empty dict)."""
+    from fymo.build.manifest import Manifest, RouteAssets
+    m = Manifest(routes={"home": RouteAssets(ssr="ssr/home.mjs", client="client/home.A.js", css=None, preload=[])})
+    out = tmp_path / "manifest.json"
+    m.write(out)
+    loaded = Manifest.read(out)
+    assert loaded.remote_modules == {}

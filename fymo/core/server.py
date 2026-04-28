@@ -62,6 +62,8 @@ class FymoApp:
             self.sidecar.start()
             self.sidecar.ping()
             self.manifest_cache = ManifestCache(dist_dir=dist_dir)
+            from fymo.core.manifest_cache import set_shared_cache
+            set_shared_cache(self.manifest_cache)
             self.template_renderer.sidecar = self.sidecar
             self.template_renderer.manifest_cache = self.manifest_cache
         else:
@@ -145,9 +147,11 @@ class FymoApp:
         """WSGI application callable"""
         path = environ.get("PATH_INFO", "/")
 
-        if path.startswith("/__remote/"):
-            from fymo.remote.router import handle_remote
-            return handle_remote(environ, start_response)
+        if path.startswith("/_fymo/remote/"):
+            from fymo.remote import router as router_mod
+            if getattr(self, "manifest_cache", None) is not None:
+                router_mod._resolve_module_for_hash = self.manifest_cache.module_for_hash
+            return router_mod.handle_remote(environ, start_response)
 
         if path == "/_dev/reload":
             return self._dev_sse(start_response)

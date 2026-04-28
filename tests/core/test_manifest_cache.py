@@ -28,3 +28,17 @@ def test_raises_if_manifest_missing(tmp_path: Path):
     cache = ManifestCache(tmp_path)
     with pytest.raises(ManifestUnavailable):
         cache.get()
+
+
+def test_module_for_hash_round_trip(tmp_path: Path):
+    from fymo.build.manifest import Manifest, RouteAssets, RemoteModuleAssets
+    Manifest(
+        routes={"home": RouteAssets(ssr="ssr/home.mjs", client="client/home.A.js", css=None, preload=[])},
+        remote_modules={"posts": RemoteModuleAssets(hash="abc123def456", fns=["hello"])},
+    ).write(tmp_path / "manifest.json")
+
+    cache = ManifestCache(tmp_path)
+    assert cache.module_for_hash("abc123def456") == "posts"
+    assert cache.module_for_hash("nonexistent") is None
+    assert cache.get_remote_hash("posts") == "abc123def456"
+    assert cache.get_remote_hash("missing") is None

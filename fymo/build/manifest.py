@@ -18,15 +18,23 @@ class RouteAssets:
 
 
 @dataclass(frozen=True)
+class RemoteModuleAssets:
+    hash: str
+    fns: List[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Manifest:
     routes: Dict[str, RouteAssets]
     build_time: str = ""
+    remote_modules: Dict[str, RemoteModuleAssets] = field(default_factory=dict)
 
     def write(self, path: Path) -> None:
         data = {
             "version": MANIFEST_VERSION,
             "buildTime": self.build_time,
             "routes": {name: asdict(r) for name, r in self.routes.items()},
+            "remote_modules": {name: asdict(m) for name, m in self.remote_modules.items()},
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
@@ -52,4 +60,8 @@ class Manifest:
             )
             for name, r in data.get("routes", {}).items()
         }
-        return cls(routes=routes, build_time=data.get("buildTime", ""))
+        remote_modules = {
+            name: RemoteModuleAssets(hash=m["hash"], fns=list(m.get("fns", [])))
+            for name, m in data.get("remote_modules", {}).items()
+        }
+        return cls(routes=routes, build_time=data.get("buildTime", ""), remote_modules=remote_modules)

@@ -86,3 +86,50 @@ def test_raises_on_untyped_parameter(tmp_path: Path):
         for name in list(sys.modules):
             if name.startswith("app."):
                 del sys.modules[name]
+
+
+def test_remote_function_includes_module_hash(tmp_path: Path):
+    project = _scaffold(tmp_path, {
+        "app/__init__.py": "",
+        "app/remote/__init__.py": "",
+        "app/remote/posts.py": "def hello(name: str) -> str: return name\n",
+    })
+    sys.path.insert(0, str(project))
+    try:
+        result = discover_remote_modules(project)
+        fn = result["posts"]["hello"]
+        assert hasattr(fn, "module_hash")
+        assert isinstance(fn.module_hash, str)
+        assert len(fn.module_hash) == 12
+        # Same source → same hash
+        result2 = discover_remote_modules(project)
+        assert result2["posts"]["hello"].module_hash == fn.module_hash
+    finally:
+        sys.path.remove(str(project))
+        for name in list(sys.modules):
+            if name.startswith("app."):
+                del sys.modules[name]
+
+
+def test_module_hash_changes_with_source(tmp_path: Path):
+    project = _scaffold(tmp_path, {
+        "app/__init__.py": "",
+        "app/remote/__init__.py": "",
+        "app/remote/posts.py": "def a(s: str) -> str: return s\n",
+    })
+    sys.path.insert(0, str(project))
+    try:
+        h1 = discover_remote_modules(project)["posts"]["a"].module_hash
+        # Edit the file
+        (project / "app" / "remote" / "posts.py").write_text("def a(s: str) -> str: return s + '!'\n")
+        # Force a fresh import
+        for name in list(sys.modules):
+            if name.startswith("app."):
+                del sys.modules[name]
+        h2 = discover_remote_modules(project)["posts"]["a"].module_hash
+        assert h1 != h2
+    finally:
+        sys.path.remove(str(project))
+        for name in list(sys.modules):
+            if name.startswith("app."):
+                del sys.modules[name]

@@ -9,7 +9,7 @@ from typing import Optional
 
 from fymo.build.discovery import discover_routes
 from fymo.build.entry_generator import write_client_entries
-from fymo.build.manifest import Manifest, RouteAssets
+from fymo.build.manifest import Manifest, RouteAssets, RemoteModuleAssets
 from fymo.remote.discovery import discover_remote_modules
 from fymo.remote.codegen import emit_module, emit_runtime
 
@@ -63,6 +63,16 @@ class BuildPipeline:
             for module_name, fns in remote_modules.items():
                 emit_module(module_name, fns, remote_out)
 
+        remote_assets: dict[str, RemoteModuleAssets] = {}
+        for module_name, fns in remote_modules.items():
+            if not fns:
+                continue
+            any_fn = next(iter(fns.values()))
+            remote_assets[module_name] = RemoteModuleAssets(
+                hash=any_fn.module_hash,
+                fns=sorted(fns.keys()),
+            )
+
         config = {
             "projectRoot": str(self.project_root),
             "distDir": str(self.dist_dir),
@@ -97,11 +107,11 @@ class BuildPipeline:
         if not result.get("ok"):
             raise BuildError(f"build failed: {result.get('error')}\n{result.get('stack', '')}")
 
-        manifest = self._build_manifest(routes, result)
+        manifest = self._build_manifest(routes, result, remote_assets)
         manifest.write(self.dist_dir / "manifest.json")
         return BuildResult(ok=True, manifest_path=self.dist_dir / "manifest.json")
 
-    def _build_manifest(self, routes, esbuild_result) -> Manifest:
+    def _build_manifest(self, routes, esbuild_result, remote_assets: dict | None = None) -> Manifest:
         # Resolve hashed client filenames from the metafile.
         client_meta = esbuild_result.get("client", {}).get("outputs", {})
         # esbuild metafile keys are relative to the project root (its cwd).
@@ -163,4 +173,5 @@ class BuildPipeline:
         return Manifest(
             routes=route_assets,
             build_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            remote_modules=remote_assets or {},
         )

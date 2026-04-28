@@ -4,13 +4,29 @@ from typing import Any, Dict
 from fymo.build.manifest import RouteAssets
 
 
+def _lookup_remote_hash(module_name: str) -> str | None:
+    """Look up a remote module's hash from the manifest. Overridable in tests."""
+    from fymo.core.manifest_cache import _SHARED_CACHE
+    if _SHARED_CACHE is None:
+        return None
+    try:
+        return _SHARED_CACHE.get_remote_hash(module_name)
+    except Exception:
+        return None
+
+
 def _remote_marker(obj):
-    """If obj is a callable from app.remote.*, return its marker dict; else raise."""
-    mod = getattr(obj, "__module__", None)
-    if mod and mod.startswith("app.remote.") and callable(obj):
-        module_name = mod[len("app.remote."):]
-        return {"__fymo_remote": f"{module_name}/{obj.__name__}"}
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+    mod_name = getattr(obj, "__module__", None)
+    if not (mod_name and mod_name.startswith("app.remote.") and callable(obj)):
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+    short = mod_name[len("app.remote."):]
+    hash_ = _lookup_remote_hash(short)
+    if not hash_:
+        raise TypeError(
+            f"remote module 'app.remote.{short}' has no hash in manifest "
+            f"(did you forget to run `fymo build`?)"
+        )
+    return {"__fymo_remote": f"{hash_}/{obj.__name__}"}
 
 
 def _safe_json(obj: Any) -> str:

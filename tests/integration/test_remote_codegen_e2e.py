@@ -1,4 +1,5 @@
 """End-to-end: BuildPipeline must produce .js + .d.ts under dist/client/_remote/."""
+import json
 import shutil
 from pathlib import Path
 import pytest
@@ -24,4 +25,14 @@ def test_build_emits_remote_artifacts(example_app: Path):
 
     js = (out / "test_mod.js").read_text()
     assert "export const hello" in js
-    assert "test_mod/hello" in js
+    # New wire: hash baked into the emitted module, RPC dispatch via __rpc(HASH, fn, args).
+    assert "const HASH = '" in js
+    assert "__rpc(HASH, 'hello'," in js
+
+    # The manifest carries the remote module's hash + fn list so the runtime
+    # can resolve the path on the server side.
+    manifest = json.loads((example_app / "dist" / "manifest.json").read_text())
+    assert "remote_modules" in manifest
+    assert "test_mod" in manifest["remote_modules"]
+    assert len(manifest["remote_modules"]["test_mod"]["hash"]) == 12
+    assert "hello" in manifest["remote_modules"]["test_mod"]["fns"]

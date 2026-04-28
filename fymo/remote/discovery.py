@@ -1,10 +1,16 @@
 """Discover and introspect functions in app/remote/*.py."""
+import hashlib
 import importlib
 import inspect
 import typing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+
+def file_hash(path: Path) -> str:
+    """Return a 12-char lowercase hex SHA-256 prefix of the file's contents."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
 
 
 @dataclass(frozen=True)
@@ -15,6 +21,7 @@ class RemoteFunction:
     fn: Callable[..., Any]
     signature: inspect.Signature
     hints: dict[str, Any]  # includes 'return' if annotated
+    module_hash: str
 
 
 def _ensure_parent_packages(project_root: Path) -> None:
@@ -64,6 +71,7 @@ def discover_remote_modules(project_root: Path) -> dict[str, dict[str, RemoteFun
         if py.name == "__init__.py" or py.stem.startswith("_"):
             continue
         module_name = py.stem
+        mod_hash = file_hash(py)
         full = f"app.remote.{module_name}"
         if full in importlib.sys.modules:
             mod = importlib.reload(importlib.sys.modules[full])
@@ -94,7 +102,8 @@ def discover_remote_modules(project_root: Path) -> dict[str, dict[str, RemoteFun
                         f"{pname!r} of function {name!r}"
                     )
             fns[name] = RemoteFunction(
-                module=module_name, name=name, fn=obj, signature=sig, hints=hints
+                module=module_name, name=name, fn=obj, signature=sig, hints=hints,
+                module_hash=mod_hash,
             )
         out[module_name] = fns
     return out
