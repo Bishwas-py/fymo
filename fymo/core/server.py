@@ -137,6 +137,10 @@ class FymoApp:
             set_shared_cache(self.manifest_cache)
             self.template_renderer.sidecar = self.sidecar
             self.template_renderer.manifest_cache = self.manifest_cache
+            # Reap the Node child on normal interpreter shutdown so we don't
+            # leave orphan processes behind. Covers gunicorn worker exits,
+            # Ctrl-C, and any sys.exit() path that lets atexit fire.
+            self._register_shutdown()
         else:
             # Fail fast at startup with a clear message; the legacy template
             # renderer path will not work either without manifest+sidecar in
@@ -144,6 +148,65 @@ class FymoApp:
             raise RuntimeError(
                 f"dist/ not found at {dist_dir}. Run `fymo build` first."
             )
+
+    def _register_shutdown(self) -> None:
+        """Best-effort cleanup on interpreter exit + SIGTERM/SIGINT.
+
+        atexit handles normal exits (gunicorn worker shutdown, sys.exit,
+        Ctrl-C → KeyboardInterrupt → exit). Signal handlers cover SIGTERM
+        delivered without going through Python's exception handling
+        (e.g. `kill <pid>` against a long-running gunicorn worker).
+        """
+        import atexit
+        import signal
+        import threading
+
+        # Avoid registering twice if FymoApp is constructed multiple times in
+        # the same process (rare, but happens in tests).
+        if getattr(self, "_shutdown_registered", False):
+            return
+        self._shutdown_registered = True
+
+        def _shutdown() -> None:
+            sc = getattr(self, "sidecar", None)
+            if sc is None:
+                return
+            try:
+                sc.stop()
+            except Exception:
+                pass
+
+        atexit.register(_shutdown)
+
+        # Signal handlers must be installed from the main thread. WSGI
+        # workers usually run in the main thread; if not, skip silently.
+        if threading.current_thread() is not threading.main_thread():
+            return
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                prior = signal.getsignal(sig)
+            except (ValueError, OSError):
+                continue
+
+            def _handler(signum, frame, _prior=prior):
+                _shutdown()
+                # Chain to whatever was installed before us so frameworks
+                # like gunicorn keep their own SIGTERM behavior.
+                if callable(_prior) and _prior not in (signal.SIG_DFL, signal.SIG_IGN):
+                    try:
+                        _prior(signum, frame)
+                        return
+                    except Exception:
+                        pass
+                # Default behavior: re-raise the signal so the process exits
+                # with the conventional 128+signum status.
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+
+            try:
+                signal.signal(sig, _handler)
+            except (ValueError, OSError):
+                pass
 
     def __del__(self):
         if getattr(self, 'sidecar', None) is not None:
