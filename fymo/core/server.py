@@ -224,6 +224,10 @@ class FymoApp:
                 router_mod._resolve_module_for_hash = self.manifest_cache.module_for_hash
             return router_mod.handle_remote(environ, start_response)
 
+        if path.startswith("/_fymo/data/"):
+            from fymo.core.soft_nav import handle_data
+            return handle_data(self, environ, start_response)
+
         if path == "/_dev/reload":
             return self._dev_sse(start_response)
 

@@ -6,15 +6,26 @@ from fymo.build.discovery import Route
 
 
 CLIENT_ENTRY_TEMPLATE = """\
-import {{ hydrate }} from 'svelte';
+import {{ hydrate, mount, unmount }} from 'svelte';
 import {{ stringify, parse }} from 'devalue';
 import Component from '{component_import}';
 
+// Re-export the route's Svelte component so the soft-nav router can
+// dynamic-`import()` this bundle later and pluck `.default` without
+// re-running the boot logic below.
+export default Component;
+
+// Boot only on the FIRST script load. When softNav dynamic-imports another
+// route's bundle, this guard skips the hydrate + listener setup; the new
+// bundle just contributes its component default to the import cache.
+if (typeof window !== 'undefined' && !window.__fymoBooted) {{
+window.__fymoBooted = true;
+
 const propsEl = document.getElementById('svelte-props');
-const props = propsEl ? JSON.parse(propsEl.textContent) : {{}};
+const initialProps = propsEl ? JSON.parse(propsEl.textContent) : {{}};
 const docEl = document.getElementById('svelte-doc');
-const doc = docEl ? JSON.parse(docEl.textContent) : {{}};
-globalThis.getDoc = () => doc;
+let currentDoc = docEl ? JSON.parse(docEl.textContent) : {{}};
+globalThis.getDoc = () => currentDoc;
 
 function b64url(s) {{
     return btoa(s).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -46,11 +57,110 @@ function __resolveRemoteProps(p) {{
             p[k] = (...args) => __rpc(hash, name, args);
         }}
     }}
+    return p;
 }}
-__resolveRemoteProps(props);
+__resolveRemoteProps(initialProps);
 
+// --- Soft navigation ---
 const target = document.getElementById('svelte-app');
-hydrate(Component, {{ target, props }});
+let currentMount = hydrate(Component, {{ target, props: initialProps }});
+let inflight = null;
+
+const loadedCss = new Set();
+function ensureCss(url) {{
+    if (loadedCss.has(url)) return Promise.resolve();
+    if (document.querySelector(`link[rel="stylesheet"][href="${{url}}"]`)) {{
+        loadedCss.add(url);
+        return Promise.resolve();
+    }}
+    return new Promise((resolve, reject) => {{
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = url;
+        link.onload = () => {{ loadedCss.add(url); resolve(); }};
+        link.onerror = () => reject(new Error('failed to load ' + url));
+        document.head.appendChild(link);
+    }});
+}}
+
+async function softNav(path, push = true) {{
+    if (inflight) inflight.abort();
+    const ctrl = new AbortController();
+    inflight = ctrl;
+    let res;
+    try {{
+        res = await fetch('/_fymo/data' + path, {{ signal: ctrl.signal, credentials: 'same-origin' }});
+    }} catch (e) {{
+        if (e.name === 'AbortError') return;
+        window.location.href = path;
+        return;
+    }}
+    let env;
+    try {{ env = await res.json(); }}
+    catch (e) {{ window.location.href = path; return; }}
+    if (env.type === 'error') {{ window.location.href = path; return; }}
+    inflight = null;
+
+    const data = parse(env.result);
+    const leaf = data.leaf;
+
+    // Block on CSS to avoid FOUC.
+    if (leaf.css && leaf.css.length) {{
+        try {{ await Promise.all(leaf.css.map(ensureCss)); }} catch (_) {{}}
+    }}
+
+    let mod;
+    try {{ mod = await import(leaf.module); }}
+    catch (e) {{ window.location.href = path; return; }}
+    const NewComponent = mod.default;
+    if (!NewComponent) {{ window.location.href = path; return; }}
+
+    __resolveRemoteProps(leaf.props);
+
+    if (currentMount) {{
+        try {{ unmount(currentMount); }} catch (_) {{}}
+    }}
+    target.innerHTML = '';
+    currentMount = mount(NewComponent, {{ target, props: leaf.props }});
+
+    currentDoc = data.doc || {{}};
+    if (data.title) document.title = data.title;
+    if (push) history.pushState({{ path }}, '', path);
+    window.scrollTo(0, 0);
+    window.dispatchEvent(new CustomEvent('fymo:navigate', {{ detail: {{ path, leaf }} }}));
+}}
+
+function shouldIntercept(a, e) {{
+    if (e.defaultPrevented) return false;
+    if (e.button !== 0) return false;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return false;
+    if (!a || a.tagName !== 'A') return false;
+    if (a.target && a.target !== '_self') return false;
+    if (a.hasAttribute('download')) return false;
+    if (a.dataset.fymoReload !== undefined) return false;
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('#')) return false;
+    let url;
+    try {{ url = new URL(a.href, window.location.origin); }}
+    catch (_) {{ return false; }}
+    if (url.origin !== window.location.origin) return false;
+    if (url.pathname === window.location.pathname &&
+        url.search === window.location.search) return false;
+    return url;
+}}
+
+document.addEventListener('click', (e) => {{
+    const a = e.target && e.target.closest && e.target.closest('a');
+    const url = shouldIntercept(a, e);
+    if (!url) return;
+    e.preventDefault();
+    softNav(url.pathname + url.search, true);
+}});
+
+window.addEventListener('popstate', () => {{
+    softNav(window.location.pathname + window.location.search, false);
+}});
+}}  // end !window.__fymoBooted guard
 """
 
 SSE_SNIPPET = """
