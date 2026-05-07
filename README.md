@@ -17,6 +17,11 @@
 
 ## Quick Start
 
+### Prerequisites
+
+- Python 3.11+
+- Node.js 20+ (Fymo's bundler shells out to esbuild)
+
 ### Installation
 
 ```bash
@@ -28,12 +33,6 @@ pip install fymo
 ```bash
 fymo new my-app
 cd my-app
-```
-
-### Install Dependencies
-
-```bash
-pip install -r requirements.txt
 npm install
 ```
 

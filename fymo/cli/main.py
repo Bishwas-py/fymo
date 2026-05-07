@@ -26,15 +26,6 @@ def new(name, template):
 
 
 @cli.command()
-@click.argument('type', type=click.Choice(['component', 'controller', 'model']))
-@click.argument('name')
-def generate(type, name):
-    """Generate a new component, controller, or model"""
-    from fymo.cli.commands.generate import generate_item
-    generate_item(type, name)
-
-
-@cli.command()
 @click.option('--host', '-h', default='127.0.0.1', help='Host to bind to')
 @click.option('--port', '-p', default=8000, type=int, help='Port to bind to')
 @click.option('--reload', '-r', is_flag=True, default=True, help='Enable auto-reload')

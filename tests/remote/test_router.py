@@ -141,3 +141,64 @@ def test_uid_cookie_issued_on_first_call(remote_project):
     set_cookie = next((v for k, v in headers if k.lower() == "set-cookie"), None)
     assert set_cookie is not None
     assert "fymo_uid=" in set_cookie
+
+
+def test_uid_cookie_secure_flag_only_on_https(remote_project):
+    """Secure flag must be present over https and absent over http."""
+    proj, h = remote_project
+    # http: no Secure
+    env = _make_environ(f"/_fymo/remote/{h}/whoami", [], scheme="http", origin="http://x")
+    (_, headers), _ = _call(env)
+    cookie = next(v for k, v in headers if k.lower() == "set-cookie")
+    assert "Secure" not in cookie
+    # https: Secure present
+    env = _make_environ(f"/_fymo/remote/{h}/whoami", [], scheme="https", origin="https://x")
+    (_, headers), _ = _call(env)
+    cookie = next(v for k, v in headers if k.lower() == "set-cookie")
+    assert "Secure" in cookie
+
+
+def test_500_omits_traceback_when_dev_mode_off(remote_project, monkeypatch):
+    """In production (default), internal-error responses must not leak traceback or message."""
+    proj, h = remote_project
+    from fymo.remote import router as router_mod
+    monkeypatch.setattr(router_mod, "_dev_mode", False)
+    # Wire a function that raises a non-RemoteError exception
+    (proj / "app/remote/posts.py").write_text(
+        "def explode() -> str: raise RuntimeError('secret internal detail')\n"
+    )
+    # Recompute hash since we rewrote the file
+    from fymo.remote.discovery import file_hash
+    new_h = file_hash(proj / "app/remote/posts.py")
+    monkeypatch.setattr(router_mod, "_resolve_module_for_hash", lambda hash_: "posts" if hash_ == new_h else None)
+    # Force module reimport
+    for name in list(sys.modules):
+        if name == "app" or name.startswith("app."):
+            del sys.modules[name]
+    env = _make_environ(f"/_fymo/remote/{new_h}/explode", [], host="x", origin="http://x")
+    (_, _), body = _call(env)
+    assert body == {"type": "error", "status": 500, "error": "internal"}
+    # No traceback, no message — opaque
+    assert "traceback" not in body
+    assert "message" not in body
+
+
+def test_500_includes_traceback_when_dev_mode_on(remote_project, monkeypatch):
+    proj, h = remote_project
+    from fymo.remote import router as router_mod
+    monkeypatch.setattr(router_mod, "_dev_mode", True)
+    (proj / "app/remote/posts.py").write_text(
+        "def explode() -> str: raise RuntimeError('explosion details')\n"
+    )
+    from fymo.remote.discovery import file_hash
+    new_h = file_hash(proj / "app/remote/posts.py")
+    monkeypatch.setattr(router_mod, "_resolve_module_for_hash", lambda hash_: "posts" if hash_ == new_h else None)
+    for name in list(sys.modules):
+        if name == "app" or name.startswith("app."):
+            del sys.modules[name]
+    env = _make_environ(f"/_fymo/remote/{new_h}/explode", [], host="x", origin="http://x")
+    (_, _), body = _call(env)
+    assert body["type"] == "error"
+    assert body["status"] == 500
+    assert "explosion details" in body.get("message", "")
+    assert "Traceback" in body.get("traceback", "")

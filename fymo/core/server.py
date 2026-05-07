@@ -2,6 +2,7 @@
 Fymo Server - Core WSGI application
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -12,18 +13,36 @@ from fymo.core.template_renderer import TemplateRenderer
 from fymo.core.router import Router
 
 
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
+
+
 class FymoApp:
     """Main Fymo application class"""
 
-    def __init__(self, project_root: Optional[Path] = None, config: Optional[Dict] = None):
+    def __init__(
+        self,
+        project_root: Optional[Path] = None,
+        config: Optional[Dict] = None,
+        dev: Optional[bool] = None,
+    ):
         """
         Initialize Fymo application
 
         Args:
             project_root: Root directory of the project
             config: Configuration dictionary
+            dev: Dev mode flag. If None, reads FYMO_DEV env var (default False).
+                 When True: 500 responses include tracebacks; cookies omit Secure flag
+                 even on https; verbose logging. Production must leave dev=False.
         """
         self.project_root = Path(project_root) if project_root else Path.cwd()
+        self.dev = dev if dev is not None else _env_truthy("FYMO_DEV")
+
+        # Wire the dev flag into the remote router so its 500 path knows whether
+        # to include traceback details.
+        from fymo.remote import router as _remote_router
+        _remote_router._dev_mode = self.dev
 
         # Ensure project_root is on sys.path so that app.* packages are importable
         # (needed for remote function dispatch and convention-based routing)
@@ -191,15 +210,20 @@ class FymoApp:
         return iter([html_bytes])
 
 
-def create_app(project_root: Optional[Path] = None, config: Optional[Dict] = None) -> FymoApp:
+def create_app(
+    project_root: Optional[Path] = None,
+    config: Optional[Dict] = None,
+    dev: Optional[bool] = None,
+) -> FymoApp:
     """
     Factory function to create a Fymo application
-    
+
     Args:
         project_root: Root directory of the project
         config: Configuration dictionary
-        
+        dev: Dev mode flag (defaults to FYMO_DEV env var). Production must be False.
+
     Returns:
         FymoApp instance
     """
-    return FymoApp(project_root, config)
+    return FymoApp(project_root, config, dev=dev)
