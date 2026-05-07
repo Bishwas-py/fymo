@@ -22,6 +22,13 @@ def _prepend_venv_bin_to_path() -> None:
         os.environ["PATH"] = venv_bin_str + os.pathsep + current_path
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _fymo_secret_for_tests() -> None:
+    """Provide FYMO_SECRET so FymoApp instances created in tests don't have to
+    each set dev=True or maintain a per-project .fymo/secret.key file."""
+    os.environ.setdefault("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
+
+
 @pytest.fixture
 def example_app(tmp_path: Path) -> Path:
     """Copy of examples/todo_app into an isolated tmp dir.
