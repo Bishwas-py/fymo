@@ -130,6 +130,22 @@ async function softNav(path, push = true) {{
     window.dispatchEvent(new CustomEvent('fymo:navigate', {{ detail: {{ path, leaf }} }}));
 }}
 
+// Resources whose soft_nav: false in fymo.yml. Read from a meta tag set
+// by the SSR layer; clicks targeting these resources skip interception so
+// the browser does a full page load.
+const disabledMeta = document.querySelector('meta[name="fymo-disabled-resources"]');
+const disabledResources = new Set(
+    (disabledMeta && disabledMeta.getAttribute('content') || '')
+        .split(',').map(s => s.trim()).filter(Boolean)
+);
+
+function isDisabledResource(pathname) {{
+    if (disabledResources.size === 0) return false;
+    // Compare top-level path segment (e.g. "/admin/users" → "admin").
+    const seg = pathname.split('/').filter(Boolean)[0];
+    return seg ? disabledResources.has(seg) : false;
+}}
+
 function shouldIntercept(a, e) {{
     if (e.defaultPrevented) return false;
     if (e.button !== 0) return false;
@@ -146,6 +162,7 @@ function shouldIntercept(a, e) {{
     if (url.origin !== window.location.origin) return false;
     if (url.pathname === window.location.pathname &&
         url.search === window.location.search) return false;
+    if (isDisabledResource(url.pathname)) return false;
     return url;
 }}
 

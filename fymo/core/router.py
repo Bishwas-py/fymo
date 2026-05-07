@@ -16,12 +16,15 @@ class Router:
     def __init__(self, routes_file: Optional[Path] = None) -> None:
         """
         Initialize router
-        
+
         Args:
             routes_file: Path to routes configuration file
         """
         self.routes: Dict[str, Dict[str, Any]] = {}
         self.resources: List[str] = []
+        # Per-controller soft-nav flag. True (default) = SPA-style nav; False
+        # = full page reload on every link to that resource.
+        self._soft_nav: Dict[str, bool] = {}
         
         if routes_file and routes_file.exists():
             try:
@@ -74,7 +77,26 @@ class Router:
             }
         
         if 'resources' in routes_config:
-            self.resources = routes_config['resources']
+            # Resources may be plain strings (`- posts`) or dicts with
+            # per-resource config (`- name: admin\n  soft_nav: false`).
+            normalized: List[str] = []
+            for entry in routes_config['resources']:
+                if isinstance(entry, str):
+                    normalized.append(entry)
+                elif isinstance(entry, dict):
+                    name = entry.get('name')
+                    if not name:
+                        raise ConfigurationError(
+                            f"resource entry missing required 'name': {entry}"
+                        )
+                    normalized.append(name)
+                    if 'soft_nav' in entry:
+                        self._soft_nav[name] = bool(entry['soft_nav'])
+                else:
+                    raise ConfigurationError(
+                        f"resource entry must be a string or dict, got {type(entry).__name__}"
+                    )
+            self.resources = normalized
             self._expand_resources()
         
         # Handle explicit route definitions
@@ -174,12 +196,24 @@ class Router:
         """Add a route dynamically"""
         if not template:
             template = f"{controller}/{action}.svelte"
-        
+
         self.routes[path] = {
             'controller': controller,
             'action': action,
             'template': template
         }
+
+    def soft_nav_enabled(self, controller: str) -> bool:
+        """Whether SPA-style soft navigation is enabled for this controller.
+
+        Default: True. Apps opt out via `resources: - {name: x, soft_nav: false}`
+        in fymo.yml.
+        """
+        return self._soft_nav.get(controller, True)
+
+    def disabled_soft_nav_resources(self) -> List[str]:
+        """Sorted list of resource names with soft_nav explicitly disabled."""
+        return sorted(name for name, enabled in self._soft_nav.items() if not enabled)
     
     def _try_convention_based_routing(self, path: str) -> Optional[Dict[str, Any]]:
         """

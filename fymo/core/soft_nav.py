@@ -66,6 +66,12 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
 
     controller_name = route_info["controller"]
 
+    # Per-resource opt-out from soft navigation. The client preempts via the
+    # fymo-disabled-resources meta tag, but we still answer here in case a
+    # stale client (or a hand-rolled fetch) hits the endpoint anyway.
+    if not app.router.soft_nav_enabled(controller_name):
+        return _200(start_response, {"type": "error", "status": 409, "error": "soft_nav_disabled"})
+
     # Manifest lookup — controller name is the route key.
     try:
         manifest = app.manifest_cache.get()
