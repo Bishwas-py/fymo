@@ -53,6 +53,7 @@ def build_html(
     title: str,
     asset_prefix: str = "/dist",
     doc: Dict[str, Any] = None,
+    disabled_soft_nav: list = None,
 ) -> str:
     """Render the minimal HTML envelope. Pieces are concatenated with no boilerplate."""
     css_link = (
@@ -67,6 +68,21 @@ def build_html(
         f'<script type="application/json" id="svelte-doc">{_safe_json(doc)}</script>\n'
         if doc is not None else ""
     )
+    # Pass the list of resources whose soft-nav is disabled to the client
+    # router so it can skip click interception preemptively (no wasted
+    # /_fymo/data round-trip for those URLs).
+    disabled_meta = ""
+    if disabled_soft_nav:
+        # Resource names are alphanumeric/underscore; HTML-escape defensively anyway.
+        def _esc(s: str) -> str:
+            return (
+                s.replace("&", "&amp;")
+                .replace('"', "&quot;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+        safe = ",".join(_esc(n) for n in disabled_soft_nav)
+        disabled_meta = f'<meta name="fymo-disabled-resources" content="{safe}">\n'
     return (
         "<!DOCTYPE html>\n"
         "<html>\n"
@@ -74,6 +90,7 @@ def build_html(
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{title}</title>\n"
+        f"{disabled_meta}"
         f"{head_extra}"
         f"{css_link}"
         f'<link rel="modulepreload" href="{asset_prefix}/{assets.client}">\n'

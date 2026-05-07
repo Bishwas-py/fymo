@@ -124,3 +124,43 @@ def test_soft_nav_root_path(blog_app: Path, monkeypatch):
     finally:
         if app.sidecar:
             app.sidecar.stop()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_soft_nav_disabled_resource_returns_error_envelope(blog_app: Path, monkeypatch):
+    """Resources with `soft_nav: false` in fymo.yml respond with the opt-out envelope."""
+    fymo_yml = blog_app / "fymo.yml"
+    fymo_yml.write_text(
+        "name: blog_app\n"
+        "version: 1.0.0\n"
+        "routes:\n"
+        "  root: index.index\n"
+        "  resources:\n"
+        "    - name: posts\n"
+        "      soft_nav: false\n"
+        "    - tags\n"
+        "build:\n"
+        "  output_dir: dist\n"
+    )
+
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=blog_app).build(dev=False)
+
+    monkeypatch.chdir(blog_app)
+    from app.lib.seeder import ensure_seeded
+    ensure_seeded(blog_app)
+    from fymo import create_app
+    app = create_app(blog_app)
+    try:
+        (status, _), env = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
+        assert status.startswith("200")
+        assert env["type"] == "error"
+        assert env["error"] == "soft_nav_disabled"
+        assert env["status"] == 409
+
+        (status, _), env = _wsgi_get(app, "/_fymo/data/tags")
+        assert status.startswith("200")
+        assert env["type"] == "result", env
+    finally:
+        if app.sidecar:
+            app.sidecar.stop()

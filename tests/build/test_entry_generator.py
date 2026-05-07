@@ -43,3 +43,13 @@ def test_entry_includes_soft_nav_router(tmp_path: Path):
     # Imports the Svelte 5 mount/unmount API for swapping leaves
     assert "mount" in text
     assert "unmount" in text
+
+
+def test_entry_reads_disabled_resources_meta(tmp_path: Path):
+    """Entry stub looks up the fymo-disabled-resources meta to skip intercept."""
+    route = Route(name="home", entry_path=tmp_path / "templates/home/index.svelte")
+    out_dir = tmp_path / ".fymo" / "entries"
+    write_client_entries([route], out_dir, project_root=tmp_path)
+    text = (out_dir / "home.client.js").read_text()
+    assert 'meta[name="fymo-disabled-resources"]' in text
+    assert "isDisabledResource" in text

@@ -109,6 +109,7 @@ class TemplateRenderer:
             assets=manifest.routes[route_name],
             title=title,
             doc=doc_meta,
+            disabled_soft_nav=self.router.disabled_soft_nav_resources(),
         )
         return html, "200 OK"
 

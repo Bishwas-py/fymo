@@ -92,3 +92,29 @@ def test_remote_callable_serialized_as_marker(monkeypatch):
         asset_prefix="/dist",
     )
     assert '"__fymo_remote":"abc123def456/create_post"' in out or '"__fymo_remote": "abc123def456/create_post"' in out
+
+def test_disabled_soft_nav_meta_tag_emitted():
+    """build_html injects fymo-disabled-resources meta when list non-empty."""
+    assets = RouteAssets(ssr='x', client='x.js', css=None, preload=[])
+    html = build_html(
+        body='', head_extra='', props={}, assets=assets, title='t',
+        disabled_soft_nav=['admin', 'api_keys'],
+    )
+    assert '<meta name="fymo-disabled-resources" content="admin,api_keys">' in html
+
+
+def test_no_meta_when_disabled_list_empty():
+    assets = RouteAssets(ssr='x', client='x.js', css=None, preload=[])
+    html = build_html(body='', head_extra='', props={}, assets=assets, title='t')
+    assert 'fymo-disabled-resources' not in html
+
+
+def test_disabled_resource_names_html_escaped():
+    assets = RouteAssets(ssr='x', client='x.js', css=None, preload=[])
+    html = build_html(
+        body='', head_extra='', props={}, assets=assets, title='t',
+        disabled_soft_nav=['<script>alert(1)</script>'],
+    )
+    assert '<script>alert(1)' not in html  # escaped form is in there
+    assert '&lt;script&gt;' in html
+
