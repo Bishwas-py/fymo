@@ -18,19 +18,28 @@ def _read_cookie(environ: dict, name: str) -> str | None:
 
 
 def _ensure_uid(environ: dict) -> tuple[str, str | None]:
-    """Return (uid, Set-Cookie header value or None if no cookie needs to be set)."""
+    """Return (uid, Set-Cookie header value or None if no cookie needs to be set).
+
+    The cookie is HttpOnly + SameSite=Lax always. Adds Secure when the request
+    arrived over https, so the cookie is only sent back over TLS. Production
+    deployments behind a reverse proxy must propagate the original scheme via
+    `wsgi.url_scheme` (gunicorn does this from `X-Forwarded-Proto` when
+    configured with `--forwarded-allow-ips`).
+    """
     existing = _read_cookie(environ, _UID_COOKIE)
     if existing:
         return existing, None
     new_uid = "u_" + secrets.token_urlsafe(12)
-    cookie = (
-        f"{_UID_COOKIE}={new_uid}; "
-        f"Path=/; "
-        f"Max-Age={_TEN_YEARS_SECONDS}; "
-        f"SameSite=Lax; "
-        f"HttpOnly"
-    )
-    return new_uid, cookie
+    parts = [
+        f"{_UID_COOKIE}={new_uid}",
+        "Path=/",
+        f"Max-Age={_TEN_YEARS_SECONDS}",
+        "SameSite=Lax",
+        "HttpOnly",
+    ]
+    if environ.get("wsgi.url_scheme") == "https":
+        parts.append("Secure")
+    return new_uid, "; ".join(parts)
 
 
 def current_uid() -> str:

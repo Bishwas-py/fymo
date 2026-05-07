@@ -28,6 +28,10 @@ _PATH_PREFIX = "/_fymo/remote/"
 # fymo.core.server when ManifestCache is available.
 _resolve_module_for_hash: Callable[[str], "str | None"] = lambda h: None
 
+# Dev mode: when True, 500 responses include traceback + exception message.
+# When False (production), 500 responses are opaque. Set by fymo.core.server.
+_dev_mode: bool = False
+
 
 def _200(start_response, payload: dict, set_cookie: "str | None" = None) -> Iterable[bytes]:
     body = json.dumps(payload).encode("utf-8")
@@ -153,12 +157,19 @@ def handle_remote(environ: dict, start_response) -> Iterable[bytes]:
     except RemoteError as e:
         return _200(start_response, {"type": "error", "status": e.status, "error": e.code, "message": str(e)}, set_cookie)
     except Exception as e:
-        return _200(start_response, {"type": "error", "status": 500, "error": "internal", "message": str(e), "traceback": traceback.format_exc()}, set_cookie)
+        payload = {"type": "error", "status": 500, "error": "internal"}
+        if _dev_mode:
+            payload["message"] = str(e)
+            payload["traceback"] = traceback.format_exc()
+        return _200(start_response, payload, set_cookie)
 
     # 8. Encode response via devalue
     try:
         encoded = devalue.stringify(result)
     except Exception as e:
-        return _200(start_response, {"type": "error", "status": 500, "error": "encode_failed", "message": str(e)}, set_cookie)
+        payload = {"type": "error", "status": 500, "error": "encode_failed"}
+        if _dev_mode:
+            payload["message"] = str(e)
+        return _200(start_response, payload, set_cookie)
 
     return _200(start_response, {"type": "result", "result": encoded}, set_cookie)

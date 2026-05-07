@@ -3,7 +3,8 @@ name = "fymo"
 version = "0.1.0"
 description = "Python SSR framework for Svelte 5 — esbuild pipeline, Node sidecar, SvelteKit-style remote functions"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Bishwas Bhandari", email = "bishwasbh@gmail.com" },
 ]
@@ -17,7 +18,6 @@ keywords = ["svelte", "ssr", "python", "framework", "wsgi", "esbuild"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
