@@ -17,6 +17,52 @@ def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
 
 
+def _load_identity_secret(project_root: Path, dev: bool) -> bytes:
+    """Resolve the HMAC secret used to sign fymo_uid cookies.
+
+    Resolution order:
+      1. FYMO_SECRET env var — used as raw utf-8 bytes; must be ≥ 16 chars.
+      2. Read .fymo/secret.key if it exists (≥ 16 bytes).
+      3. Dev mode only: auto-generate .fymo/secret.key (32 random bytes).
+      4. Production with neither: raise. Loud failure beats forgeable cookies.
+    """
+    raw = os.environ.get("FYMO_SECRET", "").strip()
+    if raw:
+        b = raw.encode("utf-8")
+        if len(b) < 16:
+            raise RuntimeError(
+                "FYMO_SECRET is set but is shorter than 16 characters. "
+                "Use a long random string, e.g.: "
+                "python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        return b
+
+    secret_path = project_root / ".fymo" / "secret.key"
+    if secret_path.is_file():
+        data = secret_path.read_bytes()
+        if len(data) >= 16:
+            return data
+
+    if not dev:
+        raise RuntimeError(
+            "FYMO_SECRET environment variable is required in production "
+            "(set FymoApp(dev=True) or FYMO_DEV=1 for local development, "
+            "in which case a per-project secret will be auto-generated at "
+            f"{secret_path}). Generate one with: "
+            "python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+
+    import secrets as _secrets
+    secret_path.parent.mkdir(parents=True, exist_ok=True)
+    new_secret = _secrets.token_bytes(32)
+    secret_path.write_bytes(new_secret)
+    try:
+        secret_path.chmod(0o600)
+    except Exception:
+        pass
+    return new_secret
+
+
 class FymoApp:
     """Main Fymo application class"""
 
@@ -43,6 +89,12 @@ class FymoApp:
         # to include traceback details.
         from fymo.remote import router as _remote_router
         _remote_router._dev_mode = self.dev
+
+        # Resolve and install the HMAC secret used to sign fymo_uid cookies.
+        # Done eagerly at startup so production misconfiguration fails fast
+        # instead of on the first remote call.
+        from fymo.remote import identity as _identity
+        _identity.set_secret(_load_identity_secret(self.project_root, self.dev))
 
         # Ensure project_root is on sys.path so that app.* packages are importable
         # (needed for remote function dispatch and convention-based routing)
