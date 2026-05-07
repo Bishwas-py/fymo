@@ -2,7 +2,7 @@
 title: SvelteKit-style wire format for Fymo Remote Functions
 date: 2026-04-28
 status: approved-design
-authors: Bishwas, brainstormed with Claude
+authors: Bishwas
 related: docs/superpowers/specs/2026-04-28-fymo-remote-functions-design.md
 ---
 

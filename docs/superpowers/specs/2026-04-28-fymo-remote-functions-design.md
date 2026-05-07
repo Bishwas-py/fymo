@@ -2,7 +2,7 @@
 title: Fymo Remote Functions + blog showcase
 date: 2026-04-28
 status: approved-design
-authors: Bishwas, brainstormed with Claude
+authors: Bishwas
 ---
 
 # Fymo Remote Functions + blog showcase

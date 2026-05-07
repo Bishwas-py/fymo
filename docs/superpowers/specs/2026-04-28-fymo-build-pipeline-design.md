@@ -2,7 +2,7 @@
 title: Fymo build pipeline + Node sidecar SSR
 date: 2026-04-28
 status: approved-design
-authors: Bishwas, brainstormed with Claude
+authors: Bishwas
 ---
 
 # Fymo build pipeline + Node sidecar SSR
