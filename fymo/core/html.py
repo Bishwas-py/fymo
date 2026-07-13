@@ -54,8 +54,13 @@ def build_html(
     asset_prefix: str = "/dist",
     doc: Dict[str, Any] = None,
     disabled_soft_nav: list = None,
+    global_css: str = None,
 ) -> str:
     """Render the minimal HTML envelope. Pieces are concatenated with no boilerplate."""
+    global_css_link = (
+        f'<link rel="stylesheet" href="{asset_prefix}/{global_css}">\n'
+        if global_css else ""
+    )
     css_link = (
         f'<link rel="stylesheet" href="{asset_prefix}/{assets.css}">\n'
         if assets.css else ""
@@ -92,6 +97,7 @@ def build_html(
         f"<title>{title}</title>\n"
         f"{disabled_meta}"
         f"{head_extra}"
+        f"{global_css_link}"
         f"{css_link}"
         f'<link rel="modulepreload" href="{asset_prefix}/{assets.client}">\n'
         f"{preload}"

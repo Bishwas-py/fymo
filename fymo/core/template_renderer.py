@@ -182,15 +182,7 @@ class TemplateRenderer:
             title=title,
             doc=doc_meta,
             disabled_soft_nav=self.router.disabled_soft_nav_resources(),
-            # NOTE: build_html() does not accept a `global_css` parameter yet
-            # (that lands in Task 9, which also makes `html.build_html`
-            # actually consume `manifest.global_css`). Passing it here today
-            # would raise TypeError on *every* route, including routes with
-            # no layout chain, breaking the flat-props backward-compat
-            # requirement this task is held to. Deferred until Task 9 adds
-            # the parameter; Task 9 must also update this call site to pass
-            # `global_css=manifest.global_css` since Task 8 (the natural
-            # owner of this call site) landed before Task 9 existed.
+            global_css=manifest.global_css,
         )
         return html, "200 OK"
 
