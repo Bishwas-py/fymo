@@ -68,3 +68,62 @@ def test_entry_error_branch_shares_the_runtime_error_handling(tmp_path: Path):
     text = (out_dir / "home.client.js").read_text()
     assert "env.message || env.error" in text
     assert "e.traceback = env.traceback;" in text
+
+
+def test_no_layout_chain_generates_same_template_as_before(tmp_path: Path):
+    from fymo.build.discovery import Route
+    from fymo.build.entry_generator import write_client_entries
+    leaf = tmp_path / "templates" / "home" / "index.svelte"
+    leaf.parent.mkdir(parents=True)
+    leaf.write_text("<div></div>")
+    route = Route(name="home", entry_path=leaf)
+    out_dir = tmp_path / "out"
+    written = write_client_entries([route], out_dir, tmp_path)
+    content = written["home"].read_text()
+    assert "hydrate(Component" in content
+    assert not (out_dir / "home.shell.svelte").exists()
+
+
+def test_layout_chain_generates_shell_and_bootstrap(tmp_path: Path):
+    from fymo.build.discovery import Route, LayoutRef
+    from fymo.build.entry_generator import write_client_entries
+
+    root_layout = tmp_path / "templates" / "_layout.svelte"
+    root_layout.parent.mkdir(parents=True)
+    root_layout.write_text("<div></div>")
+    resource_layout = tmp_path / "templates" / "posts" / "_layout.svelte"
+    resource_layout.parent.mkdir(parents=True)
+    resource_layout.write_text("<div></div>")
+    leaf = tmp_path / "templates" / "posts" / "show.svelte"
+    leaf.write_text("<div></div>")
+
+    route = Route(
+        name="posts",
+        entry_path=leaf,
+        layout_chain=[
+            LayoutRef(level="root", id="_root", svelte_path=root_layout, controller_module=None),
+            LayoutRef(level="resource", id="posts", svelte_path=resource_layout, controller_module=None),
+        ],
+    )
+    out_dir = tmp_path / "out"
+    written = write_client_entries([route], out_dir, tmp_path)
+
+    shell_path = out_dir / "posts.shell.svelte"
+    assert shell_path.exists()
+    shell = shell_path.read_text()
+    assert "import RootLayout from" in shell
+    assert "import ResourceLayout from" in shell
+    assert "import Leaf from" in shell
+    assert "$state" in shell
+    assert "export function swapLeaf" in shell
+    assert "export function swapResourceLayout" in shell
+    assert "export function updateRootLayoutProps" in shell
+    assert "<svelte:boundary" in shell
+
+    bootstrap = written["posts"].read_text()
+    assert "import Shell from './posts.shell.svelte'" in bootstrap
+    assert "hydrate(Shell" in bootstrap
+    assert "shellInstance.swapLeaf" in bootstrap
+    assert "shellInstance.swapResourceLayout" in bootstrap
+    assert "shellInstance.updateRootLayoutProps" in bootstrap
+    assert "unmount(currentMount)" not in bootstrap  # old full-remount path is gone for shell routes
