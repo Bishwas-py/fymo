@@ -13,6 +13,7 @@ from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
 from fymo.core.exceptions import TemplateError, CompilationError, RenderingError, ControllerError
 from fymo.core.ssr_controller import load_controller_context, ssr_request_scope, load_layout_props_and_docs, merge_docs
+from fymo.remote.errors import RemoteError
 from fymo.utils.colors import Color
 
 logger = logging.getLogger("fymo")
@@ -111,6 +112,20 @@ class TemplateRenderer:
         except RenderingError as e:
             print(f"{Color.FAIL}Rendering error: {e.message}{Color.ENDC}")
             return self._render_error(e, "Rendering Error")
+        except RemoteError as e:
+            # A controller's getContext() raised NotFound/Unauthorized/etc.
+            # directly (not via a remote-function RPC call) -- e.g. a page
+            # controller doing `get_post(slug)` and getting a 404-shaped
+            # domain error for a missing row. Without this branch every one
+            # of these fell through to the generic 500 below, even though
+            # RemoteError already carries the right status/code. Reuses the
+            # exact status/code convention remote functions use over RPC, so
+            # a controller can raise the same NotFound its own remote
+            # functions already raise instead of the SSR path flattening it.
+            status_line = f"{e.status} {e.code.upper().replace('_', ' ')}"
+            label = e.code.replace('_', ' ').title()
+            print(f"{Color.FAIL}{label}: {e}{Color.ENDC}")
+            return self._render_error(e, label, status=status_line)
         except Exception as e:
             print(f"{Color.FAIL}Unexpected error: {str(e)}{Color.ENDC}")
             return self._render_error(e, "Server Error")
