@@ -211,7 +211,9 @@ SHELL_TEMPLATE = """\
   }}
 
   function onLeafError(error) {{
-    if (typeof console !== 'undefined') console.error('[fymo] leaf render error:', error);
+    if (typeof console !== 'undefined') {{
+      console.error('[fymo] leaf render error:', error && error.stack || error && error.message || error);
+    }}
   }}
 </script>
 

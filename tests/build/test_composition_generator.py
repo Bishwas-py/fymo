@@ -29,7 +29,6 @@ def test_writes_tree_file_for_root_only_chain(tmp_path: Path):
     assert "import Leaf from" in content
     assert "ResourceLayout" not in content
     assert "<RootLayout" in content
-    assert "<Leaf" in content
     assert "layoutProps.root" in content
     assert "leafProps" in content
     # Structural parity with the client shell (entry_generator.py's
@@ -41,6 +40,21 @@ def test_writes_tree_file_for_root_only_chain(tmp_path: Path):
     assert "{#if false}" in content
     assert "{:else}" in content
     assert "{/if}" in content
+    # Regression guard: the leaf MUST be referenced via a $state-bound
+    # "CurrentLeaf" tag, not the static "Leaf" import, directly as the
+    # component tag. Svelte's compiler only emits the dynamic-component
+    # codegen (a `$.component()` wrapper with its own hydration marker
+    # comment) for tags bound to something other than a plain import/`let`
+    # (kind != 'normal') -- the client shell's `CurrentLeaf` is `$state(...)`,
+    # so it always compiles to that dynamic form. A static `<Leaf .../>` tag
+    # here compiles WITHOUT that marker, so the server's HTML is missing the
+    # comment the client's compiled `$.component()` call requires at
+    # hydration time -- a real bug (`svelte.dev/e/hydration_mismatch`,
+    # verified live in a browser) this test would otherwise miss entirely,
+    # since it's invisible to a plain WSGI/curl check.
+    assert "<CurrentLeaf" in content
+    assert "let CurrentLeaf = $state(Leaf);" in content
+    assert "<Leaf" not in content
 
 
 def test_writes_tree_file_for_root_and_resource_chain(tmp_path: Path):
@@ -68,8 +82,6 @@ def test_writes_tree_file_for_root_and_resource_chain(tmp_path: Path):
     assert "import ResourceLayout from" in content
     assert "import Leaf from" in content
     assert "<RootLayout" in content
-    assert "<ResourceLayout" in content
-    assert "<Leaf" in content
     # Structural parity with the client shell: resource-layout slot is wrapped
     # in {#if}/{:else}/{/if} (literal `true` since this route has a resource
     # layout), and the leaf is rendered via the shared leafSlot snippet inside
@@ -80,15 +92,28 @@ def test_writes_tree_file_for_root_and_resource_chain(tmp_path: Path):
     assert "{:else}" in content
     assert "{/if}" in content
     assert content.count("{@render leafSlot()}") == 2
+    # Regression guard (see test_writes_tree_file_for_root_only_chain for the
+    # full rationale): both the leaf AND the resource layout must be
+    # referenced via $state-bound "Current*" tags, matching the client
+    # shell's dynamic-component binding kind -- a static tag reference here
+    # compiles without the hydration marker comment the client's compiled
+    # `$.component()` call expects, causing a real hydration_mismatch.
+    assert "<CurrentLeaf" in content
+    assert "<CurrentResourceLayout" in content
+    assert "let CurrentLeaf = $state(Leaf);" in content
+    assert "let CurrentResourceLayout = $state(ResourceLayout);" in content
+    assert "<Leaf" not in content
+    assert "<ResourceLayout" not in content
     # Root must nest outside resource, resource outside the leaf-slot render,
     # in the composed tree section (i.e. after the leafSlot snippet
-    # definition -- <Leaf itself lives inside that snippet's own body, which
-    # is defined once and referenced via {@render leafSlot()}, so ordering
-    # is checked against the render call, not the snippet's internal markup).
+    # definition -- CurrentLeaf itself lives inside that snippet's own body,
+    # which is defined once and referenced via {@render leafSlot()}, so
+    # ordering is checked against the render call, not the snippet's internal
+    # markup).
     tree_section = content.split("{/snippet}")[-1]
     assert (
         tree_section.index("<RootLayout")
-        < tree_section.index("<ResourceLayout")
+        < tree_section.index("<CurrentResourceLayout")
         < tree_section.index("{@render leafSlot()}")
     )
 

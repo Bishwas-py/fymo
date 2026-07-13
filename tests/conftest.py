@@ -57,7 +57,22 @@ def blog_app(tmp_path: Path) -> Path:
     auth enabled — needed for tests that exercise remote-module discovery
     (todo_app has neither). Same node_modules-symlink treatment as
     example_app: read-only, shared across test runs.
+
+    `FymoApp.__init__` (fymo/core/server.py) inserts `project_root` onto
+    `sys.path` so `app.*` is importable, but never removes it or clears
+    `sys.modules` afterward. Since every blog_app copy uses the same
+    top-level package name ("app"), a second test in the same pytest
+    process that uses this fixture with a *different* tmp_path would
+    otherwise silently reuse the first test's cached `app.data.db` (etc.)
+    module -- e.g. `seed_test_post()` would insert its row into the FIRST
+    test's SQLite file, not the current test's, and the current test's own
+    server would then see an empty database with no error at all, just a
+    confusing 404. Clean up both `sys.path` and the cached `app.*` modules
+    after each test using this fixture, matching the pattern already used
+    by the local `blog_app` overrides in test_soft_nav.py and
+    test_layout_system_e2e.py.
     """
+    import sys
     dest = tmp_path / "blog_app"
     shutil.copytree(
         BLOG_APP, dest,
@@ -68,7 +83,13 @@ def blog_app(tmp_path: Path) -> Path:
         (dest / "node_modules").symlink_to(nm)
     else:
         pytest.skip("examples/blog_app/node_modules not found — run npm install in examples/blog_app/")
-    return dest
+    dest_str = str(dest)
+    yield dest
+    if dest_str in sys.path:
+        sys.path.remove(dest_str)
+    for name in list(sys.modules):
+        if name == "app" or name.startswith("app."):
+            del sys.modules[name]
 
 
 @pytest.fixture(scope="session")

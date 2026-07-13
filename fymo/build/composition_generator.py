@@ -11,14 +11,23 @@ SSR_TREE_TEMPLATE = """\
 {imports}
   let {{ leafProps, layoutProps }} = $props();
 
+  // Bound via $state (never actually reassigned during SSR) purely so the
+  // compiler treats this component reference as *dynamic* -- see the long
+  // comment below on SSR_RESOURCE_BLOCK_WITH_LAYOUT for why a plain static
+  // import reference here would structurally desync from the client shell's
+  // hydration expectations.
+  let CurrentLeaf = $state(Leaf);
+{resource_state_decl}
   function onLeafError(error) {{
-    if (typeof console !== 'undefined') console.error('[fymo] leaf render error:', error);
+    if (typeof console !== 'undefined') {{
+      console.error('[fymo] leaf render error:', error && error.stack || error && error.message || error);
+    }}
   }}
 </script>
 
 {{#snippet leafSlot()}}
   <svelte:boundary onerror={{onLeafError}}>
-    <Leaf {{...leafProps}} />
+    <CurrentLeaf {{...leafProps}} />
     {{#snippet failed(error, reset)}}
       <div class="fymo-leaf-error">Something went wrong. <button onclick={{reset}}>Retry</button></div>
     {{/snippet}}
@@ -43,10 +52,33 @@ SSR_ROOT_CLOSE = "\n</RootLayout>"
 # both branches still compile and both `generate: 'server'` and
 # `generate: 'client'` output the same anchor/comment structure regardless of
 # the literal value), so this preserves hydration compatibility.
+#
+# CurrentResourceLayout is likewise bound via $state rather than referencing
+# `ResourceLayout` (the static import) directly as the tag. This is not
+# cosmetic: Svelte's compiler decides whether a `<Component .../>` tag emits
+# the plain static-component codegen or the dynamic-component codegen (a
+# `$.component(...)` wrapper with its own hydration marker comment) based on
+# whether the tag's binding is "dynamic" -- and a binding is only dynamic if
+# its `kind` is something other than `'normal'` (see
+# `phases/2-analyze/visitors/Component.js`: `node.metadata.dynamic = ...
+# binding.kind !== 'normal' ...`). A plain `import X from '...'` and even a
+# plain `let x = X` both get `kind: 'normal'` -- only rune-derived bindings
+# ($state, $props, $derived, ...) get a non-'normal' kind. The client shell's
+# `CurrentResourceLayout`/`CurrentLeaf` are `$state(...)`, so they always
+# compile to the dynamic-component form; a route's SSR tree MUST use the same
+# form for the identical tag, or the server output is missing the hydration
+# marker comment the client's compiled `$.component()` call requires --
+# producing a real, user-visible bug: `svelte.dev/e/hydration_mismatch` plus
+# the leaf's `<svelte:boundary>` catching a bare `HYDRATION_ERROR` sentinel
+# and discarding the entire SSR'd subtree in favour of the `failed` snippet.
+# (Root-caused by tracing a live `hydration_mismatch` through
+# `read_hydration_instruction` straight to the `$.component()` call compiled
+# for `<CurrentLeaf .../>` in the shell bundle -- confirmed by reproducing
+# with and without this fix against a real browser.)
 SSR_RESOURCE_BLOCK_WITH_LAYOUT = """{#if true}
-  <ResourceLayout {...layoutProps.resource}>
+  <CurrentResourceLayout {...layoutProps.resource}>
     {@render leafSlot()}
-  </ResourceLayout>
+  </CurrentResourceLayout>
 {:else}
   {@render leafSlot()}
 {/if}
@@ -110,12 +142,19 @@ def generate_ssr_tree(route: Route, out_dir: Path) -> Optional[Path]:
     resource_block = (
         SSR_RESOURCE_BLOCK_WITH_LAYOUT if has_resource else SSR_RESOURCE_BLOCK_WITHOUT_LAYOUT
     )
+    # Same $state-binding rationale as CurrentLeaf above -- only emitted when
+    # this route actually has a resource layout (ResourceLayout is only
+    # imported in that case).
+    resource_state_decl = (
+        "  let CurrentResourceLayout = $state(ResourceLayout);\n" if has_resource else ""
+    )
 
     body = SSR_TREE_TEMPLATE.format(
         imports="\n".join(imports),
         root_open=root_open,
         root_close=root_close,
         resource_block=resource_block,
+        resource_state_decl=resource_state_decl,
     )
 
     out_path = out_dir / f"{route.name}.tree.svelte"
