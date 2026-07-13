@@ -192,3 +192,24 @@ def test_blog_e2e(blog_app: Path):
     finally:
         if app.sidecar:
             app.sidecar.stop()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_home_page_renders_nav_via_root_layout(blog_app: Path):
+    """After migration, Nav must still appear in the rendered HTML -- just
+    sourced from the shared layout instead of each page importing it.
+    Asserts on Nav.svelte's actual markup (examples/blog_app/app/templates/
+    _shared/Nav.svelte): a <nav> element containing the brand link."""
+    import subprocess
+    subprocess.run(["fymo", "build"], cwd=blog_app, check=True, capture_output=True)
+    from fymo import create_app
+    app = create_app(blog_app)
+    try:
+        (status, headers), out = _wsgi_call(app, "/")
+        html = out.decode("utf-8")
+        assert status == "200 OK"
+        assert 'class="brand' in html and 'href="/"' in html and 'fymo' in html
+        assert "<nav" in html
+    finally:
+        if app.sidecar:
+            app.sidecar.stop()

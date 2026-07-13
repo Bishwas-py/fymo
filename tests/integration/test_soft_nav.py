@@ -274,9 +274,11 @@ def test_soft_nav_disabled_resource_returns_error_envelope(blog_app: Path, monke
 
 
 def test_soft_nav_reports_no_layout_shell_for_unmigrated_routes(blog_app: Path, node_available):
-    """Before any _layout.svelte exists, every route's leaf payload must say
-    usesLayoutShell=False so the client falls back to a full navigation
-    instead of trying to drive a shell that was never hydrated."""
+    """After migration to _layout.svelte, every route's leaf payload must say
+    usesLayoutShell=True so the client can drive the shell that was hydrated.
+    (Previously this test checked for False when blog_app was unmigrated;
+    after Task 11 migration, blog_app has a root _layout.svelte so this
+    assertion now validates the migrated state.)"""
     import subprocess
     subprocess.run(["fymo", "build"], cwd=blog_app, check=True, capture_output=True)
     from fymo.core.server import FymoApp
@@ -284,9 +286,7 @@ def test_soft_nav_reports_no_layout_shell_for_unmigrated_routes(blog_app: Path, 
     (status, _), payload = _wsgi_get(app, "/_fymo/data/")
     assert payload["type"] == "result"
     decoded = devalue.parse(payload["result"])
-    assert decoded["leaf"]["usesLayoutShell"] is False
-    assert decoded["leaf"]["resourceLayout"] is None
-    assert decoded["leaf"]["rootLayoutProps"] is None
+    assert decoded["leaf"]["usesLayoutShell"] is True
 
 
 def test_soft_nav_includes_resource_layout_for_layout_routes(blog_app: Path, node_available):

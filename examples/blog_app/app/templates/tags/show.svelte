@@ -1,11 +1,8 @@
 <script lang="ts">
-  import Nav from '../_shared/Nav.svelte';
   import type { PostSummary } from '$remote/posts';
 
   let { tag, posts }: { tag: string; posts: PostSummary[] } = $props();
 </script>
-
-<Nav />
 
 <header class="head">
   <p class="kicker">Tag</p>
