@@ -271,3 +271,43 @@ def test_soft_nav_disabled_resource_returns_error_envelope(blog_app: Path, monke
     finally:
         if app.sidecar:
             app.sidecar.stop()
+
+
+def test_soft_nav_reports_no_layout_shell_for_unmigrated_routes(blog_app: Path, node_available):
+    """Before any _layout.svelte exists, every route's leaf payload must say
+    usesLayoutShell=False so the client falls back to a full navigation
+    instead of trying to drive a shell that was never hydrated."""
+    import subprocess
+    subprocess.run(["fymo", "build"], cwd=blog_app, check=True, capture_output=True)
+    from fymo.core.server import FymoApp
+    app = FymoApp(blog_app, dev=False)
+    (status, _), payload = _wsgi_get(app, "/_fymo/data/")
+    assert payload["type"] == "result"
+    decoded = devalue.parse(payload["result"])
+    assert decoded["leaf"]["usesLayoutShell"] is False
+    assert decoded["leaf"]["resourceLayout"] is None
+    assert decoded["leaf"]["rootLayoutProps"] is None
+
+
+def test_soft_nav_includes_resource_layout_for_layout_routes(blog_app: Path, node_available):
+    templates = blog_app / "app" / "templates"
+    (templates / "_layout.svelte").write_text(
+        "<script>\n  let { children } = $props();\n</script>\n{@render children()}\n"
+    )
+    (templates / "posts" / "_layout.svelte").write_text(
+        "<script>\n  let { children } = $props();\n</script>\n{@render children()}\n"
+    )
+    import subprocess
+    subprocess.run(["fymo", "build"], cwd=blog_app, check=True, capture_output=True)
+    from fymo.core.server import FymoApp
+    app = FymoApp(blog_app, dev=False)
+
+    from app.lib.seeder import ensure_seeded
+    ensure_seeded(blog_app)
+
+    (status, _), payload = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
+    decoded = devalue.parse(payload["result"])
+    assert decoded["leaf"]["usesLayoutShell"] is True
+    assert decoded["leaf"]["resourceLayout"]["id"] == "posts"
+    assert decoded["leaf"]["resourceLayout"]["module"].startswith("/dist/")
+    assert decoded["leaf"]["rootLayoutProps"] == {}
