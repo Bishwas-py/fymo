@@ -19,9 +19,6 @@
 </script>
 
 <article>
-  <p class="kicker">
-    <a href="/" class="back">← fymo●blog</a>
-  </p>
   <header class="post-head">
     <p class="dateline">
       <time>{new Date(post.published_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</time>
@@ -36,13 +33,6 @@
 <Comments slug={post.slug} initial={initial_comments} {create_comment} />
 
 <style>
-  .kicker { margin: 0 0 2.5rem; }
-  .back {
-    font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.04em;
-    color: var(--muted); transition: color 0.15s ease;
-  }
-  .back:hover { color: var(--accent); }
-
   .post-head { margin-bottom: 2.5rem; }
   .dateline {
     display: flex; gap: 1rem; align-items: center;

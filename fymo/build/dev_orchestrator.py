@@ -7,10 +7,12 @@ import time
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from fymo.build.discovery import discover_routes
+from fymo.build.composition_generator import generate_ssr_tree
+from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
 from fymo.build.hygiene import check_directory_hygiene, format_hygiene_error
-from fymo.build.manifest import Manifest, RemoteModuleAssets, RouteAssets
+from fymo.build.manifest import Manifest, RemoteModuleAssets
+from fymo.build.manifest_matching import match_esbuild_outputs
 from fymo.remote.codegen import emit_module, emit_runtime
 from fymo.remote.discovery import discover_remote_modules
 
@@ -27,6 +29,8 @@ class DevOrchestrator:
         self._listeners: List[Callable[[dict], None]] = []
         self._latest_metafile: Optional[dict] = None
         self._routes = []
+        self._all_layouts = []
+        self._has_global_css = False
         self._remote_assets: dict[str, RemoteModuleAssets] = {}
 
     def add_listener(self, fn: Callable[[dict], None]) -> None:
@@ -45,6 +49,20 @@ class DevOrchestrator:
         templates = self.project_root / "app" / "templates"
         self._routes = discover_routes(templates)
         client_entries = write_client_entries(self._routes, self.cache_dir, self.project_root, dev=True)
+
+        # Layout + global-CSS entries, mirroring BuildPipeline.build() so
+        # `fymo dev` and `fymo build` can't drift on what gets built --
+        # this file previously stopped at write_client_entries() and never
+        # discovered layouts or _global.css at all, which is exactly what
+        # let the manifest fields below go stale (see match_esbuild_outputs
+        # docstring for the bug this caused).
+        self._all_layouts = discover_all_layouts(templates)
+        layout_client_entries = {
+            f"_layout-{ref.id}": str(ref.svelte_path) for ref in self._all_layouts
+        }
+        global_css_path = templates / "_global.css"
+        self._has_global_css = global_css_path.is_file()
+        global_css_entry = {"_global": str(global_css_path)} if self._has_global_css else {}
 
         # Discover app/remote/*.py (+ auth providers') remote functions and
         # emit their dist/client/_remote/<name>.{js,d.ts} stubs, exactly like
@@ -85,11 +103,25 @@ class DevOrchestrator:
             if fns
         }
 
+        # SSR entry points: composed tree file when a route has a layout
+        # chain, else the raw leaf -- same rule as BuildPipeline.build().
+        # Without this, the SSR bundle is always the bare leaf regardless of
+        # layout_chain, so a route with a real layout never renders its
+        # <RootLayout>/<ResourceLayout> wrapper at all under `fymo dev`.
+        ssr_entries = [
+            {"name": r.name, "entryPath": str(generate_ssr_tree(r, self.cache_dir) or r.entry_path)}
+            for r in self._routes
+        ]
+
         config = {
             "projectRoot": str(self.project_root),
             "distDir": str(self.dist_dir),
-            "routes": [{"name": r.name, "entryPath": str(r.entry_path)} for r in self._routes],
-            "clientEntries": {n: str(p) for n, p in client_entries.items()},
+            "routes": ssr_entries,
+            "clientEntries": {
+                **{n: str(p) for n, p in client_entries.items()},
+                **layout_client_entries,
+                **global_css_entry,
+            },
         }
         self._proc = subprocess.Popen(
             ["node", str(self.dev_script), json.dumps(config)],
@@ -151,51 +183,25 @@ class DevOrchestrator:
             return
         outputs = self._latest_metafile.get("outputs", {})
 
-        project_root_abs = self.project_root.resolve()
-        dist_dir_abs = self.dist_dir.resolve()
+        route_assets, layout_assets, global_css_out = match_esbuild_outputs(
+            client_outputs=outputs,
+            routes=self._routes,
+            all_layouts=self._all_layouts,
+            project_root=self.project_root,
+            dist_dir=self.dist_dir,
+            has_global_css=self._has_global_css,
+        )
 
-        def to_rel_dist(out_path: str):
-            p = Path(out_path)
-            if not p.is_absolute():
-                p = project_root_abs / p
-            try:
-                return p.resolve().relative_to(dist_dir_abs).as_posix()
-            except ValueError:
-                return None
-
-        client_by_route = {}
-        css_by_route = {}
-        chunks = []
-        for out_path, info in outputs.items():
-            rel = to_rel_dist(out_path)
-            if rel is None:
-                continue
-            entry = info.get("entryPoint")
-            if entry:
-                for r in self._routes:
-                    if Path(entry).name == f"{r.name}.client.js":
-                        if rel.endswith(".js"):
-                            client_by_route[r.name] = rel
-                            css_bundle = info.get("cssBundle")
-                            if css_bundle:
-                                css_rel = to_rel_dist(css_bundle)
-                                if css_rel:
-                                    css_by_route[r.name] = css_rel
-            elif Path(out_path).name.startswith("chunk-") and rel.endswith(".js"):
-                chunks.append(rel)
-
-        routes = {}
-        for r in self._routes:
-            if r.name in client_by_route:
-                routes[r.name] = RouteAssets(
-                    ssr=f"ssr/{r.name}.mjs",
-                    client=client_by_route[r.name],
-                    css=css_by_route.get(r.name),
-                    preload=chunks,
-                )
-        if routes:
+        # Lenient by design (unlike BuildPipeline's strict BuildError): a
+        # route or layout's output can be transiently absent mid-rebuild
+        # while watching, and the next successful rebuild event will catch
+        # it up. Only require at least one route to be ready before writing
+        # anything at all, matching this method's prior behavior.
+        if route_assets:
             Manifest(
-                routes=routes,
+                routes=route_assets,
                 build_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 remote_modules=self._remote_assets,
+                layouts=layout_assets,
+                global_css=global_css_out,
             ).write(self.dist_dir / "manifest.json")
