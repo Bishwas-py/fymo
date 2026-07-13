@@ -51,8 +51,8 @@ def test_soft_nav_data_returns_leaf_envelope(blog_app: Path, monkeypatch):
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from app.lib.seeder import ensure_seeded
-    ensure_seeded(blog_app)
+    from tests.integration._seed_helpers import seed_test_post
+    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
@@ -89,8 +89,8 @@ def test_soft_nav_unknown_route_returns_no_route(blog_app: Path, monkeypatch):
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from app.lib.seeder import ensure_seeded
-    ensure_seeded(blog_app)
+    from tests.integration._seed_helpers import seed_test_post
+    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
@@ -111,8 +111,8 @@ def test_soft_nav_root_path(blog_app: Path, monkeypatch):
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from app.lib.seeder import ensure_seeded
-    ensure_seeded(blog_app)
+    from tests.integration._seed_helpers import seed_test_post
+    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
@@ -254,8 +254,8 @@ def test_soft_nav_disabled_resource_returns_error_envelope(blog_app: Path, monke
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from app.lib.seeder import ensure_seeded
-    ensure_seeded(blog_app)
+    from tests.integration._seed_helpers import seed_test_post
+    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
@@ -305,8 +305,8 @@ def test_soft_nav_includes_resource_layout_for_layout_routes(blog_app: Path, nod
     from fymo.core.server import FymoApp
     app = FymoApp(blog_app, dev=False)
 
-    from app.lib.seeder import ensure_seeded
-    ensure_seeded(blog_app)
+    from tests.integration._seed_helpers import seed_test_post
+    seed_test_post()
 
     (status, _), payload = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
     decoded = devalue.parse(payload["result"])

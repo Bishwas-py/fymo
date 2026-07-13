@@ -2,5 +2,5 @@ dist/
 .fymo/
 .venv/
 node_modules/
-app/data/
+app/data/*.db
 __pycache__/

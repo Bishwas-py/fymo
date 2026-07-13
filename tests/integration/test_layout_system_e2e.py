@@ -75,8 +75,8 @@ def test_full_layout_system_end_to_end(blog_app: Path):
     # 3. Soft-nav to a post reports usesLayoutShell + omits resourceLayout
     #    (no posts/_layout.svelte in this migration), and rootLayoutProps
     #    is present ({} since the root layout has no controller).
-    from app.lib.seeder import ensure_seeded
-    ensure_seeded(blog_app)
+    from tests.integration._seed_helpers import seed_test_post
+    seed_test_post()
     status, out = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
     payload = json.loads(out)
     decoded = devalue.parse(payload["result"])

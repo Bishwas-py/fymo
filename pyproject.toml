@@ -65,8 +65,6 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pydantic>=2.5",
-    "mistune>=3.0",
-    "pygments>=2.0",
 ]
 
 [tool.pytest.ini_options]

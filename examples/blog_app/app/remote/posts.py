@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from fymo.remote import current_uid, NotFound
 from fymo.auth import require_auth, current_user
-from app.lib.db import get_db
+from app.data.db import get_db
 
 
 class Post(TypedDict):
