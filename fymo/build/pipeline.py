@@ -212,17 +212,22 @@ class BuildPipeline:
             # their source file is the raw _layout.svelte (no per-route stub
             # like routes get from entry_generator.py), so esbuild's metafile
             # `entryPoint` is the .svelte source path -- its basename never
-            # matches "_layout-<id>.js". The object key only surfaces in the
-            # *output* filename (entryNames: '[name].[hash]'), so match on
-            # that instead. Verified against a real esbuild build.
-            out_name = Path(out_path).name
-            matched_layout = next(
-                (
-                    ref for ref in all_layouts
-                    if out_name.startswith(f"_layout-{ref.id}.") and out_name.endswith(".js")
-                ),
-                None,
-            )
+            # matches "_layout-<id>.js". `ref.id` is an unsanitized directory
+            # name (see discovery.py), so it can itself contain "." -- e.g.
+            # resource dirs "a" and "a.b" both -- which would make a
+            # string-prefix match on the hashed output filename ambiguous
+            # (out_name.startswith(f"_layout-{ref.id}.")). Match by path
+            # identity instead: resolve entry_point the same way abs_out()
+            # resolves other paths here, and compare it to ref.svelte_path,
+            # mirroring the route branch's identity match on entry_name.
+            if not str(rel_to_dist).endswith(".js"):
+                matched_layout = None
+            else:
+                entry_point_abs = abs_out(entry_point)
+                matched_layout = next(
+                    (ref for ref in all_layouts if entry_point_abs == ref.svelte_path.resolve()),
+                    None,
+                )
             if matched_layout is not None:
                 layout_client[matched_layout.id] = str(rel_to_dist).replace("\\", "/")
                 css_bundle = info.get("cssBundle")
@@ -262,10 +267,13 @@ class BuildPipeline:
                 uses_layout_shell=bool(r.layout_chain),
             )
 
+        for ref in all_layouts:
+            if ref.id not in layout_client:
+                raise BuildError(f"esbuild produced no client output for layout '{ref.id}'")
+
         layouts_assets = {
             ref.id: LayoutAssets(client=layout_client[ref.id], css=layout_css.get(ref.id))
             for ref in all_layouts
-            if ref.id in layout_client
         }
 
         return Manifest(

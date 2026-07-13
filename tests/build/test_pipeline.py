@@ -81,6 +81,69 @@ def test_pipeline_populates_layout_chain_and_layouts_manifest(blog_app: Path, no
         assert ssr_path.is_file()
 
 
+def test_pipeline_layout_ids_with_dot_do_not_collide(blog_app: Path, node_available):
+    """Regression test for a matching bug: `ref.id` is an unsanitized resource
+    directory name, so two resource-level layouts with ids like "a" and
+    "a.b" produce hashed output filenames "_layout-a.<hash>.js" and
+    "_layout-a.b.<hash>.js" -- the latter also satisfies a naive
+    `out_name.startswith(f"_layout-{ref.id}.")` check for id "a". Matching
+    must instead be by path identity (metafile entryPoint vs
+    ref.svelte_path), which does not have this collision."""
+    templates = blog_app / "app" / "templates"
+    for resource_id in ("a", "a.b"):
+        resource_dir = templates / resource_id
+        resource_dir.mkdir(parents=True, exist_ok=True)
+        (resource_dir / "_layout.svelte").write_text(
+            "<script>\n  let { children } = $props();\n</script>\n"
+            f"<div data-layout-marker=\"marker-{resource_id.replace('.', '-')}\">"
+            "{@render children()}</div>\n"
+        )
+    from fymo.build.pipeline import BuildPipeline
+    result = BuildPipeline(blog_app).build(dev=False)
+    from fymo.build.manifest import Manifest
+    manifest = Manifest.read(result.manifest_path)
+
+    assert "a" in manifest.layouts
+    assert "a.b" in manifest.layouts
+    assert manifest.layouts["a"].client != manifest.layouts["a.b"].client
+
+    client_a = (blog_app / "dist" / manifest.layouts["a"].client).read_text()
+    client_ab = (blog_app / "dist" / manifest.layouts["a.b"].client).read_text()
+    assert "marker-a" in client_a
+    assert "marker-a-b" not in client_a
+    assert "marker-a-b" in client_ab
+
+
+def test_pipeline_raises_on_unmatched_layout_output(blog_app: Path):
+    """If esbuild's metafile has no output matching a discovered layout's
+    svelte_path (e.g. due to a matching bug, or a build-tool quirk), the
+    pipeline must fail loudly instead of silently dropping the layout from
+    manifest.layouts -- mirrors the route branch's analogous BuildError."""
+    templates = blog_app / "app" / "templates"
+    (templates / "_layout.svelte").write_text(
+        "<script>\n  let { children } = $props();\n</script>\n{@render children()}\n"
+    )
+    from fymo.build.pipeline import BuildPipeline
+    from fymo.build.discovery import discover_routes, discover_all_layouts
+
+    pipeline = BuildPipeline(blog_app)
+    routes = discover_routes(templates)
+    all_layouts = discover_all_layouts(templates)
+    assert any(ref.id == "_root" for ref in all_layouts)
+
+    # Fabricate an esbuild client metafile with output for every route (so
+    # the route-side check passes) but none for any layout -- as if the
+    # layout entry point's output never got emitted.
+    fake_outputs = {
+        f"dist/client/{r.name}.deadbeef.js": {"entryPoint": f"{r.name}.client.js"}
+        for r in routes
+    }
+    fake_result = {"client": {"outputs": fake_outputs}}
+
+    with pytest.raises(BuildError, match="esbuild produced no client output for layout '_root'"):
+        pipeline._build_manifest(routes, fake_result, {}, all_layouts, False)
+
+
 def test_pipeline_no_layout_routes_unaffected(example_app: Path, node_available):
     """todo_app has no _layout.svelte -- manifest routes must have empty
     layout_chain and uses_layout_shell=False, matching pre-feature behavior."""
