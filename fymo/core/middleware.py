@@ -76,13 +76,49 @@ class _TokenBucket:
         return False
 
 
+#: How often (in seconds) `RateLimiter.check` opportunistically sweeps idle
+#: buckets. A dedicated background thread isn't worth it for this -- request
+#: traffic itself drives the sweep, and a 60s cadence bounds the sweep's own
+#: overhead to well under the cost of the token-bucket check it rides along
+#: with.
+_SWEEP_INTERVAL_SECONDS = 60.0
+
+
 class RateLimiter:
-    """Per-(IP, rule) token bucket rate limiter, in-process."""
+    """Per-(IP, rule) token bucket rate limiter, in-process.
+
+    `_buckets` is otherwise unbounded: every distinct (client_ip, rule)
+    pair seen gets its own entry that nothing ever removes, so a
+    long-running process fielding traffic from many distinct IPs (the
+    normal case for anything public-facing) leaks memory for as long as it
+    runs. `check` opportunistically sweeps idle buckets to bound this.
+    """
 
     def __init__(self, config: RateLimitConfig):
         self.config = config
         self._buckets: Dict[Tuple[str, str], _TokenBucket] = {}
         self._lock = threading.Lock()
+        self._last_sweep = time.monotonic()
+
+    def _sweep_idle_buckets(self, now: float) -> None:
+        """Drop buckets that have fully refilled since their last request.
+
+        A fully-refilled bucket carries no state a brand-new one wouldn't
+        also have (both start at `capacity` tokens), so evicting it doesn't
+        change any client-visible behavior -- the next request for that key
+        just lazily recreates an identical bucket. Buckets with partial
+        state (a client currently being throttled, or one that hasn't been
+        idle long enough to fully refill) are left alone, since dropping
+        those WOULD reset their limit early. Must be called with `_lock`
+        held.
+        """
+        stale = [
+            key
+            for key, bucket in self._buckets.items()
+            if bucket.tokens + (now - bucket.last_refill) * bucket.rate >= bucket.capacity
+        ]
+        for key in stale:
+            del self._buckets[key]
 
     def client_ip(self, environ: dict) -> str:
         if self.config.trust_proxy:
@@ -119,6 +155,11 @@ class RateLimiter:
         scope_key = (ip, rule_key)
 
         with self._lock:
+            now = time.monotonic()
+            if now - self._last_sweep >= _SWEEP_INTERVAL_SECONDS:
+                self._sweep_idle_buckets(now)
+                self._last_sweep = now
+
             bucket = self._buckets.get(scope_key)
             if bucket is None or bucket.capacity != rpm:
                 bucket = _TokenBucket(capacity=rpm, rate=rpm / 60.0)
@@ -341,7 +382,14 @@ class MiddlewareSettings:
                 continue
 
         rate_limit_config = RateLimitConfig(
-            enabled=bool(rl.get("enabled", True)),
+            # Defaults to enabled in production, disabled in dev -- a single
+            # developer's browser tabs, soft-nav clicks, and page reloads all
+            # share one token bucket (same REMOTE_ADDR) for the whole life of
+            # `fymo dev`, so the production-sane default of 60/min is easy to
+            # exhaust during ordinary local testing. Still fully overridable
+            # either direction via an explicit `rate_limit.enabled` in
+            # fymo.yml, in prod or in dev.
+            enabled=bool(rl.get("enabled", not dev)),
             default_rpm=int(rl.get("requests_per_minute", 60)),
             path_rules=path_rules,
             trust_proxy=bool(rl.get("trust_proxy", False)),

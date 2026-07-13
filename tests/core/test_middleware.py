@@ -123,6 +123,68 @@ def test_trust_proxy_ignores_xff_when_disabled():
     assert rl.check(_env(ip="10.0.0.1", xff="DIFFERENT"))[0] is False
 
 
+# ---------------- Bucket eviction (unbounded-growth fix) ----------------
+
+
+def test_idle_fully_refilled_buckets_are_swept():
+    """A long-running process fielding traffic from many distinct IPs must
+    not accumulate one bucket per IP forever -- idle (fully-refilled)
+    buckets get dropped so memory stays bounded to recently-active clients."""
+    rl = RateLimiter(RateLimitConfig(enabled=True, default_rpm=60))
+    rl.check(_env(ip="1.1.1.1"))
+    key_a = ("1.1.1.1", "")
+    assert key_a in rl._buckets
+
+    # Simulate: plenty of time has passed since both this bucket's last
+    # request and the limiter's last sweep, so the bucket is fully refilled
+    # (idle) and the next check() call is due to sweep.
+    rl._buckets[key_a].last_refill -= 1000
+    rl._last_sweep -= 1000
+
+    rl.check(_env(ip="2.2.2.2"))  # triggers the sweep as a side effect
+
+    assert key_a not in rl._buckets  # idle bucket dropped
+    assert ("2.2.2.2", "") in rl._buckets  # the just-created one stays
+
+
+def test_actively_throttled_buckets_survive_sweep():
+    """A bucket that's currently rate-limiting a client (partial/zero
+    tokens) must NOT be dropped by the sweep -- that would silently reset
+    the client's limit early, defeating the point of the limiter."""
+    rl = RateLimiter(RateLimitConfig(enabled=True, default_rpm=1))
+    rl.check(_env(ip="1.1.1.1"))  # consumes the only token
+    assert rl.check(_env(ip="1.1.1.1"))[0] is False  # now throttled
+
+    key_a = ("1.1.1.1", "")
+    assert rl._buckets[key_a].tokens < 1.0
+
+    # Force the sweep to run, but WITHOUT enough elapsed time for the
+    # throttled bucket to refill (unlike the idle-bucket test above).
+    rl._last_sweep -= 1000
+
+    rl.check(_env(ip="2.2.2.2"))
+
+    assert key_a in rl._buckets  # still throttled, not reset early
+    assert rl.check(_env(ip="1.1.1.1"))[0] is False
+
+
+def test_sweep_does_not_run_before_interval_elapses():
+    """The sweep only runs once per _SWEEP_INTERVAL_SECONDS -- it rides
+    along with normal request traffic rather than needing its own thread,
+    so it must not do the (cheap but non-zero) full-dict scan on every
+    single request."""
+    from fymo.core.middleware import _SWEEP_INTERVAL_SECONDS
+
+    rl = RateLimiter(RateLimitConfig(enabled=True, default_rpm=60))
+    rl.check(_env(ip="1.1.1.1"))
+    last_sweep_before = rl._last_sweep
+
+    rl.check(_env(ip="2.2.2.2"))  # well within the interval
+
+    assert rl._last_sweep == last_sweep_before
+    assert _SWEEP_INTERVAL_SECONDS > 0
+
+
 # ---------------- Body cap ----------------
 
 
@@ -253,6 +315,36 @@ def test_settings_from_yaml_complete():
 def test_settings_disabled_rate_limit():
     s = MiddlewareSettings.from_yaml(
         limits={"rate_limit": {"enabled": False}}, security={},
+    )
+    assert s.rate_limit_config.enabled is False
+
+
+def test_rate_limit_disabled_by_default_in_dev():
+    """A single developer's browser tabs/soft-nav clicks/reloads all share
+    one token bucket for the whole `fymo dev` process life -- the
+    production-sane 60/min default is easy to exhaust during ordinary local
+    testing, so dev mode must not rate-limit unless explicitly asked to."""
+    s = MiddlewareSettings.from_yaml(limits={}, security={}, dev=True)
+    assert s.rate_limit_config.enabled is False
+
+
+def test_rate_limit_enabled_by_default_in_prod():
+    s = MiddlewareSettings.from_yaml(limits={}, security={}, dev=False)
+    assert s.rate_limit_config.enabled is True
+
+
+def test_rate_limit_explicit_enabled_true_wins_even_in_dev():
+    """An explicit `rate_limit.enabled: true` in fymo.yml must still be
+    honored in dev -- e.g. someone deliberately testing the limiter locally."""
+    s = MiddlewareSettings.from_yaml(
+        limits={"rate_limit": {"enabled": True}}, security={}, dev=True,
+    )
+    assert s.rate_limit_config.enabled is True
+
+
+def test_rate_limit_explicit_enabled_false_wins_even_in_prod():
+    s = MiddlewareSettings.from_yaml(
+        limits={"rate_limit": {"enabled": False}}, security={}, dev=False,
     )
     assert s.rate_limit_config.enabled is False
 
