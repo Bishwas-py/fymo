@@ -10,6 +10,7 @@ from typing import Optional
 from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
 from fymo.build.composition_generator import generate_ssr_tree
+from fymo.build.hygiene import check_directory_hygiene, format_hygiene_error
 from fymo.build.manifest import Manifest, RouteAssets, RemoteModuleAssets, LayoutRefAsset, LayoutAssets
 from fymo.remote.discovery import discover_remote_modules
 from fymo.remote.codegen import emit_module, emit_runtime
@@ -35,6 +36,15 @@ class BuildPipeline:
         self.build_script = Path(__file__).resolve().parent / "js" / "build.mjs"
 
     def build(self, dev: bool = False) -> BuildResult:
+        # Pure filesystem check, no external dependency -- runs before the
+        # node check so a misplaced file is reported even in an environment
+        # where node isn't installed at all, rather than being masked by a
+        # "node executable not found" error that doesn't mention the more
+        # fundamental structural issue.
+        hygiene_violations = check_directory_hygiene(self.project_root)
+        if hygiene_violations:
+            raise BuildError(format_hygiene_error(hygiene_violations))
+
         if shutil.which("node") is None:
             raise BuildError("node executable not found on PATH")
 

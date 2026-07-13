@@ -9,6 +9,7 @@ from typing import Callable, List, Optional
 
 from fymo.build.discovery import discover_routes
 from fymo.build.entry_generator import write_client_entries
+from fymo.build.hygiene import check_directory_hygiene, format_hygiene_error
 from fymo.build.manifest import Manifest, RemoteModuleAssets, RouteAssets
 from fymo.remote.codegen import emit_module, emit_runtime
 from fymo.remote.discovery import discover_remote_modules
@@ -33,6 +34,12 @@ class DevOrchestrator:
         self._listeners.append(fn)
 
     def start(self) -> None:
+        # Pure filesystem check first, same ordering rationale as
+        # BuildPipeline.build() -- no external dependency, so it shouldn't
+        # be masked by (or wait on) the node-availability check.
+        hygiene_violations = check_directory_hygiene(self.project_root)
+        if hygiene_violations:
+            raise RuntimeError(format_hygiene_error(hygiene_violations))
         if shutil.which("node") is None:
             raise RuntimeError("node not found on PATH")
         templates = self.project_root / "app" / "templates"

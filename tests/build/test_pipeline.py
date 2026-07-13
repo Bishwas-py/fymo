@@ -177,10 +177,10 @@ def test_pipeline_no_global_css_leaves_manifest_field_none(example_app: Path, no
     assert manifest.global_css is None
 
 
-def test_lib_and_shared_aliases_resolve_to_real_files(blog_app: Path, node_available):
+def test_lib_and_components_aliases_resolve_to_real_files(blog_app: Path, node_available):
     """blog_app's real source imports via `$lib/auth` (Nav.svelte) and
-    `$_shared/Nav.svelte` (_layout.svelte). Proves both aliases are load-
-    bearing -- not just "the build happens not to error" -- via a
+    `$components/Nav.svelte` (_layout.svelte). Proves both aliases are
+    load-bearing -- not just "the build happens not to error" -- via a
     negative control: the build must succeed with the real files present,
     then FAIL specifically once each aliased target is removed, showing
     the resolution genuinely depends on that exact file rather than
@@ -204,16 +204,16 @@ def test_lib_and_shared_aliases_resolve_to_real_files(blog_app: Path, node_avail
     finally:
         (blog_app / "app" / "lib" / "auth.ts.bak").rename(auth_ts)
 
-    # Negative control for $_shared/*: remove its target, confirm the build
-    # now fails because _layout.svelte's `$_shared/Nav.svelte` import can no
-    # longer resolve.
-    nav_svelte = blog_app / "app" / "templates" / "_shared" / "Nav.svelte"
-    nav_svelte.rename(blog_app / "app" / "templates" / "_shared" / "Nav.svelte.bak")
+    # Negative control for $components/*: remove its target, confirm the
+    # build now fails because _layout.svelte's `$components/Nav.svelte`
+    # import can no longer resolve.
+    nav_svelte = blog_app / "app" / "components" / "Nav.svelte"
+    nav_svelte.rename(blog_app / "app" / "components" / "Nav.svelte.bak")
     try:
         with pytest.raises(BuildError):
             BuildPipeline(blog_app).build(dev=False)
     finally:
-        (blog_app / "app" / "templates" / "_shared" / "Nav.svelte.bak").rename(nav_svelte)
+        (blog_app / "app" / "components" / "Nav.svelte.bak").rename(nav_svelte)
 
     # Confirm the fixture is back to a fully working state (both renames
     # were restored) rather than just trusting the finally blocks ran.
@@ -221,29 +221,24 @@ def test_lib_and_shared_aliases_resolve_to_real_files(blog_app: Path, node_avail
     assert result.ok
 
 
-def test_server_only_guard_fails_build_when_reached_from_client(example_app: Path, node_available):
-    """A file under app/lib/server/ imported from a client-reachable
-    component must fail the build loudly, not silently ship to the browser."""
-    server_dir = example_app / "app" / "lib" / "server"
-    server_dir.mkdir(parents=True)
-    (server_dir / "secret.ts").write_text('export const API_SECRET = "s3cr3t";\n')
-
-    leaf = example_app / "app" / "templates" / "home" / "index.svelte"
-    original = leaf.read_text()
-    leaf.write_text(
-        "<script>\n  import { API_SECRET } from '../../lib/server/secret';\n"
-        + original.removeprefix("<script>\n")
-    )
-
-    from fymo.build.pipeline import BuildPipeline
-    with pytest.raises(BuildError, match="server-only"):
+def test_build_fails_on_svelte_file_in_controllers(example_app: Path, node_available):
+    (example_app / "app" / "controllers" / "oops.svelte").write_text("<div></div>")
+    with pytest.raises(BuildError, match="app/controllers/oops.svelte"):
         BuildPipeline(example_app).build(dev=False)
 
 
-def test_server_only_guard_is_noop_without_app_lib_server(example_app: Path, node_available):
-    """No app/lib/server/ directory at all (the common case, e.g. todo_app
-    today) -- the guard plugin must not affect the build in any way."""
-    assert not (example_app / "app" / "lib" / "server").exists()
-    from fymo.build.pipeline import BuildPipeline
-    result = BuildPipeline(example_app).build(dev=False)
-    assert result.ok
+def test_build_fails_on_py_file_in_templates(example_app: Path, node_available):
+    (example_app / "app" / "templates" / "oops.py").write_text("x = 1\n")
+    with pytest.raises(BuildError, match="app/templates/oops.py"):
+        BuildPipeline(example_app).build(dev=False)
+
+
+def test_hygiene_check_runs_even_without_node_on_path(example_app: Path, monkeypatch):
+    """The violation must be reported even when node isn't available at all
+    -- proves this is a fast, up-front filesystem check that doesn't depend
+    on (or get masked by) the node-availability check, not something that
+    only surfaces once a real build gets underway."""
+    (example_app / "app" / "controllers" / "oops.svelte").write_text("<div></div>")
+    monkeypatch.setattr("fymo.build.pipeline.shutil.which", lambda cmd: None)
+    with pytest.raises(BuildError, match="app/controllers/oops.svelte"):
+        BuildPipeline(example_app).build(dev=False)

@@ -1,0 +1,47 @@
+"""Directory-hygiene validation, shared by `fymo build` and `fymo dev`.
+
+app/controllers/ is Python-only; app/templates/ and app/components/ are
+frontend-only (.svelte/.ts). A misplaced file doesn't actually break
+anything mechanically -- Python's controller loader never tries to import
+a stray .svelte file, and esbuild never bundles a stray .py file sitting
+in a template/component directory -- which is exactly what makes it easy
+to miss without an explicit check: the file just silently does nothing,
+instead of erroring where a developer would notice.
+"""
+from pathlib import Path
+from typing import List
+
+_FRONTEND_ONLY_DIRS = ("templates", "components")
+
+
+def check_directory_hygiene(project_root: Path) -> List[str]:
+    """Return a list of human-readable violation messages (empty if none)."""
+    violations: List[str] = []
+
+    controllers_dir = project_root / "app" / "controllers"
+    if controllers_dir.is_dir():
+        for f in sorted(controllers_dir.rglob("*.svelte")):
+            violations.append(
+                f"{f.relative_to(project_root)}: .svelte file inside app/controllers/ "
+                f"(Python-only -- move it to app/templates/ or app/components/)"
+            )
+
+    for dir_name in _FRONTEND_ONLY_DIRS:
+        frontend_dir = project_root / "app" / dir_name
+        if frontend_dir.is_dir():
+            for f in sorted(frontend_dir.rglob("*.py")):
+                violations.append(
+                    f"{f.relative_to(project_root)}: .py file inside app/{dir_name}/ "
+                    f"(frontend-only -- move it to app/controllers/, app/remote/, or app/lib/)"
+                )
+
+    return violations
+
+
+def format_hygiene_error(violations: List[str]) -> str:
+    bullet_list = "\n".join(f"  - {v}" for v in violations)
+    return (
+        "Directory hygiene violation(s) found:\n" + bullet_list +
+        "\n\napp/controllers/ is Python-only; app/templates/ and app/components/ "
+        "are frontend-only."
+    )
