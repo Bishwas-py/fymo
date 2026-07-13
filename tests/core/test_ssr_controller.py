@@ -54,3 +54,67 @@ def test_load_controller_context_handles_missing_hooks():
     props, doc_meta = load_controller_context(EmptyController(), {}, auth_enabled=False, environ=None)
     assert props == {}
     assert doc_meta == {}
+
+
+def test_merge_docs_leaf_wins_on_scalar_keys():
+    from fymo.core.ssr_controller import merge_docs
+    merged = merge_docs([{"title": "Root default"}, {"title": "Post: Hello"}])
+    assert merged["title"] == "Post: Hello"
+
+
+def test_merge_docs_concatenates_head_meta_and_link():
+    from fymo.core.ssr_controller import merge_docs
+    root_doc = {"head": {"meta": [{"name": "og:site", "content": "Blog"}]}}
+    leaf_doc = {"head": {"meta": [{"name": "description", "content": "A post"}], "link": [{"rel": "canonical", "href": "/x"}]}}
+    merged = merge_docs([root_doc, leaf_doc])
+    assert merged["head"]["meta"] == [
+        {"name": "og:site", "content": "Blog"},
+        {"name": "description", "content": "A post"},
+    ]
+    assert merged["head"]["link"] == [{"rel": "canonical", "href": "/x"}]
+
+
+def test_merge_docs_empty_list_returns_empty_dict():
+    from fymo.core.ssr_controller import merge_docs
+    assert merge_docs([]) == {}
+
+
+def test_load_layout_props_and_docs_fills_missing_levels_with_empty_dict(monkeypatch):
+    from fymo.core.ssr_controller import load_layout_props_and_docs
+    from fymo.build.manifest import LayoutRefAsset
+    props_by_level, docs = load_layout_props_and_docs([], {}, False, None)
+    assert props_by_level == {"root": {}, "resource": {}}
+    assert docs == []
+
+
+def test_load_layout_props_and_docs_invokes_controller_per_level(monkeypatch, tmp_path):
+    import sys
+    from fymo.core.ssr_controller import load_layout_props_and_docs
+    from fymo.build.manifest import LayoutRefAsset
+
+    pkg_dir = tmp_path / "layoutpkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("")
+    (pkg_dir / "root_ctrl.py").write_text(
+        "def getContext():\n    return {'nav_items': ['a', 'b']}\n"
+        "def getDoc():\n    return {'title': 'Root'}\n"
+    )
+    (pkg_dir / "resource_ctrl.py").write_text(
+        "def getContext():\n    return {'active_tab': 'posts'}\n"
+        "def getDoc():\n    return {}\n"
+    )
+    sys.path.insert(0, str(tmp_path))
+    try:
+        chain = [
+            LayoutRefAsset(level="root", id="_root", controller_module="layoutpkg.root_ctrl"),
+            LayoutRefAsset(level="resource", id="posts", controller_module="layoutpkg.resource_ctrl"),
+        ]
+        props_by_level, docs = load_layout_props_and_docs(chain, {}, False, None)
+        assert props_by_level["root"] == {"nav_items": ["a", "b"]}
+        assert props_by_level["resource"] == {"active_tab": "posts"}
+        assert docs == [{"title": "Root"}, {}]
+    finally:
+        sys.path.remove(str(tmp_path))
+        for name in list(sys.modules):
+            if name.startswith("layoutpkg"):
+                del sys.modules[name]
