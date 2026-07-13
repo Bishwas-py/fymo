@@ -1,0 +1,42 @@
+# .dockerignore for a Fymo application build context.
+#
+# The Dockerfile at repo root is a template meant to sit at the root of a
+# Fymo project (alongside server.py, fymo.yml, app/, requirements.txt,
+# package.json — the layout `fymo new` scaffolds). This file trims the
+# build context to what `fymo build` and `fymo serve --prod` actually need,
+# so images build faster and never accidentally ship secrets or local state.
+
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+virtualenv/
+*.egg-info/
+.pytest_cache/
+
+# Node — reinstalled inside the image from package-lock.json
+node_modules/
+
+# Build output — rebuilt inside the image by `fymo build`; never ship a
+# stale host copy into the build context.
+dist/
+
+# Fymo runtime state / auto-generated dev secret — never bake into an image
+.fymo/
+
+# Editors / OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Docs/tests — not needed to build or run the image
+docs/
+tests/
+README.md
+LICENSE

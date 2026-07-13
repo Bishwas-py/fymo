@@ -1,0 +1,15 @@
+virtualenv/
+.idea/
+__pycache__/
+node_modules/
+dist/
+!fymo/bundler/js/dist/
+venv/
+.venv/
+.worktrees/
+.fymo/
+.playwright-mcp/
+*.egg-info/
+/build/
+# local working docs (specs/plans) — never committed; substance goes to journal/
+/docs/superpowers/

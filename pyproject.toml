@@ -1,0 +1,77 @@
+[project]
+name = "fymo"
+version = "0.6.0"
+description = "Python SSR framework for Svelte 5 — esbuild pipeline, Node sidecar, SvelteKit-style remote functions"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Bishwas Bhandari", email = "bishwasbh@gmail.com" },
+]
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.0.0",
+    "gunicorn>=23.0.0",
+    "pyyaml>=6.0",
+]
+keywords = ["svelte", "ssr", "python", "framework", "wsgi", "esbuild"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
+[project.optional-dependencies]
+pydantic = ["pydantic>=2.5"]
+procrastinate = ["procrastinate>=3.0", "psycopg[binary,pool]>=3.1"]
+
+[project.scripts]
+fymo = "fymo.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/Bishwas-py/fymo"
+Repository = "https://github.com/Bishwas-py/fymo"
+Issues = "https://github.com/Bishwas-py/fymo/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fymo"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "fymo/**",
+    "tests/**",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "fymo/bundler/js/node_modules",
+    "fymo/build/js/node_modules",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pydantic>=2.5",
+    "mistune>=3.0",
+    "pygments>=2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+norecursedirs = ["*.egg", ".*", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"]

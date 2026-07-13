@@ -1,0 +1,4 @@
+fymo>=0.1.0
+mistune>=3.0
+pygments>=2.17
+pydantic>=2.5
