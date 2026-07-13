@@ -8,10 +8,61 @@ from fymo.build.discovery import Route
 
 SSR_TREE_TEMPLATE = """\
 <script>
+{imports}
   let {{ leafProps, layoutProps }} = $props();
+
+  function onLeafError(error) {{
+    if (typeof console !== 'undefined') console.error('[fymo] leaf render error:', error);
+  }}
 </script>
-{open_tags}<Leaf {{...leafProps}} />
-{close_tags}"""
+
+{{#snippet leafSlot()}}
+  <svelte:boundary onerror={{onLeafError}}>
+    <Leaf {{...leafProps}} />
+    {{#snippet failed(error, reset)}}
+      <div class="fymo-leaf-error">Something went wrong. <button onclick={{reset}}>Retry</button></div>
+    {{/snippet}}
+  </svelte:boundary>
+{{/snippet}}
+
+{root_open}{resource_block}{root_close}"""
+
+SSR_ROOT_OPEN = "<RootLayout {...layoutProps.root}>\n"
+SSR_ROOT_CLOSE = "\n</RootLayout>"
+
+# Structural mirror of entry_generator.py's SHELL_RESOURCE_BLOCK: the client
+# shell ALWAYS wraps the leaf slot in an {#if}/{:else}/{/if} around the
+# resource-layout slot (so soft-nav can swap one in without changing the
+# shell's post-hydration markup shape). SSR has no such runtime concern --
+# whether this route has a resource layout is a static, per-route fact known
+# at generation time -- but it must still emit the SAME {#if}/{:else}/{/if}
+# control-flow shape so the compiler's hydration anchor comments match the
+# client shell's for the same route. The condition is a literal `true`/
+# `false` rather than a reactive variable; Svelte does not dead-code-eliminate
+# literal-condition {#if} blocks (verified against the compiler directly --
+# both branches still compile and both `generate: 'server'` and
+# `generate: 'client'` output the same anchor/comment structure regardless of
+# the literal value), so this preserves hydration compatibility.
+SSR_RESOURCE_BLOCK_WITH_LAYOUT = """{#if true}
+  <ResourceLayout {...layoutProps.resource}>
+    {@render leafSlot()}
+  </ResourceLayout>
+{:else}
+  {@render leafSlot()}
+{/if}
+"""
+
+# No resource layout for this route at build time -- both branches render the
+# leaf directly and no <ResourceLayout> import/reference appears anywhere in
+# the file. The {#if}/{:else}/{/if} wrapper is still emitted (with a literal
+# `false` condition) purely for structural parity with the client shell,
+# which always emits this wrapper for any route with a layout chain.
+SSR_RESOURCE_BLOCK_WITHOUT_LAYOUT = """{#if false}
+  {@render leafSlot()}
+{:else}
+  {@render leafSlot()}
+{/if}
+"""
 
 
 def _import_line(name: str, path: Path, out_dir_resolved: Path) -> str:
@@ -46,24 +97,25 @@ def generate_ssr_tree(route: Route, out_dir: Path) -> Optional[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_dir_resolved = out_dir.resolve()
 
-    imports = [_import_line("Leaf", route.entry_path, out_dir_resolved)]
-    open_tags = []
-    close_tags = []
+    has_root = any(ref.level == "root" for ref in route.layout_chain)
+    has_resource = any(ref.level == "resource" for ref in route.layout_chain)
+
+    imports = ["  " + _import_line("Leaf", route.entry_path, out_dir_resolved)]
     for ref in route.layout_chain:
-        component_name = "RootLayout" if ref.level == "root" else "ResourceLayout"
-        imports.append(_import_line(component_name, ref.svelte_path, out_dir_resolved))
-        props_key = "root" if ref.level == "root" else "resource"
-        open_tags.append(f"<{component_name} {{...layoutProps.{props_key}}}>\n")
-        close_tags.insert(0, f"</{component_name}>\n")
+        name = "RootLayout" if ref.level == "root" else "ResourceLayout"
+        imports.append("  " + _import_line(name, ref.svelte_path, out_dir_resolved))
+
+    root_open = SSR_ROOT_OPEN if has_root else ""
+    root_close = SSR_ROOT_CLOSE if has_root else ""
+    resource_block = (
+        SSR_RESOURCE_BLOCK_WITH_LAYOUT if has_resource else SSR_RESOURCE_BLOCK_WITHOUT_LAYOUT
+    )
 
     body = SSR_TREE_TEMPLATE.format(
-        open_tags="".join(open_tags),
-        close_tags="".join(close_tags),
-    )
-    # Imports go above the props declaration inside the same <script> block.
-    body = body.replace(
-        "let {{ leafProps, layoutProps }} = $props();".replace("{{", "{").replace("}}", "}"),
-        "\n  ".join(imports) + "\n\n  let { leafProps, layoutProps } = $props();",
+        imports="\n".join(imports),
+        root_open=root_open,
+        root_close=root_close,
+        resource_block=resource_block,
     )
 
     out_path = out_dir / f"{route.name}.tree.svelte"

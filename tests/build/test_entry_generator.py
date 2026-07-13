@@ -136,6 +136,14 @@ def test_layout_chain_generates_shell_and_bootstrap(tmp_path: Path):
     assert "shellInstance.updateRootLayoutProps" in bootstrap
     assert "shellInstance.updateResourceLayoutProps" in bootstrap
     assert "unmount(currentMount)" not in bootstrap  # old full-remount path is gone for shell routes
+    # Regression guard: without `export default InitialLeaf`, soft-nav's
+    # `import(leaf.module)` for THIS route always resolves `.default` as
+    # undefined when navigating here from elsewhere, silently forcing a full
+    # page reload (window.location.href fallback) instead of a soft nav --
+    # every Python-level test can pass while the reactive shell never
+    # actually activates in a browser. See CLIENT_ENTRY_TEMPLATE's identical
+    # `export default Component;` contract for the non-layout-route case.
+    assert "export default InitialLeaf;" in bootstrap
 
 
 def test_root_only_layout_chain_still_renders_leaf_in_else_branch(tmp_path: Path):

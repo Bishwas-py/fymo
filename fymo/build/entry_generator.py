@@ -251,6 +251,11 @@ import Shell from './{shell_filename}';
 import InitialLeaf from '{component_import}';
 {initial_resource_layout_import}
 
+// Re-export the route's leaf Svelte component so the soft-nav router can
+// dynamic-`import()` this bundle later and pluck `.default` without
+// re-running the boot logic below (same contract as CLIENT_ENTRY_TEMPLATE).
+export default InitialLeaf;
+
 if (typeof window !== 'undefined' && !window.__fymoBooted) {{
 window.__fymoBooted = true;
 

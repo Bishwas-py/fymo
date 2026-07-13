@@ -32,6 +32,15 @@ def test_writes_tree_file_for_root_only_chain(tmp_path: Path):
     assert "<Leaf" in content
     assert "layoutProps.root" in content
     assert "leafProps" in content
+    # Structural parity with the client shell (entry_generator.py's
+    # SHELL_TEMPLATE): same leaf-slot snippet + boundary, same {#if}/{:else}/
+    # {/if} wrapper shape, so SSR and client hydration anchors match.
+    assert "{#snippet leafSlot()}" in content
+    assert "<svelte:boundary" in content
+    assert "{@render leafSlot()}" in content
+    assert "{#if false}" in content
+    assert "{:else}" in content
+    assert "{/if}" in content
 
 
 def test_writes_tree_file_for_root_and_resource_chain(tmp_path: Path):
@@ -61,8 +70,27 @@ def test_writes_tree_file_for_root_and_resource_chain(tmp_path: Path):
     assert "<RootLayout" in content
     assert "<ResourceLayout" in content
     assert "<Leaf" in content
-    # Root must nest outside resource, resource outside leaf.
-    assert content.index("<RootLayout") < content.index("<ResourceLayout") < content.index("<Leaf")
+    # Structural parity with the client shell: resource-layout slot is wrapped
+    # in {#if}/{:else}/{/if} (literal `true` since this route has a resource
+    # layout), and the leaf is rendered via the shared leafSlot snippet inside
+    # a <svelte:boundary>, matching entry_generator.py's SHELL_TEMPLATE shape.
+    assert "{#snippet leafSlot()}" in content
+    assert "<svelte:boundary" in content
+    assert "{#if true}" in content
+    assert "{:else}" in content
+    assert "{/if}" in content
+    assert content.count("{@render leafSlot()}") == 2
+    # Root must nest outside resource, resource outside the leaf-slot render,
+    # in the composed tree section (i.e. after the leafSlot snippet
+    # definition -- <Leaf itself lives inside that snippet's own body, which
+    # is defined once and referenced via {@render leafSlot()}, so ordering
+    # is checked against the render call, not the snippet's internal markup).
+    tree_section = content.split("{/snippet}")[-1]
+    assert (
+        tree_section.index("<RootLayout")
+        < tree_section.index("<ResourceLayout")
+        < tree_section.index("{@render leafSlot()}")
+    )
 
 
 def test_missing_layout_file_raises_filenotfounderror(tmp_path: Path):
