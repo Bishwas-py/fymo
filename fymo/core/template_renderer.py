@@ -12,7 +12,7 @@ from fymo.core.router import Router
 from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
 from fymo.core.exceptions import TemplateError, CompilationError, RenderingError, ControllerError
-from fymo.core.ssr_controller import load_controller_context, ssr_request_scope
+from fymo.core.ssr_controller import load_controller_context, ssr_request_scope, load_layout_props_and_docs, merge_docs
 from fymo.utils.colors import Color
 
 logger = logging.getLogger("fymo")
@@ -129,9 +129,6 @@ class TemplateRenderer:
         route_name = controller_key.split(".")[0]
         controller_module = f"app.controllers.{controller_key}"
         params = route_info.get("params", {})
-        _, props, doc_meta = self._load_controller_data(
-            controller_module, params=params, environ=environ
-        )
 
         try:
             manifest = self.manifest_cache.get()
@@ -143,13 +140,31 @@ class TemplateRenderer:
                 RuntimeError(f"Route '{route_name}' not in manifest. Run `fymo build`."),
                 "Server Error",
             )
+        assets = manifest.routes[route_name]
+
+        _, leaf_props, leaf_doc = self._load_controller_data(
+            controller_module, params=params, environ=environ
+        )
+
+        if assets.layout_chain:
+            layout_props_by_level, layout_docs = load_layout_props_and_docs(
+                assets.layout_chain, params, self.auth_enabled, environ
+            )
+            doc_meta = merge_docs(layout_docs + [leaf_doc])
+            sidecar_props = {
+                "leafProps": leaf_props,
+                "layoutProps": layout_props_by_level,
+            }
+        else:
+            doc_meta = leaf_doc
+            sidecar_props = leaf_props
 
         try:
             from fymo.core.html import _safe_json
             import json
             # Serialize props through _safe_json first so remote callables become
             # their marker dicts before being JSON-encoded for the IPC message.
-            serialized_props = json.loads(_safe_json(props))
+            serialized_props = json.loads(_safe_json(sidecar_props))
             ssr = self.sidecar.render(route_name, serialized_props, doc=doc_meta)
         except SidecarError as e:
             return self._render_error(e, "SSR Error")
@@ -162,11 +177,20 @@ class TemplateRenderer:
         html = build_html(
             body=ssr["body"],
             head_extra=head_extra,
-            props=props,
-            assets=manifest.routes[route_name],
+            props=sidecar_props,
+            assets=assets,
             title=title,
             doc=doc_meta,
             disabled_soft_nav=self.router.disabled_soft_nav_resources(),
+            # NOTE: build_html() does not accept a `global_css` parameter yet
+            # (that lands in Task 9, which also makes `html.build_html`
+            # actually consume `manifest.global_css`). Passing it here today
+            # would raise TypeError on *every* route, including routes with
+            # no layout chain, breaking the flat-props backward-compat
+            # requirement this task is held to. Deferred until Task 9 adds
+            # the parameter; Task 9 must also update this call site to pass
+            # `global_css=manifest.global_css` since Task 8 (the natural
+            # owner of this call site) landed before Task 9 existed.
         )
         return html, "200 OK"
 
@@ -223,7 +247,20 @@ class TemplateRenderer:
                     
                     if meta_attrs:
                         head_parts.append(f'    <meta {" ".join(meta_attrs)}>')
-        
+
+        # Generate link tags (stylesheets, canonical URLs, fonts, etc.)
+        link_data = head_data.get('link', [])
+        if link_data and isinstance(link_data, list):
+            for link in link_data:
+                if isinstance(link, dict):
+                    link_attrs = []
+                    for key, value in link.items():
+                        safe_key = self._escape_html_attr(str(key))
+                        safe_value = self._escape_html_attr(str(value))
+                        link_attrs.append(f'{safe_key}="{safe_value}"')
+                    if link_attrs:
+                        head_parts.append(f'    <link {" ".join(link_attrs)}>')
+
         # Generate script tags
         script_data = head_data.get('script', {})
         if script_data and isinstance(script_data, dict):
