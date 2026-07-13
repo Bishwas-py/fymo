@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from fymo.build.discovery import discover_routes
+from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
-from fymo.build.manifest import Manifest, RouteAssets, RemoteModuleAssets
+from fymo.build.composition_generator import generate_ssr_tree
+from fymo.build.manifest import Manifest, RouteAssets, RemoteModuleAssets, LayoutRefAsset, LayoutAssets
 from fymo.remote.discovery import discover_remote_modules
 from fymo.remote.codegen import emit_module, emit_runtime
 
@@ -43,6 +44,21 @@ class BuildPipeline:
             raise BuildError(f"no routes found under {templates_dir}")
 
         client_entry_paths = write_client_entries(routes, self.cache_dir, self.project_root, dev=dev)
+
+        all_layouts = discover_all_layouts(templates_dir)
+        layout_client_entries = {
+            f"_layout-{ref.id}": ref.svelte_path for ref in all_layouts
+        }
+
+        global_css_path = templates_dir / "_global.css"
+        global_css_entry = {"_global": global_css_path} if global_css_path.is_file() else {}
+
+        # SSR entry points: composed tree file when a route has a layout
+        # chain, else the raw leaf (unchanged behavior).
+        ssr_entries = []
+        for r in routes:
+            tree_path = generate_ssr_tree(r, self.cache_dir)
+            ssr_entries.append({"name": r.name, "entryPath": str(tree_path or r.entry_path)})
 
         # Codegen for app/remote/*.py — produces dist/client/_remote/<name>.{js,d.ts}
         remote_out = self.dist_dir / "client" / "_remote"
@@ -87,11 +103,11 @@ class BuildPipeline:
         config = {
             "projectRoot": str(self.project_root),
             "distDir": str(self.dist_dir),
-            "routes": [
-                {"name": r.name, "entryPath": str(r.entry_path)} for r in routes
-            ],
+            "routes": ssr_entries,
             "clientEntries": {
-                name: str(path) for name, path in client_entry_paths.items()
+                **{name: str(path) for name, path in client_entry_paths.items()},
+                **{name: str(path) for name, path in layout_client_entries.items()},
+                **{name: str(path) for name, path in global_css_entry.items()},
             },
             "dev": dev,
         }
@@ -118,7 +134,7 @@ class BuildPipeline:
         if not result.get("ok"):
             raise BuildError(f"build failed: {result.get('error')}\n{result.get('stack', '')}")
 
-        manifest = self._build_manifest(routes, result, remote_assets)
+        manifest = self._build_manifest(routes, result, remote_assets, all_layouts, bool(global_css_entry))
         manifest.write(self.dist_dir / "manifest.json")
         return BuildResult(ok=True, manifest_path=self.dist_dir / "manifest.json")
 
@@ -147,16 +163,16 @@ class BuildPipeline:
             return {}
         return data.get(key) or {}
 
-    def _build_manifest(self, routes, esbuild_result, remote_assets: dict | None = None) -> Manifest:
-        # Resolve hashed client filenames from the metafile.
+    def _build_manifest(
+        self, routes, esbuild_result, remote_assets: dict | None = None,
+        all_layouts=None, has_global_css: bool = False,
+    ) -> Manifest:
+        all_layouts = all_layouts or []
         client_meta = esbuild_result.get("client", {}).get("outputs", {})
-        # esbuild metafile keys are relative to the project root (its cwd).
-        # Compute absolute path via project_root, then make relative to dist_dir.
         dist_dir_abs = self.dist_dir.resolve()
         project_root_abs = self.project_root.resolve()
 
         def abs_out(out_path: str) -> Path:
-            """Resolve an esbuild output path (relative to project root) to absolute."""
             p = Path(out_path)
             if p.is_absolute():
                 return p
@@ -164,6 +180,9 @@ class BuildPipeline:
 
         client_by_route = {}
         css_by_route = {}
+        layout_client = {}
+        layout_css = {}
+        global_css_out = None
         for out_path, info in client_meta.items():
             entry_point = info.get("entryPoint")
             if entry_point is None:
@@ -173,19 +192,51 @@ class BuildPipeline:
                 rel_to_dist = abs_path.relative_to(dist_dir_abs)
             except ValueError:
                 continue
-            for r in routes:
-                if Path(entry_point).name == f"{r.name}.client.js":
-                    if str(rel_to_dist).endswith(".js"):
-                        client_by_route[r.name] = str(rel_to_dist).replace("\\", "/")
-                        css_bundle = info.get("cssBundle")
-                        if css_bundle:
-                            try:
-                                css_rel = abs_out(css_bundle).relative_to(dist_dir_abs)
-                                css_by_route[r.name] = str(css_rel).replace("\\", "/")
-                            except ValueError:
-                                pass
+            entry_name = Path(entry_point).name
+            if not str(rel_to_dist).endswith(".js") and not str(rel_to_dist).endswith(".css"):
+                continue
 
-        # Preload chunks: any output whose path starts with client/chunk-
+            matched_route = next((r for r in routes if entry_name == f"{r.name}.client.js"), None)
+            if matched_route is not None:
+                client_by_route[matched_route.name] = str(rel_to_dist).replace("\\", "/")
+                css_bundle = info.get("cssBundle")
+                if css_bundle:
+                    try:
+                        css_rel = abs_out(css_bundle).relative_to(dist_dir_abs)
+                        css_by_route[matched_route.name] = str(css_rel).replace("\\", "/")
+                    except ValueError:
+                        pass
+                continue
+
+            # Layout entries are keyed in clientEntries as "_layout-<id>" but
+            # their source file is the raw _layout.svelte (no per-route stub
+            # like routes get from entry_generator.py), so esbuild's metafile
+            # `entryPoint` is the .svelte source path -- its basename never
+            # matches "_layout-<id>.js". The object key only surfaces in the
+            # *output* filename (entryNames: '[name].[hash]'), so match on
+            # that instead. Verified against a real esbuild build.
+            out_name = Path(out_path).name
+            matched_layout = next(
+                (
+                    ref for ref in all_layouts
+                    if out_name.startswith(f"_layout-{ref.id}.") and out_name.endswith(".js")
+                ),
+                None,
+            )
+            if matched_layout is not None:
+                layout_client[matched_layout.id] = str(rel_to_dist).replace("\\", "/")
+                css_bundle = info.get("cssBundle")
+                if css_bundle:
+                    try:
+                        css_rel = abs_out(css_bundle).relative_to(dist_dir_abs)
+                        layout_css[matched_layout.id] = str(css_rel).replace("\\", "/")
+                    except ValueError:
+                        pass
+                continue
+
+            if has_global_css and entry_name == "_global.css" and str(rel_to_dist).endswith(".css"):
+                global_css_out = str(rel_to_dist).replace("\\", "/")
+
         chunks = []
         for p in client_meta:
             if Path(p).name.startswith("chunk-") and p.endswith(".js"):
@@ -204,10 +255,23 @@ class BuildPipeline:
                 client=client_by_route[r.name],
                 css=css_by_route.get(r.name),
                 preload=chunks,
+                layout_chain=[
+                    LayoutRefAsset(level=ref.level, id=ref.id, controller_module=ref.controller_module)
+                    for ref in r.layout_chain
+                ],
+                uses_layout_shell=bool(r.layout_chain),
             )
+
+        layouts_assets = {
+            ref.id: LayoutAssets(client=layout_client[ref.id], css=layout_css.get(ref.id))
+            for ref in all_layouts
+            if ref.id in layout_client
+        }
 
         return Manifest(
             routes=route_assets,
             build_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             remote_modules=remote_assets or {},
+            layouts=layouts_assets,
+            global_css=global_css_out,
         )

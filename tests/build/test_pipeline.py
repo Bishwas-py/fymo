@@ -53,3 +53,62 @@ def test_build_output_css_is_external_not_injected(example_app: Path):
     js_content = js_path.read_text()
     # Injected CSS would show up as a style-injection call in the JS bundle.
     assert "append_styles" not in js_content
+
+
+def test_pipeline_populates_layout_chain_and_layouts_manifest(blog_app: Path, node_available):
+    """blog_app doesn't have a _layout.svelte yet at this point in the plan
+    (Task 11 adds it) -- this test creates a minimal one inline so Task 7 is
+    independently verifiable before the example app migration happens."""
+    templates = blog_app / "app" / "templates"
+    (templates / "_layout.svelte").write_text(
+        "<script>\n  let { children } = $props();\n</script>\n{@render children()}\n"
+    )
+    from fymo.build.pipeline import BuildPipeline
+    result = BuildPipeline(blog_app).build(dev=False)
+    from fymo.build.manifest import Manifest
+    manifest = Manifest.read(result.manifest_path)
+
+    assert "_root" in manifest.layouts
+    assert manifest.layouts["_root"].client.startswith("client/")
+
+    for route_name in ("index", "posts", "tags"):
+        chain = manifest.routes[route_name].layout_chain
+        assert any(ref.level == "root" and ref.id == "_root" for ref in chain)
+        assert manifest.routes[route_name].uses_layout_shell is True
+        # SSR bundle for a layout route is the composed tree, not the bare leaf.
+        assert manifest.routes[route_name].ssr == f"ssr/{route_name}.mjs"
+        ssr_path = blog_app / "dist" / manifest.routes[route_name].ssr
+        assert ssr_path.is_file()
+
+
+def test_pipeline_no_layout_routes_unaffected(example_app: Path, node_available):
+    """todo_app has no _layout.svelte -- manifest routes must have empty
+    layout_chain and uses_layout_shell=False, matching pre-feature behavior."""
+    from fymo.build.pipeline import BuildPipeline
+    result = BuildPipeline(example_app).build(dev=False)
+    from fymo.build.manifest import Manifest
+    manifest = Manifest.read(result.manifest_path)
+    for route_name, assets in manifest.routes.items():
+        assert assets.layout_chain == []
+        assert assets.uses_layout_shell is False
+    assert manifest.layouts == {}
+
+
+def test_pipeline_global_css_produces_manifest_entry(example_app: Path, node_available):
+    (example_app / "app" / "templates" / "_global.css").write_text("body { margin: 0; }")
+    from fymo.build.pipeline import BuildPipeline
+    result = BuildPipeline(example_app).build(dev=False)
+    from fymo.build.manifest import Manifest
+    manifest = Manifest.read(result.manifest_path)
+    assert manifest.global_css is not None
+    css_path = example_app / "dist" / manifest.global_css
+    assert css_path.is_file()
+    assert "margin" in css_path.read_text()
+
+
+def test_pipeline_no_global_css_leaves_manifest_field_none(example_app: Path, node_available):
+    from fymo.build.pipeline import BuildPipeline
+    result = BuildPipeline(example_app).build(dev=False)
+    from fymo.build.manifest import Manifest
+    manifest = Manifest.read(result.manifest_path)
+    assert manifest.global_css is None
