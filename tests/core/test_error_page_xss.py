@@ -8,6 +8,7 @@ shows a generic body with no exception text at all.
 """
 from pathlib import Path
 
+from fymo.build.manifest import RouteAssets
 from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
 from fymo.core.exceptions import TemplateError
@@ -97,7 +98,12 @@ def test_render_template_message_style_error_omits_text_in_prod(tmp_path, monkey
 
 class _FakeManifest:
     def __init__(self, route_name):
-        self.routes = {route_name: object()}
+        # A real RouteAssets (rather than a bare object()) so that
+        # `_render_via_sidecar`'s `assets.layout_chain` check -- added once
+        # layout-chain support landed -- has a real (empty) list to read,
+        # matching every route this test's FakeSidecar short-circuits before
+        # `.css`/`.client`/`.preload` would ever be touched.
+        self.routes = {route_name: RouteAssets(ssr="ssr/x.mjs", client="client/x.js", css=None, preload=[])}
 
 
 class _FakeManifestCache:

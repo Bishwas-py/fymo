@@ -15,11 +15,25 @@ The decoded result has the shape:
         "id":     "posts",                          # manifest route key
         "module": "/dist/client/posts.A1B2.js",     # absolute URL of leaf bundle
         "css":    ["/dist/client/posts.A1B2.css"],  # may be empty
-        "props":  { ... }                            # devalue-serialized
+        "props":  { ... },                           # devalue-serialized
+        "usesLayoutShell": True,                    # False for routes with no layout_chain
+        "resourceLayout": {                         # or None when no resource-level layout
+          "id":     "posts",
+          "module": "/dist/client/layouts/posts.C3D4.js",
+          "css":    ["/dist/client/layouts/posts.C3D4.css"],
+          "props":  { ... },
+        },
+        "rootLayoutProps": { ... },                 # or None when no root-level layout
       },
       "title":  "Post: Welcome",
-      "doc":    { ... }                             # full controller getDoc() output
+      "doc":    { ... }                             # merged getDoc() output (root -> resource -> leaf)
     }
+
+The `doc`/`title` merge and layout-prop loading go through the exact same
+`ssr_controller.load_layout_props_and_docs`/`merge_docs` helpers the
+full-page SSR path (`template_renderer.py`) uses, so the two call sites
+can't drift apart the way they once did for `current_user()` scoping (see
+`ssr_controller`'s module docstring).
 
 The client uses `id` for chain-diffing in PR B; in PR A every nav swaps
 the leaf unconditionally.
@@ -32,7 +46,7 @@ from typing import Iterable
 
 from fymo.core.html import _safe_json
 from fymo.core.manifest_cache import ManifestUnavailable
-from fymo.core.ssr_controller import load_controller_context
+from fymo.core.ssr_controller import load_controller_context, load_layout_props_and_docs, merge_docs
 from fymo.remote import devalue
 
 
@@ -96,9 +110,15 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
     # on both the full-page render and this soft-nav path -- see
     # ssr_controller for why this must be the same helper both call.
     try:
-        props, doc_meta = load_controller_context(
+        leaf_props, leaf_doc = load_controller_context(
             controller_mod, params, getattr(app, "auth_enabled", False), environ
         )
+        layout_props_by_level = {"root": {}, "resource": {}}
+        layout_docs = []
+        if assets.layout_chain:
+            layout_props_by_level, layout_docs = load_layout_props_and_docs(
+                assets.layout_chain, params, getattr(app, "auth_enabled", False), environ
+            )
     except Exception as e:
         payload = {"type": "error", "status": 500, "error": "controller_failed"}
         if getattr(app, "dev", False):
@@ -106,19 +126,42 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
             payload["traceback"] = traceback.format_exc()
         return _200(start_response, payload)
 
+    doc_meta = merge_docs(layout_docs + [leaf_doc]) if assets.layout_chain else leaf_doc
+
     # Round-trip props through _safe_json so remote callables become
     # {"__fymo_remote": "<hash>/<fn>"} markers (same shape as full-page SSR).
-    serialized_props = json.loads(_safe_json(props))
+    serialized_leaf_props = json.loads(_safe_json(leaf_props))
 
     css_urls = [f"{_ASSET_PREFIX}/{assets.css}"] if assets.css else []
     preload_urls = [f"{_ASSET_PREFIX}/{p}" for p in assets.preload]
+
+    resource_layout_payload = None
+    root_layout_props_payload = None
+    if assets.layout_chain:
+        resource_ref = next((ref for ref in assets.layout_chain if ref.level == "resource"), None)
+        if resource_ref is not None:
+            layout_asset = app.manifest_cache.get().layouts.get(resource_ref.id)
+            if layout_asset is not None:
+                resource_css = [f"{_ASSET_PREFIX}/{layout_asset.css}"] if layout_asset.css else []
+                resource_layout_payload = {
+                    "id": resource_ref.id,
+                    "module": f"{_ASSET_PREFIX}/{layout_asset.client}",
+                    "css": resource_css,
+                    "props": json.loads(_safe_json(layout_props_by_level.get("resource", {}))),
+                }
+        root_ref = next((ref for ref in assets.layout_chain if ref.level == "root"), None)
+        if root_ref is not None:
+            root_layout_props_payload = json.loads(_safe_json(layout_props_by_level.get("root", {})))
 
     leaf = {
         "id": controller_name,
         "module": f"{_ASSET_PREFIX}/{assets.client}",
         "css": css_urls,
         "preload": preload_urls,
-        "props": serialized_props,
+        "props": serialized_leaf_props,
+        "usesLayoutShell": assets.uses_layout_shell,
+        "resourceLayout": resource_layout_payload,
+        "rootLayoutProps": root_layout_props_payload,
     }
 
     title = doc_meta.get("title", app.config_manager.get_app_name())

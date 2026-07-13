@@ -68,3 +68,110 @@ def test_entry_error_branch_shares_the_runtime_error_handling(tmp_path: Path):
     text = (out_dir / "home.client.js").read_text()
     assert "env.message || env.error" in text
     assert "e.traceback = env.traceback;" in text
+
+
+def test_no_layout_chain_generates_same_template_as_before(tmp_path: Path):
+    from fymo.build.discovery import Route
+    from fymo.build.entry_generator import write_client_entries
+    leaf = tmp_path / "templates" / "home" / "index.svelte"
+    leaf.parent.mkdir(parents=True)
+    leaf.write_text("<div></div>")
+    route = Route(name="home", entry_path=leaf)
+    out_dir = tmp_path / "out"
+    written = write_client_entries([route], out_dir, tmp_path)
+    content = written["home"].read_text()
+    assert "hydrate(Component" in content
+    assert not (out_dir / "home.shell.svelte").exists()
+
+
+def test_layout_chain_generates_shell_and_bootstrap(tmp_path: Path):
+    from fymo.build.discovery import Route, LayoutRef
+    from fymo.build.entry_generator import write_client_entries
+
+    root_layout = tmp_path / "templates" / "_layout.svelte"
+    root_layout.parent.mkdir(parents=True)
+    root_layout.write_text("<div></div>")
+    resource_layout = tmp_path / "templates" / "posts" / "_layout.svelte"
+    resource_layout.parent.mkdir(parents=True)
+    resource_layout.write_text("<div></div>")
+    leaf = tmp_path / "templates" / "posts" / "show.svelte"
+    leaf.write_text("<div></div>")
+
+    route = Route(
+        name="posts",
+        entry_path=leaf,
+        layout_chain=[
+            LayoutRef(level="root", id="_root", svelte_path=root_layout, controller_module=None),
+            LayoutRef(level="resource", id="posts", svelte_path=resource_layout, controller_module=None),
+        ],
+    )
+    out_dir = tmp_path / "out"
+    written = write_client_entries([route], out_dir, tmp_path)
+
+    shell_path = out_dir / "posts.shell.svelte"
+    assert shell_path.exists()
+    shell = shell_path.read_text()
+    assert "import RootLayout from" in shell
+    assert "import ResourceLayout from" in shell
+    assert "import Leaf from" in shell
+    assert "$state" in shell
+    assert "export function swapLeaf" in shell
+    assert "export function swapResourceLayout" in shell
+    assert "export function updateRootLayoutProps" in shell
+    assert "export function updateResourceLayoutProps" in shell
+    assert "<svelte:boundary" in shell
+    # Regression guard: the leaf must render in BOTH the {#if CurrentResourceLayout}
+    # branch and the {:else} branch. <svelte:boundary> is now defined once inside
+    # the shared {#snippet leafSlot()}, so a bare substring check on it can't tell
+    # the two branches apart -- assert on {@render leafSlot()} appearing exactly
+    # twice (once per branch) so a future edit that drops the {:else} render can't
+    # regress silently.
+    assert shell.count("{@render leafSlot()}") == 2
+
+    bootstrap = written["posts"].read_text()
+    assert "import Shell from './posts.shell.svelte'" in bootstrap
+    assert "hydrate(Shell" in bootstrap
+    assert "shellInstance.swapLeaf" in bootstrap
+    assert "shellInstance.swapResourceLayout" in bootstrap
+    assert "shellInstance.updateRootLayoutProps" in bootstrap
+    assert "shellInstance.updateResourceLayoutProps" in bootstrap
+    assert "unmount(currentMount)" not in bootstrap  # old full-remount path is gone for shell routes
+    # Regression guard: without `export default InitialLeaf`, soft-nav's
+    # `import(leaf.module)` for THIS route always resolves `.default` as
+    # undefined when navigating here from elsewhere, silently forcing a full
+    # page reload (window.location.href fallback) instead of a soft nav --
+    # every Python-level test can pass while the reactive shell never
+    # actually activates in a browser. See CLIENT_ENTRY_TEMPLATE's identical
+    # `export default Component;` contract for the non-layout-route case.
+    assert "export default InitialLeaf;" in bootstrap
+
+
+def test_root_only_layout_chain_still_renders_leaf_in_else_branch(tmp_path: Path):
+    """Regression: a route whose layout_chain has ONLY a root layout (no
+    resource layout) still hits the shared {#snippet leafSlot()} inside the
+    {:else} branch of the {#if CurrentResourceLayout} block. Proves the
+    leaf-rendering path exists even when there's no resource layout at all,
+    since this shape is exactly what triggered the original {:else} bug."""
+    from fymo.build.discovery import Route, LayoutRef
+    from fymo.build.entry_generator import write_client_entries
+
+    root_layout = tmp_path / "templates" / "_layout.svelte"
+    root_layout.parent.mkdir(parents=True)
+    root_layout.write_text("<div></div>")
+    leaf = tmp_path / "templates" / "about" / "index.svelte"
+    leaf.parent.mkdir(parents=True)
+    leaf.write_text("<div></div>")
+
+    route = Route(
+        name="about",
+        entry_path=leaf,
+        layout_chain=[
+            LayoutRef(level="root", id="_root", svelte_path=root_layout, controller_module=None),
+        ],
+    )
+    out_dir = tmp_path / "out"
+    write_client_entries([route], out_dir, tmp_path)
+
+    shell = (out_dir / "about.shell.svelte").read_text()
+    assert "{@render leafSlot()}" in shell
+    assert shell.count("{@render leafSlot()}") == 2

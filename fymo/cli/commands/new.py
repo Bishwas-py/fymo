@@ -32,6 +32,8 @@ def create_project(name: str, template: str = 'default'):
         'app/controllers',
         'app/templates',
         'app/models',
+        'app/lib',
+        'app/components',
         'app/static/css',
         'app/static/js',
         'app/static/images',
@@ -106,7 +108,35 @@ gunicorn>=23.0.0
 }}
 """
     (project_path / 'package.json').write_text(package_json)
-    
+
+    # tsconfig.json — $lib/*, $components/*, and $remote/* aliases so imports
+    # never need brittle relative paths. $remote/* points at codegen'd
+    # output (populated by `fymo build`); $lib/* and $components/* point at
+    # real source that already exists. There's no separate server-only
+    # alias: the server/client boundary in fymo is language, not directory
+    # convention — app/controllers/*.py and app/remote/*.py are server-only
+    # by construction (Python never reaches the client bundle), so anything
+    # that must stay off the client belongs there, not in app/lib/.
+    tsconfig_json = """{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "paths": {
+      "$remote/*": ["./dist/client/_remote/*"],
+      "$lib/*": ["./app/lib/*"],
+      "$components/*": ["./app/components/*"]
+    }
+  },
+  "include": ["app/**/*.svelte", "app/**/*.ts"]
+}
+"""
+    (project_path / 'tsconfig.json').write_text(tsconfig_json)
+
     # .gitignore
     gitignore = """# Python
 __pycache__/

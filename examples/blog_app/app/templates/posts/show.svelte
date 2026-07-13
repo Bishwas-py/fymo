@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Nav from '../_shared/Nav.svelte';
   import Comments from './Comments.svelte';
   import ReactionBar from './ReactionBar.svelte';
   import type { Post, Comment, ReactionCounts } from '$remote/posts';
@@ -18,8 +17,6 @@
     toggle_reaction: (slug: string, kind: 'clap' | 'fire' | 'heart' | 'mind') => Promise<ReactionCounts>;
   } = $props();
 </script>
-
-<Nav />
 
 <article>
   <p class="kicker">

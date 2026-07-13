@@ -118,3 +118,26 @@ def test_disabled_resource_names_html_escaped():
     assert '<script>alert(1)' not in html  # escaped form is in there
     assert '&lt;script&gt;' in html
 
+
+def test_global_css_links_before_route_css():
+    from fymo.build.manifest import RouteAssets
+    from fymo.core.html import build_html
+    assets = RouteAssets(ssr="x", client="client/x.js", css="client/x.css", preload=[])
+    html = build_html(
+        body="", head_extra="", props={}, assets=assets, title="t",
+        asset_prefix="/dist", global_css="client/global.G1.css",
+    )
+    global_idx = html.index('<link rel="stylesheet" href="/dist/client/global.G1.css">')
+    route_idx = html.index('<link rel="stylesheet" href="/dist/client/x.css">')
+    assert global_idx < route_idx
+
+
+def test_no_global_css_omits_link():
+    from fymo.build.manifest import RouteAssets
+    from fymo.core.html import build_html
+    assets = RouteAssets(ssr="x", client="client/x.js", css=None, preload=[])
+    html = build_html(
+        body="", head_extra="", props={}, assets=assets, title="t", asset_prefix="/dist",
+    )
+    assert "global" not in html
+

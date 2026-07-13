@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Nav from '../_shared/Nav.svelte';
   import type { PostSummary } from '$remote/posts';
 
   let { hero, posts }: { hero: PostSummary | null; posts: PostSummary[] } = $props();
@@ -7,8 +6,6 @@
   const fmt = (d: string) =>
     new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 </script>
-
-<Nav />
 
 <header class="intro">
   <p class="kicker">Python on the server · Svelte on the client</p>
