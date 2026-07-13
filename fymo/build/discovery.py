@@ -58,8 +58,10 @@ def _resource_layout(templates_dir: Path, project_root: Path, resource: str) -> 
 def discover_routes(templates_dir: Path) -> List[Route]:
     """Return one Route per <templates_dir>/<name>/index.svelte or <name>/show.svelte.
 
-    Directories whose names start with ``_`` (e.g. ``_shared``) are skipped
-    because they contain shared components rather than routable pages.
+    Directories whose names start with ``_`` are skipped because they hold
+    non-routable content -- e.g. layout-adjacent files -- rather than pages.
+    (This is also why a resource-level ``_layout.svelte`` doesn't get
+    mistaken for a route of its own.)
 
     ``index.svelte`` takes precedence over ``show.svelte`` so that the root
     index route is not accidentally overridden.

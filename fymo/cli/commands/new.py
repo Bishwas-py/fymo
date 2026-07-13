@@ -33,7 +33,7 @@ def create_project(name: str, template: str = 'default'):
         'app/templates',
         'app/models',
         'app/lib',
-        'app/lib/server',
+        'app/components',
         'app/static/css',
         'app/static/js',
         'app/static/images',
@@ -109,13 +109,14 @@ gunicorn>=23.0.0
 """
     (project_path / 'package.json').write_text(package_json)
 
-    # tsconfig.json — $lib/*, $_shared/*, and $remote/* aliases so imports
+    # tsconfig.json — $lib/*, $components/*, and $remote/* aliases so imports
     # never need brittle relative paths. $remote/* points at codegen'd
-    # output (populated by `fymo build`); $lib/* and $_shared/* point at
-    # real source that already exists. app/lib/server/* is intentionally
-    # NOT aliased for client use — it's guarded at build time instead
-    # (fymo/build/js/plugins/server-only-guard.mjs) so server-only code
-    # can never end up in the browser bundle.
+    # output (populated by `fymo build`); $lib/* and $components/* point at
+    # real source that already exists. There's no separate server-only
+    # alias: the server/client boundary in fymo is language, not directory
+    # convention — app/controllers/*.py and app/remote/*.py are server-only
+    # by construction (Python never reaches the client bundle), so anything
+    # that must stay off the client belongs there, not in app/lib/.
     tsconfig_json = """{
   "compilerOptions": {
     "target": "ES2022",
@@ -128,7 +129,7 @@ gunicorn>=23.0.0
     "paths": {
       "$remote/*": ["./dist/client/_remote/*"],
       "$lib/*": ["./app/lib/*"],
-      "$_shared/*": ["./app/templates/_shared/*"]
+      "$components/*": ["./app/components/*"]
     }
   },
   "include": ["app/**/*.svelte", "app/**/*.ts"]

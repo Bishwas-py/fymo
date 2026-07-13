@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Comment } from '$remote/posts';
-  import { user, ready, ensureLoaded } from '../../lib/auth';
-  import AuthForm from '../_shared/AuthForm.svelte';
+  import { user, ready, ensureLoaded } from '$lib/auth';
+  import AuthForm from '$components/AuthForm.svelte';
 
   let {
     slug,

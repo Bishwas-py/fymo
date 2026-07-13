@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { login, signup } from '../../lib/auth';
+  import { login, signup } from '$lib/auth';
 
   let { compact = false }: { compact?: boolean } = $props();
 

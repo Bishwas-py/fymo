@@ -10,7 +10,7 @@
     "paths": {
       "$remote/*": ["./dist/client/_remote/*"],
       "$lib/*": ["./app/lib/*"],
-      "$_shared/*": ["./app/templates/_shared/*"]
+      "$components/*": ["./app/components/*"]
     }
   },
   "include": ["app/**/*.svelte", "app/**/*.ts"]
