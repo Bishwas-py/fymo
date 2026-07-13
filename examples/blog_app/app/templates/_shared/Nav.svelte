@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { user, ready, ensureLoaded, logout } from '../../lib/auth';
+  import { user, ready, ensureLoaded, logout } from '$lib/auth';
   import AuthForm from './AuthForm.svelte';
 
   let theme = $state<'dark' | 'light'>('dark');

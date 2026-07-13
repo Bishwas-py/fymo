@@ -1,5 +1,5 @@
 <script>
-  import Nav from './_shared/Nav.svelte';
+  import Nav from '$_shared/Nav.svelte';
   let { children } = $props();
 </script>
 

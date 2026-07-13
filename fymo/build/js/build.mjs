@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { fymoRemotePlugin } from './plugins/remote.mjs';
 import { fymoBroadcastPlugin } from './plugins/broadcast.mjs';
+import { fymoServerOnlyGuardPlugin } from './plugins/server-only-guard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(process.argv[2]);
@@ -70,6 +71,9 @@ async function buildClient() {
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
         plugins: [
+            // Must run before sveltePlugin's onLoad so a guarded file is
+            // rejected before Svelte compilation is even attempted.
+            fymoServerOnlyGuardPlugin({ projectRoot: config.projectRoot }),
             fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
             fymoBroadcastPlugin({ broadcastDir: path.join(config.distDir, 'client', '_broadcast') }),
             sveltePlugin({
