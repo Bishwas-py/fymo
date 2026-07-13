@@ -46,7 +46,7 @@ async function buildServer() {
         external: ['$remote/*', '$broadcast/*'],
         plugins: [sveltePlugin({
             preprocess: sveltePreprocess(),
-            compilerOptions: { generate: 'server', dev: false },
+            compilerOptions: { generate: 'server', dev: false, css: 'external' },
         })],
         logLevel: 'silent',
     });
@@ -74,7 +74,7 @@ async function buildClient() {
             fymoBroadcastPlugin({ broadcastDir: path.join(config.distDir, 'client', '_broadcast') }),
             sveltePlugin({
                 preprocess: sveltePreprocess(),
-                compilerOptions: { generate: 'client', dev: false },
+                compilerOptions: { generate: 'client', dev: false, css: 'external', discloseVersion: false },
             }),
         ],
         logLevel: 'silent',
