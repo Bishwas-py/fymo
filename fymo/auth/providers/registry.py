@@ -7,7 +7,7 @@ themselves, never from the config.
 """
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fymo.auth.context import register_session_resolver, reset_session_resolvers
 from fymo.auth.providers.base import AuthProvider, BaseProvider
@@ -30,7 +30,10 @@ class ProviderConfigError(_CoreProviderConfigError):
     """Raised when `auth.providers` can't be turned into provider instances."""
 
 
-def _instantiate(entry: Any) -> AuthProvider:
+def _instantiate(entry: Any) -> Optional[AuthProvider]:
+    """Returns None when a `required: auto` entry's provider declines
+    (is_configured() -> False); the caller filters those out rather than
+    including an inert placeholder in the provider list."""
     if isinstance(entry, str):
         if entry not in _BUILTINS:
             raise ProviderConfigError(f"unknown built-in provider: {entry!r}")
@@ -47,6 +50,20 @@ def _instantiate(entry: Any) -> AuthProvider:
         else:
             raise ProviderConfigError("provider config needs a 'type' or 'class' key")
         opts = {k: v for k, v in entry.items() if k not in ("type", "class")}
+        # `required` is an explicit opt-in (only "auto" is recognized, never
+        # automatic); pop it before it can reach the constructor as a stray
+        # kwarg, and validate it explicitly here rather than letting a typo
+        # silently vanish into an ignored from_config() key on one provider
+        # while raising a raw TypeError from cls(**opts) on another.
+        if "required" in opts:
+            required_value = opts.pop("required")
+            if required_value != "auto":
+                raise ProviderConfigError(
+                    f"unknown value for provider 'required': {required_value!r} "
+                    f'(only "auto" is supported); entry: {entry!r}'
+                )
+            if not cls.is_configured():
+                return None
         # Providers with env-backed secrets expose from_config(opts); others
         # take plain kwargs.
         if hasattr(cls, "from_config"):
@@ -60,7 +77,8 @@ def build_providers(config: List[Any] | None) -> List[AuthProvider]:
     """Instantiate providers from `auth.providers`. Defaults to `[password]`."""
     if not config:
         return [PasswordProvider()]
-    return [_instantiate(entry) for entry in config]
+    instantiated = (_instantiate(entry) for entry in config)
+    return [provider for provider in instantiated if provider is not None]
 
 
 def system_remote_modules(providers: List[AuthProvider]) -> dict:
