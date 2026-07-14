@@ -6,14 +6,10 @@ is gone -- the session is visible at render time, not just after the
 client hydrates and makes its own current_user() remote call.
 """
 import io
-import shutil
 import sys
 from pathlib import Path
 
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-BLOG_DIR = REPO_ROOT / "examples" / "blog_app"
 
 _WHOAMI_CONTROLLER = '''"""Whoami controller: exercises current_user() during SSR."""
 from fymo.auth.context import current_user
@@ -39,17 +35,12 @@ _WHOAMI_TEMPLATE = """<script>
 
 
 @pytest.fixture
-def whoami_app(tmp_path: Path):
-    if not BLOG_DIR.is_dir():
-        pytest.skip("blog_app missing")
-    dest = tmp_path / "whoami_app"
-    shutil.copytree(
-        BLOG_DIR, dest,
-        ignore=shutil.ignore_patterns("node_modules", "dist", ".fymo", "app/data"),
-    )
-    nm = BLOG_DIR / "node_modules"
-    if nm.is_dir():
-        (dest / "node_modules").symlink_to(nm)
+def whoami_app(blog_app: Path) -> Path:
+    """Layer an extra `whoami` controller + template onto the shared
+    blog_app fixture, rather than forking its own copy-into-tmpdir logic.
+    blog_app already handles the copytree, node_modules symlink, and
+    sys.path/sys.modules hygiene -- this only adds the route on top."""
+    dest = blog_app
 
     (dest / "app" / "controllers" / "whoami.py").write_text(_WHOAMI_CONTROLLER)
     tpl_dir = dest / "app" / "templates" / "whoami"
@@ -62,12 +53,7 @@ def whoami_app(tmp_path: Path):
     text = text.replace("    - tags\n", "    - tags\n    - whoami\n")
     fymo_yml.write_text(text)
 
-    sys.path.insert(0, str(dest))
-    yield dest
-    sys.path.remove(str(dest))
-    for name in list(sys.modules):
-        if name == "app" or name.startswith("app."):
-            del sys.modules[name]
+    return dest
 
 
 def _wsgi_get(app, path: str, *, cookies: str = ""):
