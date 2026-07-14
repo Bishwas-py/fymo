@@ -28,7 +28,6 @@
     "typescript": "^5.5.0"
   },
   "scripts": {
-    "build:runtime": "node fymo/bundler/js/build_runtime.js",
     "test": "pytest tests/"
   }
 }

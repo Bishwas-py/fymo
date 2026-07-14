@@ -3,7 +3,6 @@ virtualenv/
 __pycache__/
 node_modules/
 dist/
-!fymo/bundler/js/dist/
 venv/
 .venv/
 .worktrees/

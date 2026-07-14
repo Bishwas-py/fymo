@@ -53,13 +53,6 @@ def init():
     initialize_project()
 
 
-@cli.command(name='build-runtime')
-def build_runtime_cmd():
-    """Build the Svelte runtime for the current project"""
-    from fymo.cli.commands.build import build_runtime
-    build_runtime()
-
-
 @cli.command(name="dev")
 @click.option("--host", default="127.0.0.1")
 @click.option("--port", default=8000, type=int)
