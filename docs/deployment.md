@@ -293,3 +293,34 @@ second sink (e.g. Sentry).
 
 File output is append-only with no built-in rotation — use logrotate or
 your container platform's log driver.
+
+## Media routes (byte-range file serving)
+
+Apps that need to serve binary files with `Range` support (video/audio
+seeking and scrubbing, in particular) don't need to hand-write a raw WSGI
+route for it. Declare them in `fymo.yml` instead:
+
+```yaml
+media:
+  - prefix: /media/videos/
+    dir: data/videos
+    extensions: [webm]
+```
+
+`prefix` is matched against the request path the same way fymo's own
+`/dist/` and `/assets/` routes are (a path prefix, not a template). `dir`
+is resolved relative to the project root. `extensions` is the allow-list
+for the filename after the prefix; anything else, and any filename
+containing `..` or starting with `/`, gets a 400.
+
+fymo owns the rest: single-range `Range: bytes=start-end` requests get a
+206 with `Content-Range`, full-file requests get a 200 with `Content-Length`,
+missing files get a 404, and `Content-Type` is resolved from the filename
+via the standard library's `mimetypes` module. `media:` can list multiple
+entries with different prefixes/dirs/extensions, and the section is
+entirely optional, apps without one register no extra routes at all.
+
+See `fymo/core/media.py` for the implementation, and `fymo/core/http.py`
+for the lower-level raw-WSGI extension point (`app/routes.py`) this sits
+alongside, for the rarer case of a route that isn't just "serve a file
+from a directory" (webhooks, non-file responses, etc.).

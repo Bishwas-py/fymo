@@ -5,7 +5,7 @@ Configuration management for Fymo applications
 import os
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 
 def env_truthy(name: str) -> bool:
@@ -90,6 +90,13 @@ class ConfigManager:
         """`logging:` section. Holds destination/file/level/format — see
         fymo.core.logging.resolve_logging_config for shapes and defaults."""
         return self.get('logging', {}) or {}
+
+    def get_media_config(self) -> List[Dict[str, Any]]:
+        """`media:` section. A list of {prefix, dir, extensions} entries
+        for declarative byte-range media serving (see fymo.core.media),
+        entirely optional. Absent means no media routes are registered, so
+        existing apps are unaffected."""
+        return self.get('media', []) or []
 
     def to_dict(self) -> Dict[str, Any]:
         """Return configuration as dictionary"""
