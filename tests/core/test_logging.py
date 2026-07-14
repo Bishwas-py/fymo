@@ -1,7 +1,11 @@
 """fymo.core.logging: structured access logging (human in dev, JSON in prod)."""
 import json
+import logging
+from pathlib import Path
 
 import pytest
+
+from fymo.core.logging import LoggingSettings, resolve_logging_config
 
 
 def test_access_log_json(caplog):
@@ -65,3 +69,55 @@ def test_configure_is_idempotent_no_duplicate_handlers():
     configure(json=True)
     configure(json=False)
     assert len(logger.handlers) == 1
+
+
+# ---- resolve_logging_config ----
+
+
+def test_defaults_dev():
+    s = resolve_logging_config(dev=True, config=None)
+    assert s == LoggingSettings(destination="terminal", file=None, level=logging.INFO, json=False)
+
+
+def test_defaults_prod():
+    s = resolve_logging_config(dev=False, config={})
+    assert s.destination == "terminal"
+    assert s.json is True  # prod default format is json
+
+
+def test_file_destination_resolves_relative_to_project_root(tmp_path: Path):
+    s = resolve_logging_config(
+        dev=False,
+        config={"destination": "file", "file": "log/fymo.log"},
+        project_root=tmp_path,
+    )
+    assert s.destination == "file"
+    assert s.file == tmp_path / "log" / "fymo.log"
+
+
+def test_file_destination_absolute_path_kept(tmp_path: Path):
+    target = tmp_path / "abs.log"
+    s = resolve_logging_config(dev=False, config={"destination": "file", "file": str(target)})
+    assert s.file == target
+
+
+def test_level_and_format_overrides():
+    s = resolve_logging_config(dev=False, config={"level": "debug", "format": "text"})
+    assert s.level == logging.DEBUG
+    assert s.json is False  # explicit format beats prod default
+
+
+def test_format_json_in_dev():
+    s = resolve_logging_config(dev=True, config={"format": "json"})
+    assert s.json is True  # explicit format beats dev default
+
+
+@pytest.mark.parametrize("bad_config, key", [
+    ({"destination": "syslog"}, "logging.destination"),
+    ({"destination": "file"}, "logging.file"),  # file dest without file path
+    ({"level": "verbose"}, "logging.level"),
+    ({"format": "xml"}, "logging.format"),
+])
+def test_invalid_config_fails_fast_naming_the_key(bad_config, key):
+    with pytest.raises(ValueError, match=key.replace(".", r"\.")):
+        resolve_logging_config(dev=False, config=bad_config)

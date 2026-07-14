@@ -3,7 +3,8 @@
 Two knobs: `configure(json=...)` sets the output format for the process —
 human-readable text in dev, one JSON object per line in prod (FYMO_DEV=0).
 `access_log(environ, status, duration_ms)` emits exactly one line per
-completed request.
+completed request. `resolve_logging_config()` validates fymo.yml's `logging:`
+section into a LoggingSettings dataclass with fail-fast ValueError on bad keys.
 
 PII/secret hygiene: access_log only ever reads REQUEST_METHOD and PATH_INFO
 from `environ`. It must never be extended to log cookies, request bodies,
@@ -19,11 +20,86 @@ from __future__ import annotations
 
 import json as _json
 import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger("fymo")
 logger.addHandler(logging.NullHandler())
 
 _json_mode = False
+
+_DESTINATIONS = ("terminal", "file")
+_FORMATS = ("text", "json")
+_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+
+
+@dataclass(frozen=True)
+class LoggingSettings:
+    """Validated logging configuration, resolved from fymo.yml's `logging:`
+    section plus the dev flag. `file` is set iff destination == "file"."""
+    destination: str
+    file: Optional[Path]
+    level: int
+    json: bool
+
+
+def resolve_logging_config(
+    dev: bool = False,
+    config: Optional[dict] = None,
+    project_root: Optional[Path] = None,
+) -> LoggingSettings:
+    """Validate fymo.yml's `logging:` section into LoggingSettings.
+
+    Fail-fast by design: a bad value raises ValueError naming the key and
+    the allowed values, instead of silently falling back — logging that
+    quietly ends up somewhere unexpected is how production incidents go
+    unrecorded. An absent/empty section is NOT an error; every key has a
+    default (terminal, info, text-in-dev/json-in-prod).
+    """
+    cfg = config or {}
+
+    destination = str(cfg.get("destination", "terminal")).lower()
+    if destination not in _DESTINATIONS:
+        raise ValueError(
+            f"logging.destination must be one of {_DESTINATIONS}, got {destination!r}"
+        )
+
+    file_path: Optional[Path] = None
+    if destination == "file":
+        file_value = cfg.get("file")
+        if not file_value:
+            raise ValueError(
+                "logging.destination is 'file' but logging.file is not set "
+                "— add e.g. `file: log/fymo.log` to the logging section"
+            )
+        file_path = Path(str(file_value))
+        if not file_path.is_absolute() and project_root is not None:
+            file_path = Path(project_root) / file_path
+
+    level_name = str(cfg.get("level", "info")).lower()
+    if level_name not in _LEVELS:
+        raise ValueError(
+            f"logging.level must be one of {tuple(_LEVELS)}, got {level_name!r}"
+        )
+
+    fmt = cfg.get("format")
+    if fmt is None:
+        json_mode = not dev
+    else:
+        fmt = str(fmt).lower()
+        if fmt not in _FORMATS:
+            raise ValueError(f"logging.format must be one of {_FORMATS}, got {fmt!r}")
+        json_mode = fmt == "json"
+
+    return LoggingSettings(
+        destination=destination, file=file_path, level=_LEVELS[level_name], json=json_mode,
+    )
 
 
 def configure(json: bool = False) -> None:
