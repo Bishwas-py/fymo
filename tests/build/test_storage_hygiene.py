@@ -1,5 +1,5 @@
 """`media:` always resolves the files it serves through a StorageProvider
-(fymo.storage.registry), and storage has no default provider on purpose --
+(fymo.storage.registry), and storage has no default provider on purpose,
 see fymo/storage/registry.py's docstring. `check_storage_required_for_media`
 catches the resulting footgun (media: configured, storage: forgotten) at
 build time, before it ever reaches a runtime StorageConfigError."""
