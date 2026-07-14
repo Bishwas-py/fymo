@@ -1,7 +1,9 @@
 """Tests for app/jobs/*.py task discovery."""
 from pathlib import Path
 
-from fymo.jobs.discovery import discover_job_tasks
+import pytest
+
+from fymo.jobs.discovery import DuplicateTaskError, discover_job_tasks
 
 
 def test_returns_empty_dict_when_no_jobs_dir(tmp_path: Path):
@@ -53,3 +55,14 @@ def test_two_project_roots_dont_collide(tmp_path_factory):
     # into root_b's discovery.
     assert set(tasks_a) == {"task_a"}
     assert set(tasks_b) == {"task_b"}
+
+
+def test_duplicate_task_names_across_modules_raise(tmp_path: Path):
+    jobs_dir = tmp_path / "app" / "jobs"
+    jobs_dir.mkdir(parents=True)
+    (tmp_path / "app" / "__init__.py").write_text("")
+    (jobs_dir / "__init__.py").write_text("")
+    (jobs_dir / "a.py").write_text("def clash():\n    return 'a'\n")
+    (jobs_dir / "b.py").write_text("def clash():\n    return 'b'\n")
+    with pytest.raises(DuplicateTaskError, match="a.py.*b.py"):
+        discover_job_tasks(tmp_path)
