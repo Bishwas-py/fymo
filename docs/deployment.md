@@ -259,3 +259,37 @@ shipper (Vector, Fluent Bit, Filebeat) pick lines up and forward them to
 your log backend (CloudWatch, Loki, Elasticsearch, Datadog, ...). Because
 each line is already a single JSON object, most shippers can parse it
 without a custom grok/regex rule.
+
+## Logging
+
+fymo logs to the terminal by default — in production (`FYMO_DEV` unset)
+as one JSON object per line on stderr, which Docker, systemd, gunicorn,
+and any log collector pick up natively. Configure via `fymo.yml`:
+
+```yaml
+logging:
+  destination: file      # terminal (default) | file
+  file: log/fymo.log     # required when destination: file
+  level: info            # debug | info | warning | error
+  format: json           # text | json (default: text in dev, json in prod)
+```
+
+The same section drives both the web process and `fymo jobs-worker`,
+which also emits one line per background job (started/succeeded/failed,
+with duration). Job arguments, cookies, request bodies, and auth headers
+are never logged. (fymo's own log lines never include them, and the
+`procrastinate` library's argument-echoing lines are suppressed in the
+worker: its logger is capped to WARNING by default, and its
+permanent-failure line — which would pass at ERROR — is filtered out;
+fymo's own `job failed` line carries name/status/duration and the
+traceback instead. Explicitly `setLevel(logging.INFO)` on the
+`procrastinate` logger only if you accept that its lines will include
+job arguments.)
+
+fymo owns a single handler on Python's root logger, so your app's own
+`logging.getLogger(...)` output and library logs share the destination
+and format. Attach additional handlers in `server.py` if you need a
+second sink (e.g. Sentry).
+
+File output is append-only with no built-in rotation — use logrotate or
+your container platform's log driver.

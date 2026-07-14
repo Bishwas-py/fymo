@@ -27,4 +27,11 @@ class ThreadedJobProvider(BaseJobProvider):
     def submit(self, task_name: str, *args, **kwargs) -> None:
         if task_name not in self._tasks:
             raise ValueError(f"unknown job task: {task_name!r}")
-        get_shared_runner().submit(self._tasks[task_name], *args, **kwargs)
+        from fymo.jobs.lifecycle import run_with_lifecycle
+        # reraise=False: lifecycle logging owns the failure line; letting it
+        # propagate would make JobRunner._log_if_failed log the same failure
+        # a second time (and JobRunner's contract swallows it anyway).
+        get_shared_runner().submit(
+            run_with_lifecycle, task_name, self._tasks[task_name],
+            args, kwargs, False,
+        )
