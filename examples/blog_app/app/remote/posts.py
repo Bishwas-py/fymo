@@ -1,4 +1,5 @@
 """Remote functions for the blog: reads + comment/reaction mutations."""
+import logging
 from datetime import datetime, timezone
 from typing import TypedDict, Literal
 from pydantic import BaseModel, Field
@@ -6,6 +7,8 @@ from pydantic import BaseModel, Field
 from fymo.remote import current_uid, NotFound, remote
 from fymo.auth import require_auth, current_user
 from app.data.db import get_db
+
+logger = logging.getLogger("blog_app")
 
 
 class Post(TypedDict):
@@ -64,6 +67,17 @@ def get_post(slug: str) -> Post:
     return row
 
 
+def _publish_activity(slug: str, kind: str, **payload) -> None:
+    # Fire-and-forget: a subscriber missing this event isn't broken, they
+    # just fall back to whatever polling/refresh already covers the page,
+    # so a broadcast failure must never fail the mutation that triggered it.
+    try:
+        from fymo.broadcast import publish
+        publish("post_activity", slug=slug, data={"kind": kind, **payload})
+    except Exception:
+        logger.warning("post_activity broadcast failed for %s", slug, exc_info=True)
+
+
 @remote
 def get_comments(slug: str) -> list[Comment]:
     return get_db().fetchall(
@@ -83,9 +97,11 @@ def create_comment(slug: str, input: NewComment) -> Comment:
         "INSERT INTO comments (post_slug, uid, name, body, created_at) VALUES (?, ?, ?, ?, ?)",
         [slug, uid, author, input.body, datetime.now(timezone.utc).isoformat()],
     )
-    return get_db().fetchone(
+    comment = get_db().fetchone(
         "SELECT id, name, body, created_at FROM comments WHERE id = ?", [cid]
     )
+    _publish_activity(slug, "comment_added", comment=comment)
+    return comment
 
 
 @remote
@@ -118,4 +134,6 @@ def toggle_reaction(slug: str, kind: ReactionKind) -> ReactionCounts:
             "INSERT INTO reactions (post_slug, uid, kind) VALUES (?, ?, ?)",
             [slug, uid, kind],
         )
-    return get_reactions(slug)
+    reactions = get_reactions(slug)
+    _publish_activity(slug, "reaction_updated", reactions=reactions)
+    return reactions
