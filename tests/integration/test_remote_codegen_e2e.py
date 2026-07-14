@@ -13,6 +13,8 @@ def test_build_emits_remote_artifacts(example_app: Path):
     remote_dir.mkdir(parents=True, exist_ok=True)
     (remote_dir / "__init__.py").write_text("")
     (remote_dir / "test_mod.py").write_text(
+        "from fymo.remote import remote\n"
+        "@remote\n"
         "def hello(name: str) -> str:\n    return f'hi {name}'\n"
     )
 

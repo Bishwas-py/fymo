@@ -11,6 +11,8 @@ def test_remote_import_resolves(example_app: Path):
     remote.mkdir(parents=True, exist_ok=True)
     (remote / "__init__.py").write_text("")
     (remote / "greeter.py").write_text(
+        "from fymo.remote import remote\n"
+        "@remote\n"
         "def hello(name: str) -> str:\n    return f'hi {name}'\n"
     )
 
