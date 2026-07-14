@@ -42,6 +42,19 @@ def test_hygiene_violation_raises_before_node_check(example_app: Path, monkeypat
         prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
 
 
+def test_media_without_storage_raises_build_error(example_app: Path):
+    (example_app / "fymo.yml").write_text(
+        "media:\n"
+        "  - prefix: /media/videos/\n"
+        "    dir: data/videos\n"
+        "    extensions: [webm]\n"
+    )
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+    with pytest.raises(BuildError, match="storage:"):
+        prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
+
+
 @pytest.mark.usefixtures("node_available")
 def test_py_file_in_app_lib_warns_but_does_not_fail_build(example_app: Path, capsys):
     """Locked decision: unlike app/controllers, app/templates, and

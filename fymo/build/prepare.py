@@ -27,6 +27,7 @@ from fymo.build.hygiene import (
     check_directory_hygiene,
     check_lib_directory_warnings,
     check_remote_exposure_hygiene,
+    check_storage_required_for_media,
     format_hygiene_error,
     format_remote_exposure_error,
 )
@@ -122,6 +123,10 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     remote_exposure_violations = check_remote_exposure_hygiene(project_root, remote_config)
     if remote_exposure_violations:
         raise BuildError(format_remote_exposure_error(remote_exposure_violations))
+
+    storage_violations = check_storage_required_for_media(project_root)
+    if storage_violations:
+        raise BuildError("\n".join(storage_violations))
 
     if shutil.which("node") is None:
         raise BuildError("node not found on PATH" if dev else "node executable not found on PATH")

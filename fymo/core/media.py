@@ -23,10 +23,12 @@ will still want fully custom raw-WSGI routes for things this doesn't cover
 from __future__ import annotations
 
 import mimetypes
+import posixpath
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 from fymo.core.http import HttpRoute
+from fymo.storage.base import RangeNotSatisfiable, StorageProvider
 
 # Reserved by FymoApp._dispatch itself (fymo/core/server.py), checked before
 # the app-routes loop runs. A `media:` prefix landing under either of these
@@ -56,56 +58,47 @@ def _respond_range_not_satisfiable(start_response, file_size: int):
     return [body]
 
 
-def _is_traversal_safe(filename: str) -> bool:
-    """Cheap first check: no '..' segments and no absolute path. Checked as
-    plain substring/prefix tests, because `root_dir / filename` would
-    happily let a leading '/' override root_dir entirely, pathlib treats
-    joining with an absolute path as a replacement, not a traversal, so the
-    unsafe case has to be rejected before the join ever happens. This alone
-    is not sufficient against a symlink physically planted inside root_dir
-    that points elsewhere (its own filename contains neither '..' nor a
-    leading '/'), which is what `_resolve_within` below is for."""
-    return ".." not in filename and not filename.startswith("/")
-
-
-def _resolve_within(root_dir: Path, filename: str) -> Optional[Path]:
-    """Join `filename` onto `root_dir` and confirm the fully-resolved path,
-    symlinks included, is still contained within `root_dir`. Returns None if
-    it escapes. This covers both any traversal that slipped past
-    `_is_traversal_safe` and a symlink planted inside root_dir that points
-    outside it, since following the symlink target is exactly what
-    `Path.resolve()` does. `root_dir` is assumed already resolved (done once
-    in `build_media_routes`, not per request)."""
-    candidate = (root_dir / filename).resolve()
-    if candidate != root_dir and not candidate.is_relative_to(root_dir):
-        return None
-    return candidate
-
-
-def _make_media_handler(prefix: str, root_dir: Path, extensions: set) -> Callable:
+def _make_media_handler(prefix: str, dir_key: str, extensions: set, storage: StorageProvider) -> Callable:
     """Build the WSGI handler for one `media:` entry. `extensions` is a set
     of lowercase, dot-less extensions (e.g. {"webm"}); anything else is a
     400, same as an unsafe filename, so a probing request can't distinguish
-    "wrong extension" from "path traversal attempt"."""
+    "wrong extension" from "path traversal attempt".
+
+    `dir_key` (the entry's `dir:` value) is the storage-key namespace for
+    this route, not a filesystem path. The requested filename is joined
+    onto it with `posixpath.join` to produce the key handed to `storage`.
+    `posixpath.join` mirrors `pathlib`'s own absolute-path-override
+    behavior (a second argument starting with '/' replaces the first
+    entirely rather than being appended), which is what makes a leading '/'
+    in the requested filename resolve to a key that itself starts with '/'
+    and gets rejected by the provider's own traversal-safety check, exactly
+    as it did when this handler joined paths with pathlib directly. All
+    containment/symlink-escape enforcement now lives in the storage
+    provider (see fymo.storage.providers.local for the local case); this
+    handler only translates the provider's ValueError/RangeNotSatisfiable
+    into the right HTTP status."""
 
     def handler(environ, start_response):
         path = environ.get("PATH_INFO", "")
         filename = path[len(prefix):]
 
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if not _is_traversal_safe(filename) or ext not in extensions:
+        if ext not in extensions:
             return _respond_error(start_response, "400 Bad Request", b"invalid filename")
 
-        resolved_path = _resolve_within(root_dir, filename)
-        if resolved_path is None:
+        key = posixpath.join(dir_key, filename)
+
+        try:
+            found = storage.exists(key)
+        except ValueError:
             return _respond_error(start_response, "400 Bad Request", b"invalid filename")
 
-        if not resolved_path.is_file():
+        if not found:
             return _respond_error(start_response, "404 Not Found", b"not found")
 
         content_type, _ = mimetypes.guess_type(filename)
         content_type = content_type or "application/octet-stream"
-        file_size = resolved_path.stat().st_size
+        file_size = storage.size(key)
         range_header = environ.get("HTTP_RANGE")
 
         if range_header:
@@ -135,27 +128,30 @@ def _make_media_handler(prefix: str, root_dir: Path, extensions: set) -> Callabl
             except ValueError:
                 return _respond_error(start_response, "400 Bad Request", b"malformed range header")
 
-            # Unsatisfiable per RFC 7233 section 2.1: start at/past EOF, or
-            # an end before start. Caught here, before any arithmetic feeds
-            # into f.read(), so a crafted start like 999999999 on a small
-            # file can never turn into a negative read length.
-            if start < 0 or start >= file_size or end < start:
-                return _respond_range_not_satisfiable(start_response, file_size)
+            # Unsatisfiable-range detection (start at/past EOF, or an end
+            # before start) and end-clamping both now live in the storage
+            # provider's read(); RangeNotSatisfiable carries the size the
+            # 416 response's Content-Range header needs.
+            try:
+                data = storage.read(key, range=(start, end))
+            except RangeNotSatisfiable as exc:
+                return _respond_range_not_satisfiable(start_response, exc.size)
 
-            end = min(end, file_size - 1)
-            chunk_size = end - start + 1
-            with open(resolved_path, "rb") as f:
-                f.seek(start)
-                data = f.read(chunk_size)
+            # The actual returned length is the source of truth for the end
+            # of the range served (the provider may have clamped it), so
+            # derive the response's Content-Range from it rather than the
+            # raw (possibly past-EOF) end parsed from the request header.
+            chunk_size = len(data)
+            served_end = start + chunk_size - 1
             start_response("206 Partial Content", [
-                ("Content-Range", f"bytes {start}-{end}/{file_size}"),
+                ("Content-Range", f"bytes {start}-{served_end}/{file_size}"),
                 ("Accept-Ranges", "bytes"),
                 ("Content-Length", str(chunk_size)),
                 ("Content-Type", content_type),
             ])
             return [data]
 
-        data = resolved_path.read_bytes()
+        data = storage.read(key)
         start_response("200 OK", [
             ("Accept-Ranges", "bytes"),
             ("Content-Length", str(file_size)),
@@ -166,10 +162,15 @@ def _make_media_handler(prefix: str, root_dir: Path, extensions: set) -> Callabl
     return handler
 
 
-def build_media_routes(project_root: Path, media_config: List[Dict[str, Any]]) -> List[HttpRoute]:
+def build_media_routes(
+    project_root: Path, media_config: List[Dict[str, Any]], storage: StorageProvider
+) -> List[HttpRoute]:
     """Turn the `media:` fymo.yml section into `HttpRoute`s. Returns `[]`
     when `media_config` is empty, so apps without a `media:` section (the
     vast majority, pre-existing and new alike) register zero extra routes.
+    `storage` is the already-constructed provider every route's handler
+    resolves files through (see fymo.storage.registry.build_storage_provider,
+    called by fymo/core/server.py before this).
 
     Raises `ValueError` for an entry missing `prefix` or `dir` (a plain
     KeyError at startup would point at the wrong place, this names the bad
@@ -192,11 +193,11 @@ def build_media_routes(project_root: Path, media_config: List[Dict[str, Any]]) -
                     f"reserved {reserved!r} route, which is matched first and "
                     f"will always win. This media route may never be reached."
                 )
-        root_dir = (Path(project_root) / entry["dir"]).resolve()
+        dir_key = str(entry["dir"]).strip("/")
         extensions = {str(e).lower().lstrip(".") for e in entry.get("extensions", [])}
         routes.append(HttpRoute(
             method="GET",
             path=prefix,
-            handler=_make_media_handler(prefix, root_dir, extensions),
+            handler=_make_media_handler(prefix, dir_key, extensions, storage),
         ))
     return routes

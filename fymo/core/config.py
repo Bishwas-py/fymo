@@ -201,6 +201,14 @@ class ConfigManager:
         existing apps are unaffected."""
         return self.get('media', []) or []
 
+    def get_storage_config(self) -> Optional[Dict[str, Any]]:
+        """`storage:` section. Selects the StorageProvider (bare string,
+        `provider`/`class` dict, or absent, see fymo.storage.registry).
+        Returns None, not {}, when absent: callers need to tell "no storage
+        configured" apart from "configured but empty", since storage has no
+        silent default the way auth/jobs/broadcasts do."""
+        return self.get('storage', None)
+
     def to_dict(self) -> Dict[str, Any]:
         """Return configuration as dictionary"""
         return self.config.copy()

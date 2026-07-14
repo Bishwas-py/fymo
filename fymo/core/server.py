@@ -147,9 +147,28 @@ class FymoApp:
         # raw-WSGI routes with config-driven ones. See fymo/core/media.py.
         from fymo.core.http import discover_app_http_routes
         from fymo.core.media import build_media_routes
-        self._app_routes = discover_app_http_routes(self.project_root) + build_media_routes(
-            self.project_root, self.config_manager.get_media_config()
-        )
+        media_config = self.config_manager.get_media_config()
+        media_routes = []
+        if media_config:
+            # `fymo build`'s check_storage_required_for_media (fymo/build/hygiene.py)
+            # catches this for the normal build -> run path, but `fymo dev` and a
+            # stale dist/ built before media: was added can both reach here without
+            # ever running that check, so it's enforced again at the one place every
+            # startup path shares. The message is phrased for a running app (fix
+            # fymo.yml and restart) rather than build_storage_provider's own
+            # build-context wording.
+            from fymo.storage.registry import StorageConfigError, build_storage_provider
+            storage_config = self.config_manager.get_storage_config()
+            if storage_config is None:
+                raise StorageConfigError(
+                    "media: is configured in fymo.yml but storage: is missing. "
+                    "media: routes resolve files through the configured "
+                    "StorageProvider and there is no default, add a storage: "
+                    "section (e.g. `storage: {provider: local}`) to fymo.yml."
+                )
+            storage = build_storage_provider(storage_config, self.project_root)
+            media_routes = build_media_routes(self.project_root, media_config, storage)
+        self._app_routes = discover_app_http_routes(self.project_root) + media_routes
         self.router = self._initialize_router()
         self.template_renderer = TemplateRenderer(
             self.project_root,
