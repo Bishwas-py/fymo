@@ -22,6 +22,13 @@ routes:
   resources:
     - posts
 
+# Remote functions (app/remote/*.py) require an explicit @remote marker to
+# be browser-callable: file placement alone is not enough. Flip to false
+# only if migrating an older project that relies on implicit exposure, and
+# consider remote.allow_implicit: true as a temporary bridge instead.
+remote:
+  explicit_optin: true
+
 # Build configuration
 build:
   output_dir: dist

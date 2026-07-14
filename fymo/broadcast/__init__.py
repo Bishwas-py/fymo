@@ -15,7 +15,9 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import logging
 import threading
+import typing
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -27,6 +29,13 @@ __all__ = [
     "init_broadcasts",
     "reset_broadcasts",
 ]
+
+logger = logging.getLogger("fymo.broadcast")
+
+# Dev mode: when True, publish() checks `data` against the channel's
+# TypedDict return annotation and logs a warning on mismatch. Off by
+# default (matches fymo.remote.router._dev_mode); set by fymo.core.server.
+_dev_mode: bool = False
 
 
 def channel_key(module: str, channel: str, args: Dict[str, Any]) -> str:
@@ -98,6 +107,44 @@ def init_broadcasts(project_root: Path, provider_config: Any) -> Any:
     return provider
 
 
+def _warn_payload_mismatch(channel: str, type_name: str, detail: str) -> None:
+    logger.warning(
+        "broadcast %r: published data does not match declared payload type %s: %s",
+        channel, type_name, detail,
+    )
+
+
+def _validate_payload(channel: str, fn: Callable, data: Any) -> None:
+    """Dev-only DX check: does `data` match the channel's declared return
+    type? Only understands TypedDict returns (the documented convention for
+    channel payloads); anything else (no annotation, `dict`, `...`-body
+    default style) is left unvalidated, same as production. Never raises;
+    a bad payload still gets delivered, this only helps a developer notice
+    the drift between what a channel promises and what it actually sends.
+    """
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception:
+        return  # unresolvable forward ref etc., not worth failing publish over
+    return_type = hints.get("return")
+    if return_type is None or not typing.is_typeddict(return_type):
+        return
+
+    type_name = getattr(return_type, "__name__", str(return_type))
+    if not isinstance(data, dict):
+        _warn_payload_mismatch(channel, type_name, f"expected an object, got {type(data).__name__}")
+        return
+
+    required = getattr(return_type, "__required_keys__", set())
+    optional = getattr(return_type, "__optional_keys__", set())
+    missing = required - data.keys()
+    if missing:
+        _warn_payload_mismatch(channel, type_name, f"missing required key(s) {sorted(missing)}")
+    extra = data.keys() - required - optional
+    if extra:
+        _warn_payload_mismatch(channel, type_name, f"unrecognized key(s) {sorted(extra)}")
+
+
 def publish(channel: str, data: Any = None, **args: Any) -> None:
     """Publish `data` to everyone currently subscribed to `channel` with
     exactly these args. Fire-and-forget: no subscribers, no delivery, no
@@ -110,6 +157,8 @@ def publish(channel: str, data: Any = None, **args: Any) -> None:
     if channel not in channels:
         raise ValueError(f"unknown broadcast channel: {channel!r}")
     module, fn = channels[channel]
+    if _dev_mode:
+        _validate_payload(channel, fn, data)
     bound = inspect.signature(fn).bind(**args)
     bound.apply_defaults()
     key = channel_key(module, channel, dict(bound.arguments))

@@ -11,10 +11,13 @@ must be unique across modules, same as broadcast channel names.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable, Dict
 
 from fymo.core.app_discovery import discover_app_functions
+
+logger = logging.getLogger("fymo.jobs")
 
 
 class DuplicateTaskError(Exception):
@@ -42,6 +45,23 @@ def discover_job_tasks(project_root: Path) -> Dict[str, Callable]:
     `app.remote.*` — unlike fymo.remote.discovery, which leaves this step
     to its caller (BuildPipeline), this function doesn't require callers
     to remember it.
+
+    A function without the `@task` marker (fymo.jobs.task) is still
+    registered exactly as before. This is intentionally not a breaking
+    change, every existing app/jobs module keeps working unmodified, but it
+    logs a one-line warning suggesting `@task` be added, since an
+    undecorated top-level function becoming submittable is easy to do by
+    accident in a module meant to stay a thin task registry.
     """
     found = discover_app_functions(project_root, "jobs", _on_duplicate)
-    return {name: fn for name, (_module, fn) in found.items()}
+    tasks: Dict[str, Callable] = {}
+    for name, (module_stem, fn) in found.items():
+        if not getattr(fn, "__fymo_task__", False):
+            logger.warning(
+                "app/jobs/%s.py: %r has no @task marker (fymo.jobs.task); "
+                "it is still registered as a task for backward compatibility, "
+                "but consider adding @task to make it explicit",
+                module_stem, name,
+            )
+        tasks[name] = fn
+    return tasks

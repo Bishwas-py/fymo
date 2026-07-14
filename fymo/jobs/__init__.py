@@ -23,7 +23,15 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from fymo.jobs.decorators import task
+
 logger = logging.getLogger("fymo.jobs")
+
+__all__ = [
+    "JobRunner", "set_shared_runner", "get_shared_runner", "reset_shared_runner",
+    "set_job_provider", "get_job_provider", "init_job_provider", "reset_job_provider",
+    "task",
+]
 
 
 class JobRunner:

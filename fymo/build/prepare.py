@@ -25,12 +25,16 @@ from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
 from fymo.build.hygiene import (
     check_directory_hygiene,
+    check_lib_directory_warnings,
+    check_remote_exposure_hygiene,
     check_storage_required_for_media,
     format_hygiene_error,
+    format_remote_exposure_error,
 )
 from fymo.build.manifest import RemoteModuleAssets
 from fymo.remote.codegen import emit_module, emit_runtime
 from fymo.remote.discovery import discover_remote_modules
+from fymo.utils.colors import Color
 
 
 class BuildError(RuntimeError):
@@ -100,6 +104,26 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     if hygiene_violations:
         raise BuildError(format_hygiene_error(hygiene_violations))
 
+    # Soft check, same point in the sequence as the hard one above but never
+    # raises; see check_lib_directory_warnings' docstring for why app/lib/
+    # doesn't get the hard-error treatment. Printed for both `fymo build` and
+    # `fymo dev` since both call prepare_build_config.
+    for warning in check_lib_directory_warnings(project_root):
+        Color.print_warning(warning)
+
+    # Read once, reused below for discover_remote_modules too: both need the
+    # same `remote:` section, and re-reading fymo.yml a second time would
+    # risk the two calls drifting if the file changes mid-build.
+    remote_config = read_yaml_section(project_root, "remote")
+
+    # Also a pure-Python check (imports app/remote/*.py but does not touch
+    # node/esbuild), so it runs alongside directory hygiene rather than
+    # waiting on the node check below: a developer shipping an unguarded
+    # endpoint should hear about it even on a machine without node installed.
+    remote_exposure_violations = check_remote_exposure_hygiene(project_root, remote_config)
+    if remote_exposure_violations:
+        raise BuildError(format_remote_exposure_error(remote_exposure_violations))
+
     storage_violations = check_storage_required_for_media(project_root)
     if storage_violations:
         raise BuildError("\n".join(storage_violations))
@@ -143,7 +167,7 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
         remote_modules = discover_remote_modules(
             project_root,
             auth_config=read_yaml_section(project_root, "auth"),
-            remote_config=read_yaml_section(project_root, "remote"),
+            remote_config=remote_config,
         )
     except ValueError as e:
         if dev:
@@ -156,6 +180,13 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     if remote_modules:
         emit_runtime(remote_out)
         for module_name, fns in remote_modules.items():
+            # A module can now discover to zero functions, e.g. under
+            # explicit_optin with every function in the file left unmarked,
+            # a private-helpers-only module. emit_module indexes fns.values()
+            # for the shared module_hash, which is undefined with nothing in
+            # it, so skip rather than emit a pointless empty client module.
+            if not fns:
+                continue
             emit_module(module_name, fns, remote_out)
 
     # Codegen for app/broadcasts/*.py -- dist/client/_broadcast/<name>.{js,d.ts}

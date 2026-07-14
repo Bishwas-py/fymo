@@ -3,14 +3,115 @@ Configuration management for Fymo applications
 """
 
 import os
+import re
 import yaml
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+
+from fymo.core.exceptions import ConfigurationError
 
 
 def env_truthy(name: str) -> bool:
     """Shared FYMO_DEV-style env flag check ("1"/"true"/"yes"/"on")."""
     return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
+
+
+# ${VAR} (required) or ${VAR:-default} (falls back when unset). Resolved on
+# the raw YAML text before yaml.safe_load parses it: the simplest correct
+# approach, and it applies uniformly to the whole file (any section, any
+# nesting depth) instead of needing a walk over the parsed structure.
+_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _yaml_quote(value: str) -> str:
+    """Render `value` as a YAML double-quoted scalar.
+
+    Splicing a resolved env value back into the raw config text as a plain
+    substring would let a value that itself looks like YAML (a newline
+    followed by "admin: true", a colon, a leading "- ") restructure the
+    parsed config instead of staying a string. Emitting it as an explicit
+    quoted scalar closes that off: whatever the value contains, it can only
+    ever parse back out as that same string.
+    """
+    return yaml.dump(value, default_style='"', default_flow_style=True).strip()
+
+
+def _find_matching_brace(text: str, open_index: int) -> int:
+    """`text[open_index]` is the '{' that opened a '${' placeholder. Returns
+    the index of the '}' that closes it, counting every '{'/'}' in between
+    (not just '${' ones) so a nested ${OTHER} reference and a literal brace
+    in a default (e.g. a JSON-shaped fallback) are both handled by the same
+    depth count, instead of the first '}' anywhere winning.
+    """
+    depth = 1
+    i = open_index + 1
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    raise ConfigurationError(
+        "fymo.yml has an unterminated \"${\" placeholder starting at "
+        f"position {open_index - 1}; every \"${{\" needs a matching \"}}\""
+    )
+
+
+def _resolve_placeholder_value(inner: str) -> str:
+    """Resolve the contents between one placeholder's outer ${ and }
+    (e.g. "FOO", "FOO:-bar", or "FOO:-${BAR}") to its plain, unquoted
+    value. A default is only evaluated, including any ${OTHER} nested in
+    it, when the outer var is actually unset."""
+    name, sep, default = inner.partition(":-")
+    if not _VAR_NAME_RE.match(name):
+        raise ConfigurationError(
+            f'fymo.yml has a malformed placeholder: "${{{inner}}}" is not '
+            'a valid ${VAR} or ${VAR:-default}'
+        )
+    if name in os.environ:
+        return os.environ[name]
+    if sep:
+        return _scan_placeholders(default, quote=False)
+    raise ConfigurationError(
+        f"fymo.yml references undefined environment variable: {name}"
+    )
+
+
+def _scan_placeholders(text: str, quote: bool) -> str:
+    """Walk `text` left to right, replacing every ${...} with its resolved
+    value. `quote` controls whether each resolved value is spliced back in
+    as a YAML-quoted scalar (splicing into the actual config text) or as a
+    plain string (resolving a default's own value before its outer
+    placeholder gets quoted once, so nesting can't double-quote)."""
+    out = []
+    pos = 0
+    while True:
+        start = text.find("${", pos)
+        if start == -1:
+            out.append(text[pos:])
+            break
+        out.append(text[pos:start])
+        close = _find_matching_brace(text, start + 1)
+        inner = text[start + 2:close]
+        value = _resolve_placeholder_value(inner)
+        out.append(_yaml_quote(value) if quote else value)
+        pos = close + 1
+    return "".join(out)
+
+
+def _interpolate_env_vars(text: str) -> str:
+    """Substitute ${VAR}/${VAR:-default} placeholders in raw fymo.yml text
+    with real env values, each spliced back in as an explicit YAML-quoted
+    scalar (see _yaml_quote) so a value can never be interpreted as new
+    YAML structure, only ever as the literal string it is.
+
+    A bare ${VAR} with nothing set raises loudly and names the var, since a
+    deployment-specific value silently resolving to the literal string
+    "${VAR}" would be a much worse failure mode than refusing to boot.
+    """
+    return _scan_placeholders(text, quote=True)
 
 
 class ConfigManager:
@@ -34,8 +135,10 @@ class ConfigManager:
         if config_file.exists():
             try:
                 with open(config_file, 'r') as f:
-                    file_config = yaml.safe_load(f) or {}
-                    self.config.update(file_config)
+                    raw_text = f.read()
+                interpolated_text = _interpolate_env_vars(raw_text)
+                file_config = yaml.safe_load(interpolated_text) or {}
+                self.config.update(file_config)
             except (yaml.YAMLError, IOError) as e:
                 print(f"Warning: Could not load config from {config_file}: {e}")
     

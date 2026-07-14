@@ -3,6 +3,7 @@ import base64
 import importlib
 import inspect
 import json
+import os
 import sys
 import traceback
 import typing
@@ -83,10 +84,23 @@ def _origin_ok(environ: dict) -> bool:
 
 
 def _evict_stale_app_cache() -> None:
-    """Evict app.* packages from sys.modules if the app package root is no longer on sys.path.
+    """Evict app.* packages from sys.modules if the app package's project
+    root is no longer on sys.path.
 
     Handles test isolation and live-reload scenarios where the app package
-    directory changes between requests.
+    directory changes between requests (e.g. a test session that builds a
+    fresh "app" package under a new tmp_path for every test, or a dev
+    server whose project root moves).
+
+    The check compares sys.path against the PARENT of app.__path__ (the
+    project root that FymoApp.__init__ inserts into sys.path once, e.g.
+    "/proj"), not app.__path__ itself (the "app" subdirectory it points at,
+    e.g. "/proj/app"). sys.path holds project roots; it never holds the
+    "app" subdirectory directly. Comparing __path__ verbatim against
+    sys.path therefore never matched, so this used to evict and force a
+    full reimport of every app.* module on every single call, defeating
+    any caching keyed on the resulting function objects' identity even
+    though the project root never actually changed between requests.
     """
     app_mod = sys.modules.get("app")
     if app_mod is None:
@@ -94,7 +108,7 @@ def _evict_stale_app_cache() -> None:
     app_paths = list(getattr(app_mod, "__path__", []))
     if not app_paths:
         return
-    if not any(p in sys.path for p in app_paths):
+    if not any(os.path.dirname(p) in sys.path for p in app_paths):
         for name in list(sys.modules):
             if name == "app" or name.startswith("app."):
                 del sys.modules[name]
@@ -112,6 +126,29 @@ def set_system_modules(modules: "dict[str, dict[str, Callable]]") -> None:
     _system_modules = modules
 
 
+# (module_name, fn_name) -> (fn, signature, hints). inspect.signature and
+# typing.get_type_hints both do real reflection work (walking parameters,
+# resolving string/forward-ref annotations against the defining module's
+# globals) that produces the same result every time for a given function
+# object; it only needs to change when the function object itself does.
+# Keyed on identity rather than a version counter or explicit invalidation:
+# a reload that produces a new function object (e.g. importlib.reload, or a
+# fresh module import for the same module_name) naturally makes `cached_fn
+# is not fn` true, so the stale entry is replaced on the next lookup with no
+# extra bookkeeping.
+_sig_cache: "dict[tuple[str, str], tuple[Callable, inspect.Signature, dict]]" = {}
+
+
+def _sig_and_hints(cache_key: "tuple[str, str]", fn: Callable):
+    cached = _sig_cache.get(cache_key)
+    if cached is not None and cached[0] is fn:
+        return cached[1], cached[2]
+    sig = inspect.signature(fn)
+    hints = typing.get_type_hints(fn, include_extras=True)
+    _sig_cache[cache_key] = (fn, sig, hints)
+    return sig, hints
+
+
 def _resolve_fn_in_module(module_name: str, fn_name: str):
     if not fn_name.replace("_", "").isalnum() or fn_name.startswith("_"):
         return None, None, None
@@ -122,7 +159,8 @@ def _resolve_fn_in_module(module_name: str, fn_name: str):
         fn = _system_modules[module_name].get(fn_name)
         if fn is None:
             return None, None, None
-        return fn, inspect.signature(fn), typing.get_type_hints(fn, include_extras=True)
+        sig, hints = _sig_and_hints((module_name, fn_name), fn)
+        return fn, sig, hints
 
     if not module_name.replace("_", "").isalnum():
         return None, None, None
@@ -135,7 +173,8 @@ def _resolve_fn_in_module(module_name: str, fn_name: str):
     fn = getattr(mod, fn_name, None)
     if fn is None or not is_exposed_remote_fn(fn, full, _explicit_optin):
         return None, None, None
-    return fn, inspect.signature(fn), typing.get_type_hints(fn, include_extras=True)
+    sig, hints = _sig_and_hints((module_name, fn_name), fn)
+    return fn, sig, hints
 
 
 def handle_remote(environ: dict, start_response) -> Iterable[bytes]:
