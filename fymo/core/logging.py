@@ -1,10 +1,14 @@
 """Structured logging for fymo.
 
-Two knobs: `configure(json=...)` sets the output format for the process —
-human-readable text in dev, one JSON object per line in prod (FYMO_DEV=0).
-`access_log(environ, status, duration_ms)` emits exactly one line per
-completed request. `resolve_logging_config()` validates fymo.yml's `logging:`
-section into a LoggingSettings dataclass with fail-fast ValueError on bad keys.
+`configure(dev, config, project_root)` installs exactly one fymo-owned handler
+on the ROOT logger, so fymo's logs, the app's own `logging.getLogger(...)` output,
+and library logs (e.g. Procrastinate in the jobs worker) all flow to one destination
+in one format. Configurable via fymo.yml's `logging:` section: `destination`
+(terminal/file), `file` (path for file destination), `level` (debug/info/warning/error,
+defaults to info), `format` (text/json; defaults to text in dev, json in prod).
+`access_log(environ, status, duration_ms)` emits exactly one line per completed
+request. `resolve_logging_config()` validates fymo.yml's `logging:` section into
+a LoggingSettings dataclass with fail-fast ValueError on bad keys.
 
 PII/secret hygiene: access_log only ever reads REQUEST_METHOD and PATH_INFO
 from `environ`. It must never be extended to log cookies, request bodies,
@@ -28,6 +32,7 @@ logger = logging.getLogger("fymo")
 logger.addHandler(logging.NullHandler())
 
 _json_mode = False
+_installed_handler: Optional[logging.Handler] = None
 
 _DESTINATIONS = ("terminal", "file")
 _FORMATS = ("text", "json")
@@ -102,23 +107,88 @@ def resolve_logging_config(
     )
 
 
-def configure(json: bool = False) -> None:
-    """(Re)configure the "fymo" logger's access-log output format.
+class _FymoFormatter(logging.Formatter):
+    """One formatter for every record passing through fymo's handler.
 
-    json=True: one compact JSON object per line (prod). json=False: a
-    plain human-readable line (dev). Clears any previously attached
-    handlers first so repeated calls (e.g. one per FymoApp instance in a
-    test run) never accumulate duplicate handlers or duplicate output.
+    fymo's own records ("fymo" / "fymo.*" loggers) arrive pre-rendered by
+    access_log/job_log — in json mode they're already JSON lines, in text
+    mode already human lines — so they pass through untouched. Records
+    from app code and libraries get wrapped: json mode produces
+    {"logger", "level", "message"} objects, text mode produces
+    "LEVEL logger: message". Tracebacks (exc_info) are appended in text
+    mode / added as an "exc_info" key in json mode.
     """
-    global _json_mode
-    _json_mode = bool(json)
 
-    logger.handlers.clear()
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = True
+    def __init__(self, json_mode: bool):
+        super().__init__()
+        self._json = json_mode
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        is_fymo = record.name == "fymo" or record.name.startswith("fymo.")
+        exc_text = self.formatException(record.exc_info) if record.exc_info else None
+
+        if self._json:
+            if is_fymo and message.startswith("{"):
+                if exc_text is None:
+                    return message
+                payload = _json.loads(message)
+                payload["exc_info"] = exc_text
+                return _json.dumps(payload)
+            payload = {"logger": record.name, "level": record.levelname, "message": message}
+            if exc_text is not None:
+                payload["exc_info"] = exc_text
+            return _json.dumps(payload)
+
+        out = message if is_fymo else f"{record.levelname} {record.name}: {message}"
+        if exc_text is not None:
+            out = f"{out}\n{exc_text}"
+        return out
+
+
+def configure(
+    dev: bool = False,
+    config: Optional[dict] = None,
+    project_root: Optional[Path] = None,
+) -> None:
+    """(Re)configure process-wide logging from fymo.yml's `logging:` section.
+
+    Installs exactly one fymo-owned handler on the ROOT logger, so fymo's
+    logs, the app's own `logging.getLogger(...)` output, and library logs
+    (e.g. Procrastinate in the jobs worker) all flow to one destination in
+    one format. Idempotent: reconfiguring removes only the handler fymo
+    itself installed — pytest's caplog and any user-attached handlers are
+    never touched.
+
+    Raises ValueError on invalid config (see resolve_logging_config) —
+    fail-fast at startup rather than logging to the wrong place silently.
+    """
+    global _json_mode, _installed_handler
+
+    settings = resolve_logging_config(dev=dev, config=config, project_root=project_root)
+    _json_mode = settings.json
+
+    root = logging.getLogger()
+    if _installed_handler is not None:
+        root.removeHandler(_installed_handler)
+        _installed_handler.close()
+        _installed_handler = None
+
+    if settings.destination == "file":
+        assert settings.file is not None  # guaranteed by resolve_logging_config
+        settings.file.parent.mkdir(parents=True, exist_ok=True)
+        handler: logging.Handler = logging.FileHandler(settings.file, mode="a", encoding="utf-8")
+    else:
+        handler = logging.StreamHandler()
+
+    handler.setFormatter(_FymoFormatter(settings.json))
+    handler.setLevel(settings.level)
+    root.addHandler(handler)
+    # Root defaults to WARNING, which would filter INFO records from app
+    # loggers before the handler ever sees them — the level knob must
+    # govern end to end.
+    root.setLevel(settings.level)
+    _installed_handler = handler
 
 
 def access_log(environ: dict, status: str, duration_ms: float) -> None:
