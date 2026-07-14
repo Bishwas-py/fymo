@@ -3,6 +3,7 @@ import base64
 import importlib
 import inspect
 import json
+import os
 import sys
 import traceback
 import typing
@@ -83,10 +84,23 @@ def _origin_ok(environ: dict) -> bool:
 
 
 def _evict_stale_app_cache() -> None:
-    """Evict app.* packages from sys.modules if the app package root is no longer on sys.path.
+    """Evict app.* packages from sys.modules if the app package's project
+    root is no longer on sys.path.
 
     Handles test isolation and live-reload scenarios where the app package
-    directory changes between requests.
+    directory changes between requests (e.g. a test session that builds a
+    fresh "app" package under a new tmp_path for every test, or a dev
+    server whose project root moves).
+
+    The check compares sys.path against the PARENT of app.__path__ (the
+    project root that FymoApp.__init__ inserts into sys.path once, e.g.
+    "/proj"), not app.__path__ itself (the "app" subdirectory it points at,
+    e.g. "/proj/app"). sys.path holds project roots; it never holds the
+    "app" subdirectory directly. Comparing __path__ verbatim against
+    sys.path therefore never matched, so this used to evict and force a
+    full reimport of every app.* module on every single call, defeating
+    any caching keyed on the resulting function objects' identity even
+    though the project root never actually changed between requests.
     """
     app_mod = sys.modules.get("app")
     if app_mod is None:
@@ -94,7 +108,7 @@ def _evict_stale_app_cache() -> None:
     app_paths = list(getattr(app_mod, "__path__", []))
     if not app_paths:
         return
-    if not any(p in sys.path for p in app_paths):
+    if not any(os.path.dirname(p) in sys.path for p in app_paths):
         for name in list(sys.modules):
             if name == "app" or name.startswith("app."):
                 del sys.modules[name]
