@@ -30,6 +30,23 @@ def _fymo_secret_for_tests() -> None:
     os.environ.setdefault("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
 
 
+@pytest.fixture(autouse=True)
+def _reset_remote_router_globals():
+    """`FymoApp.__init__` (fymo/core/server.py) writes `_explicit_optin` and
+    `_dev_mode` directly onto the `fymo.remote.router` module: real
+    per-project config, not something a test fixture owns, so nothing
+    restores it the way `monkeypatch.setattr` would. Any test that builds a
+    FymoApp over a project with `remote.explicit_optin: true` (e.g. the
+    blog_app fixture) leaves that global at True for every test that runs
+    afterward in the same process, silently 404ing unmarked functions in
+    unrelated tests that assume today's default. Reset after every test
+    regardless of how it was set."""
+    yield
+    from fymo.remote import router as _remote_router
+    _remote_router._explicit_optin = False
+    _remote_router._dev_mode = False
+
+
 @pytest.fixture
 def example_app(tmp_path: Path) -> Path:
     """Copy of examples/todo_app into an isolated tmp dir.

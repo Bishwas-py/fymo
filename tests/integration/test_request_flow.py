@@ -160,7 +160,11 @@ def test_client_entry_calls_resolve_remote_props(example_app, monkeypatch):
     remote = example_app / "app" / "remote"
     remote.mkdir(parents=True, exist_ok=True)
     (remote / "__init__.py").write_text("")
-    (remote / "x.py").write_text("def fn(s: str) -> str: return s\n")
+    (remote / "x.py").write_text(
+        "from fymo.remote import remote\n"
+        "@remote\n"
+        "def fn(s: str) -> str: return s\n"
+    )
 
     BuildPipeline(project_root=example_app).build(dev=False)
 

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import TypedDict, Literal
 from pydantic import BaseModel, Field
 
-from fymo.remote import current_uid, NotFound
+from fymo.remote import current_uid, NotFound, remote
 from fymo.auth import require_auth, current_user
 from app.data.db import get_db
 
@@ -46,12 +46,14 @@ class NewComment(BaseModel):
     body: str = Field(min_length=1, max_length=1000)
 
 
+@remote
 def get_posts() -> list[PostSummary]:
     return get_db().fetchall(
         "SELECT slug, title, summary, tags, published_at FROM posts ORDER BY published_at DESC"
     )
 
 
+@remote
 def get_post(slug: str) -> Post:
     row = get_db().fetchone(
         "SELECT slug, title, summary, content_html, tags, published_at FROM posts WHERE slug = ?",
@@ -62,6 +64,7 @@ def get_post(slug: str) -> Post:
     return row
 
 
+@remote
 def get_comments(slug: str) -> list[Comment]:
     return get_db().fetchall(
         "SELECT id, name, body, created_at FROM comments WHERE post_slug = ? ORDER BY created_at DESC",
@@ -69,6 +72,7 @@ def get_comments(slug: str) -> list[Comment]:
     )
 
 
+@remote
 @require_auth
 def create_comment(slug: str, input: NewComment) -> Comment:
     # Author comes from the authenticated session, never client input. Display
@@ -84,6 +88,7 @@ def create_comment(slug: str, input: NewComment) -> Comment:
     )
 
 
+@remote
 def get_reactions(slug: str) -> ReactionCounts:
     rows = get_db().fetchall(
         "SELECT kind, COUNT(*) AS n FROM reactions WHERE post_slug = ? GROUP BY kind",
@@ -95,6 +100,7 @@ def get_reactions(slug: str) -> ReactionCounts:
     return counts
 
 
+@remote
 def toggle_reaction(slug: str, kind: ReactionKind) -> ReactionCounts:
     uid = current_uid()
     db = get_db()

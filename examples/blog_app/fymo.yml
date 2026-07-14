@@ -11,6 +11,12 @@ routes:
 auth:
   enabled: true
 
+# Every function in app/remote/posts.py is marked @remote (see that file).
+# With explicit_optin on, that's what actually makes them reachable over the
+# wire, rather than file placement alone deciding it.
+remote:
+  explicit_optin: true
+
 build:
   output_dir: dist
   minify: false
