@@ -186,3 +186,78 @@ def test_provider_without_required_auto_is_always_constructed_even_with_is_confi
 
 def test_base_provider_is_configured_defaults_to_true():
     assert BaseProvider.is_configured() is True
+
+
+# `required` typo / bad-value handling
+
+
+class FromConfigProvider(BaseProvider):
+    """Only reads named keys out of opts via from_config, like
+    Clerk/Google/OIDC do; an unrecognized extra key is silently ignored
+    unless the registry validates it first."""
+    id = "from-config"
+
+    def __init__(self, secret: str = "") -> None:
+        self.secret = secret
+
+    @classmethod
+    def from_config(cls, opts: dict) -> "FromConfigProvider":
+        return cls(secret=opts.get("secret", ""))
+
+
+class FromConfigTogglableProvider(BaseProvider):
+    id = "from-config-togglable"
+    configured = True
+
+    def __init__(self, secret: str = "") -> None:
+        self.secret = secret
+
+    @classmethod
+    def from_config(cls, opts: dict) -> "FromConfigTogglableProvider":
+        return cls(secret=opts.get("secret", ""))
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        return cls.configured
+
+
+def test_unrecognized_required_value_raises_for_from_config_providers():
+    """Previously silently dropped: from_config only reads named keys, so a
+    typo'd `required` just vanished into the ignored rest of opts."""
+    with pytest.raises(ProviderConfigError, match="required"):
+        build_providers([
+            {"class": "tests.auth.test_providers.FromConfigProvider", "required": "Auto", "secret": "x"},
+        ])
+
+
+def test_unrecognized_required_value_raises_for_plain_kwarg_providers():
+    """Previously a raw TypeError from the constructor rejecting an
+    unexpected `required` kwarg; must be the same clear ProviderConfigError
+    as the from_config path."""
+    with pytest.raises(ProviderConfigError, match="required"):
+        build_providers([
+            {"class": "tests.auth.test_providers.ConfigurableProvider", "required": "yes"},
+        ])
+
+
+def test_unrecognized_required_value_names_the_bad_value():
+    with pytest.raises(ProviderConfigError) as exc_info:
+        build_providers([
+            {"class": "tests.auth.test_providers.ConfigurableProvider", "required": "Auto"},
+        ])
+    assert "Auto" in str(exc_info.value)
+
+
+def test_required_auto_correctly_cased_still_works_for_from_config_providers():
+    FromConfigTogglableProvider.configured = False
+    try:
+        providers = build_providers([
+            {
+                "class": "tests.auth.test_providers.FromConfigTogglableProvider",
+                "required": "auto",
+                "secret": "x",
+            },
+        ])
+        assert providers == []
+    finally:
+        FromConfigTogglableProvider.configured = True

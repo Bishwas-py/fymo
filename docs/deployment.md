@@ -215,10 +215,20 @@ auth:
   variable, rather than silently loading a config with the literal string
   `${VAR}` in it.
 - `${VAR:-default}` falls back to `default` (including an empty default,
-  `${VAR:-}`) when `VAR` is unset.
-
-Interpolation runs on the raw YAML text before parsing, so it works
-anywhere in the file, not just inside `auth:`.
+  `${VAR:-}`) when `VAR` is unset. The default itself may reference
+  another placeholder, e.g. `${A:-${B}}`, resolved the same way and only
+  evaluated when `A` is actually unset.
+- The resolved value is always spliced back in as a quoted YAML string, so
+  a value can never be interpreted as YAML structure (an extra key, a new
+  list item) no matter what characters it contains, including a literal
+  newline. An env var populated from a less-trusted source than the yml
+  file itself (a build pipeline, a secrets manager with looser access)
+  still can't restructure the config, only supply a string value.
+- Interpolation runs on the raw YAML text before parsing, so it works
+  anywhere in the file, not just inside `auth:`, and that includes inside
+  `#` comments: a `${VAR}` written in a comment is still substituted and
+  validated (an unset required var there still raises), since the
+  substitution pass has no notion of YAML comments.
 
 ### Conditional auth providers: `required: auto`
 
@@ -236,13 +246,17 @@ auth:
 
 With `required: auto` set, the registry calls the provider class's
 `is_configured()` classmethod **before** constructing it. If that returns
-`False`, the provider is skipped entirely — no error, no instance, it
+`False`, the provider is skipped entirely: no error, no instance, it
 contributes nothing to the app. This lets a provider stay dormant in local
 dev (no Clerk/Auth0/etc. env vars set) and activate once real values land
 in the environment, with no separate conditional wiring in app code.
+Any value other than the literal string `"auto"` for `required` (a typo
+like `Auto`, or anything else) raises a `ProviderConfigError` naming the
+bad value, rather than being silently ignored or crashing the provider's
+constructor with an unrelated `TypeError`.
 
 `is_configured()` defaults to `True` on `BaseProvider`, so every existing
-provider is unaffected — only an entry that both sets `required: auto` and
+provider is unaffected: only an entry that both sets `required: auto` and
 points at a provider overriding the hook gets the conditional behavior.
 
 ## Worker sizing

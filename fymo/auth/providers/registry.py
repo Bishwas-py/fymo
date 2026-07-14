@@ -50,12 +50,18 @@ def _instantiate(entry: Any) -> Optional[AuthProvider]:
         else:
             raise ProviderConfigError("provider config needs a 'type' or 'class' key")
         opts = {k: v for k, v in entry.items() if k not in ("type", "class")}
-        # `required: auto` is an explicit opt-in (never automatic); pop it
-        # before it can reach the constructor as a stray kwarg, and check
-        # is_configured() before construction so a provider whose __init__
-        # would crash on a missing env var is never even built.
-        if opts.get("required") == "auto":
-            opts.pop("required")
+        # `required` is an explicit opt-in (only "auto" is recognized, never
+        # automatic); pop it before it can reach the constructor as a stray
+        # kwarg, and validate it explicitly here rather than letting a typo
+        # silently vanish into an ignored from_config() key on one provider
+        # while raising a raw TypeError from cls(**opts) on another.
+        if "required" in opts:
+            required_value = opts.pop("required")
+            if required_value != "auto":
+                raise ProviderConfigError(
+                    f"unknown value for provider 'required': {required_value!r} "
+                    f'(only "auto" is supported); entry: {entry!r}'
+                )
             if not cls.is_configured():
                 return None
         # Providers with env-backed secrets expose from_config(opts); others
