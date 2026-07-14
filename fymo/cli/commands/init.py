@@ -26,7 +26,6 @@ def initialize_project():
     # Create basic structure
     (current_dir / 'app' / 'controllers').mkdir(parents=True, exist_ok=True)
     (current_dir / 'app' / 'templates').mkdir(parents=True, exist_ok=True)
-    (current_dir / 'config').mkdir(exist_ok=True)
     
     Color.print_success("Fymo initialized successfully!")
     Color.print_info("Next steps: Create your controllers and templates in the app/ directory")

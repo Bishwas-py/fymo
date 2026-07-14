@@ -71,8 +71,8 @@ def blog_app(tmp_path: Path) -> Path:
     tests call `app.*` helpers like `seed_test_post()` *before* constructing
     a FymoApp, so they can't rely on `FymoApp.__init__` to do it in time),
     and cleans up both `sys.path` and the cached `app.*` modules after each
-    test using this fixture, matching the pattern already used by the local
-    `blog_app` overrides in test_soft_nav.py and test_layout_system_e2e.py.
+    test using this fixture to prevent cross-test pollution when multiple tests
+    use this fixture with different tmp_path instances.
     """
     import sys
     dest = tmp_path / "blog_app"
