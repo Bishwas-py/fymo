@@ -15,6 +15,16 @@ def test_init_scaffolds_fymo_yml_with_build_block(tmp_path: Path, monkeypatch):
     assert "build:" in content
 
 
+def test_init_scaffolds_app_support_dir_with_init(tmp_path: Path, monkeypatch):
+    """Same rationale as `fymo new`, see
+    tests/cli/test_new.py::test_scaffolds_app_support_dir_with_init."""
+    monkeypatch.chdir(tmp_path)
+    initialize_project()
+    support_dir = tmp_path / "app" / "support"
+    assert support_dir.is_dir()
+    assert (support_dir / "__init__.py").is_file()
+
+
 def test_init_and_new_scaffold_byte_identical_fymo_yml(tmp_path: Path, monkeypatch):
     """`fymo new <name>` and `fymo init` (run inside a directory named
     <name>) must produce byte-identical fymo.yml files for the same

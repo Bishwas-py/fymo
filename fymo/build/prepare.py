@@ -25,6 +25,7 @@ from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
 from fymo.build.hygiene import (
     check_directory_hygiene,
+    check_lib_directory_warnings,
     check_remote_exposure_hygiene,
     format_hygiene_error,
     format_remote_exposure_error,
@@ -32,6 +33,7 @@ from fymo.build.hygiene import (
 from fymo.build.manifest import RemoteModuleAssets
 from fymo.remote.codegen import emit_module, emit_runtime
 from fymo.remote.discovery import discover_remote_modules
+from fymo.utils.colors import Color
 
 
 class BuildError(RuntimeError):
@@ -100,6 +102,13 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     hygiene_violations = check_directory_hygiene(project_root)
     if hygiene_violations:
         raise BuildError(format_hygiene_error(hygiene_violations))
+
+    # Soft check, same point in the sequence as the hard one above but never
+    # raises; see check_lib_directory_warnings' docstring for why app/lib/
+    # doesn't get the hard-error treatment. Printed for both `fymo build` and
+    # `fymo dev` since both call prepare_build_config.
+    for warning in check_lib_directory_warnings(project_root):
+        Color.print_warning(warning)
 
     # Read once, reused below for discover_remote_modules too: both need the
     # same `remote:` section, and re-reading fymo.yml a second time would

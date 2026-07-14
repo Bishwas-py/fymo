@@ -12,6 +12,18 @@ def test_scaffolds_app_lib_and_app_components_dirs(tmp_path: Path, monkeypatch):
     assert (tmp_path / "myapp" / "app" / "components").is_dir()
 
 
+def test_scaffolds_app_support_dir_with_init(tmp_path: Path, monkeypatch):
+    """app/support/ is the Python-only home for shared server-side utilities
+    that don't fit controllers/remote/jobs/broadcasts/lib, see
+    docs/conventions.md. It needs __init__.py like the other app/
+    subpackages so it's importable as app.support.* right away."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    support_dir = tmp_path / "myapp" / "app" / "support"
+    assert support_dir.is_dir()
+    assert (support_dir / "__init__.py").is_file()
+
+
 def test_scaffolds_tsconfig_with_lib_components_and_remote_aliases(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     create_project("myapp")
