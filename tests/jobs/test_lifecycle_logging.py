@@ -130,3 +130,55 @@ def test_threaded_provider_failed_job_logs_once(tmp_path: Path):
     lines = _json_lines(log_file)
     error_lines = [l for l in lines if l.get("status") == "failed" or l.get("level") == "ERROR"]
     assert len(error_lines) == 1
+
+
+# ---------------- ProcrastinateJobProvider integration ----------------
+
+
+def test_procrastinate_run_worker_wraps_tasks_with_lifecycle(monkeypatch, tmp_path: Path):
+    """run_worker must register lifecycle-wrapped callables (reraise=True)
+    with the procrastinate App — verified against a stub App so no real
+    Postgres/procrastinate is needed."""
+    from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
+
+    registered = {}
+
+    class StubApp:
+        def __init__(self, connector):
+            pass
+
+        def task(self, name):
+            def register(fn):
+                registered[name] = fn
+                return fn
+            return register
+
+        def run_worker(self, **kwargs):
+            pass
+
+    class StubProcrastinate:
+        PsycopgConnector = lambda self=None, **kw: object()
+        App = StubApp
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://stub")
+    monkeypatch.setattr(
+        "fymo.jobs.providers.procrastinate._import_procrastinate",
+        lambda: StubProcrastinate(),
+    )
+
+    log_file = _configure_file(tmp_path)
+    provider = ProcrastinateJobProvider()
+    provider.register_tasks({"work": lambda: "done"})
+    provider.run_worker()
+
+    # The registered callable is the wrapper: invoking it produces
+    # lifecycle logs and still returns the task's result.
+    assert registered["work"]() == "done"
+    assert "succeeded" in log_file.read_text()
+
+    # And failures still PROPAGATE (procrastinate marks the job failed).
+    provider.register_tasks({"boom": lambda: (_ for _ in ()).throw(RuntimeError("kaput"))})
+    registered.clear()
+    provider.run_worker()
+    with pytest.raises(RuntimeError, match="kaput"):
+        registered["boom"]()

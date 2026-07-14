@@ -25,6 +25,19 @@ def run_jobs_worker(project_root: Optional[Path] = None) -> None:
     """
     project_root = Path(project_root) if project_root else Path.cwd()
     config_manager = ConfigManager(project_root)
+
+    # The worker is its own OS process — FymoApp's logging configuration
+    # happened in the web process, not here. Same config source, same
+    # dev-detection (FYMO_DEV), so both processes log to the same place in
+    # the same format.
+    from fymo.core.config import env_truthy
+    from fymo.core.logging import configure as _configure_logging
+    _configure_logging(
+        dev=env_truthy("FYMO_DEV"),
+        config=config_manager.get_logging_config(),
+        project_root=project_root,
+    )
+
     provider_config = config_manager.get_jobs_config().get("provider")
 
     provider = init_job_provider(project_root, provider_config)

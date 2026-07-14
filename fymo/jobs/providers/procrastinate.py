@@ -66,8 +66,23 @@ class ProcrastinateJobProvider(BaseJobProvider):
 
         connector = procrastinate.PsycopgConnector(conninfo=conninfo)
         app = procrastinate.App(connector=connector)
+        from fymo.jobs.lifecycle import run_with_lifecycle
+        import functools
+
         for name, fn in self._tasks.items():
-            app.task(name=name)(fn)
+            # Wrap execution with lifecycle logging. reraise=True: the
+            # exception must propagate so procrastinate marks the job
+            # failed / applies its retry policy. functools.wraps preserves
+            # the original signature for procrastinate's introspection.
+            def _make(wrapped_name: str, wrapped_fn: Callable) -> Callable:
+                @functools.wraps(wrapped_fn)
+                def _run(*args, **kwargs):
+                    return run_with_lifecycle(
+                        wrapped_name, wrapped_fn, args, kwargs, reraise=True,
+                    )
+                return _run
+
+            app.task(name=name)(_make(name, fn))
         app.run_worker(**kwargs)
 
     def _get_app(self):
