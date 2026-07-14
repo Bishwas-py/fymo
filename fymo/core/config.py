@@ -2,9 +2,15 @@
 Configuration management for Fymo applications
 """
 
+import os
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+
+def env_truthy(name: str) -> bool:
+    """Shared FYMO_DEV-style env flag check ("1"/"true"/"yes"/"on")."""
+    return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
 
 
 class ConfigManager:
@@ -79,6 +85,11 @@ class ConfigManager:
         """`remote:` section. Holds explicit_optin (require @remote to expose
         an app/remote/*.py function; default False for back-compat)."""
         return self.get('remote', {}) or {}
+
+    def get_logging_config(self) -> Dict[str, Any]:
+        """`logging:` section. Holds destination/file/level/format — see
+        fymo.core.logging.resolve_logging_config for shapes and defaults."""
+        return self.get('logging', {}) or {}
 
     def to_dict(self) -> Dict[str, Any]:
         """Return configuration as dictionary"""

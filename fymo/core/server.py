@@ -14,7 +14,8 @@ from fymo.core.router import Router
 
 
 def _env_truthy(name: str) -> bool:
-    return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
+    from fymo.core.config import env_truthy
+    return env_truthy(name)
 
 
 def _load_identity_secret(project_root: Path, dev: bool) -> bytes:
@@ -85,13 +86,6 @@ class FymoApp:
         self.project_root = Path(project_root) if project_root else Path.cwd()
         self.dev = dev if dev is not None else _env_truthy("FYMO_DEV")
 
-        # Structured logging: human-readable in dev, one JSON object per
-        # line in prod. Configured once per FymoApp construction; idempotent,
-        # so repeated construction (e.g. across a test session) never piles
-        # up duplicate handlers or duplicate log lines.
-        from fymo.core.logging import configure as _configure_logging
-        _configure_logging(json=not self.dev)
-
         # Wire the dev flag into the remote router so its 500 path knows whether
         # to include traceback details.
         from fymo.remote import router as _remote_router
@@ -118,6 +112,19 @@ class FymoApp:
 
         # Initialize core components
         self.config_manager = ConfigManager(self.project_root, config)
+
+        # Structured logging, driven by fymo.yml's `logging:` section
+        # (destination/file/level/format; defaults: terminal, info, text in
+        # dev / json in prod). Must run after ConfigManager exists — the
+        # config is the whole point — and installs its handler on the root
+        # logger so app + library logs share fymo's destination and format.
+        # Idempotent across repeated FymoApp constructions (test sessions).
+        from fymo.core.logging import configure as _configure_logging
+        _configure_logging(
+            dev=self.dev,
+            config=self.config_manager.get_logging_config(),
+            project_root=self.project_root,
+        )
 
         # Wire the remote `@remote` opt-in flag into the router, mirroring
         # _dev_mode above. Must agree with what discovery used at build time

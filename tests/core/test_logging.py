@@ -247,3 +247,69 @@ def test_import_without_configure_emits_nothing(capsys):
     logging.getLogger("fymo").info("quiet")
     captured = capsys.readouterr()
     assert "quiet" not in captured.out + captured.err
+
+
+@pytest.mark.usefixtures("node_available")
+def test_fymo_app_configures_logging_from_yml(tmp_path: Path, monkeypatch):
+    """End-to-end config plumbing: a fymo.yml logging section reaches the
+    root handler via FymoApp construction. Uses a minimal project dir —
+    FymoApp tolerates a missing dist/ at construction time. NOTE for the
+    implementer: if FymoApp.__init__ turns out to require more scaffolding
+    (e.g. app/templates existing), create the minimal empty dirs here — do
+    NOT weaken the assertion; the point is that construction alone routes
+    logs per fymo.yml."""
+    log_file = tmp_path / "log" / "app.log"
+    (tmp_path / "fymo.yml").write_text(
+        "name: LogTest\n"
+        # Explicit (empty) routes section: without it the router falls back
+        # to treating the whole fymo.yml as its routes mapping, and chokes
+        # trying to split top-level scalar keys like `name` as
+        # "controller.action" strings. Unrelated to logging; just the
+        # minimal scaffolding FymoApp/Router need to construct at all.
+        "routes: {}\n"
+        "logging:\n"
+        "  destination: file\n"
+        f"  file: {log_file}\n"
+        "  format: json\n"
+    )
+    # FymoApp always requires dist/sidecar.mjs (no dev-mode bypass) — hand-roll
+    # the tiniest possible sidecar implementing just enough of the
+    # length-prefixed JSON IPC protocol (see fymo/core/sidecar.py) to answer
+    # the startup ping. No real esbuild/BuildPipeline needed since this test
+    # never renders anything, only exercises the logging config plumbing.
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "sidecar.mjs").write_text(
+        "let buf = Buffer.alloc(0);\n"
+        "process.stdin.on('data', (chunk) => {\n"
+        "  buf = Buffer.concat([buf, chunk]);\n"
+        "  while (buf.length >= 4) {\n"
+        "    const len = buf.readUInt32BE(0);\n"
+        "    if (buf.length < 4 + len) break;\n"
+        "    const msg = JSON.parse(buf.slice(4, 4 + len).toString('utf8'));\n"
+        "    buf = buf.slice(4 + len);\n"
+        "    const replyBody = Buffer.from(JSON.stringify({ ok: true, id: msg.id }), 'utf8');\n"
+        "    const header = Buffer.alloc(4);\n"
+        "    header.writeUInt32BE(replyBody.length, 0);\n"
+        "    process.stdout.write(Buffer.concat([header, replyBody]));\n"
+        "  }\n"
+        "});\n"
+    )
+    from fymo.core.server import FymoApp
+    app = FymoApp(tmp_path, dev=True)
+    try:
+        logging.getLogger("app.smoke").info("hello file")
+    finally:
+        if app.sidecar:
+            app.sidecar.stop()
+    parsed = jsonlib.loads(log_file.read_text().strip().splitlines()[-1])
+    assert parsed["message"] == "hello file"
+
+
+def test_fymo_app_invalid_logging_config_fails_at_startup(tmp_path: Path):
+    (tmp_path / "fymo.yml").write_text(
+        "name: LogTest\nlogging:\n  destination: syslog\n"
+    )
+    from fymo.core.server import FymoApp
+    with pytest.raises(ValueError, match=r"logging\.destination"):
+        FymoApp(tmp_path, dev=True)
