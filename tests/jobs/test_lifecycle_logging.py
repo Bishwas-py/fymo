@@ -25,6 +25,10 @@ def _reset_logging_and_runner():
         fymo_logging._installed_handler.close()
         fymo_logging._installed_handler = None
     root.setLevel(logging.WARNING)
+    # run_worker() caps the "procrastinate" logger's level as a side effect
+    # (see ProcrastinateJobProvider.run_worker) -- process-global state that
+    # must not leak between tests in this file.
+    logging.getLogger("procrastinate").setLevel(logging.NOTSET)
 
 
 def _configure_file(tmp_path: Path, level: str = "debug") -> Path:
@@ -182,3 +186,88 @@ def test_procrastinate_run_worker_wraps_tasks_with_lifecycle(monkeypatch, tmp_pa
     provider.run_worker()
     with pytest.raises(RuntimeError, match="kaput"):
         registered["boom"]()
+
+
+def test_procrastinate_run_worker_caps_procrastinate_logger_to_warning(monkeypatch, tmp_path: Path):
+    """procrastinate's own INFO lines echo job.call_string (every job
+    kwarg) -- letting those through fymo's root-logger handler would leak
+    job arguments. run_worker must cap the "procrastinate" logger to
+    WARNING by default so errors still surface without the leak."""
+    from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
+
+    class StubApp:
+        def __init__(self, connector):
+            pass
+
+        def task(self, name):
+            def register(fn):
+                return fn
+            return register
+
+        def run_worker(self, **kwargs):
+            pass
+
+    class StubProcrastinate:
+        PsycopgConnector = lambda self=None, **kw: object()
+        App = StubApp
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://stub")
+    monkeypatch.setattr(
+        "fymo.jobs.providers.procrastinate._import_procrastinate",
+        lambda: StubProcrastinate(),
+    )
+
+    procrastinate_logger = logging.getLogger("procrastinate")
+    assert procrastinate_logger.level == logging.NOTSET
+    try:
+        _configure_file(tmp_path)
+        provider = ProcrastinateJobProvider()
+        provider.register_tasks({"work": lambda: "done"})
+        provider.run_worker()
+
+        assert procrastinate_logger.level == logging.WARNING
+    finally:
+        procrastinate_logger.setLevel(logging.NOTSET)
+
+
+def test_procrastinate_run_worker_respects_explicit_info_level(monkeypatch, tmp_path: Path):
+    """An app that explicitly opts into procrastinate's INFO logs (and
+    accepts that they include job arguments) by calling setLevel(INFO)
+    itself, before run_worker, must not have that choice silently
+    overridden."""
+    from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
+
+    class StubApp:
+        def __init__(self, connector):
+            pass
+
+        def task(self, name):
+            def register(fn):
+                return fn
+            return register
+
+        def run_worker(self, **kwargs):
+            pass
+
+    class StubProcrastinate:
+        PsycopgConnector = lambda self=None, **kw: object()
+        App = StubApp
+
+    monkeypatch.setenv("DATABASE_URL", "postgres://stub")
+    monkeypatch.setattr(
+        "fymo.jobs.providers.procrastinate._import_procrastinate",
+        lambda: StubProcrastinate(),
+    )
+
+    procrastinate_logger = logging.getLogger("procrastinate")
+    assert procrastinate_logger.level == logging.NOTSET
+    try:
+        procrastinate_logger.setLevel(logging.INFO)
+        _configure_file(tmp_path)
+        provider = ProcrastinateJobProvider()
+        provider.register_tasks({"work": lambda: "done"})
+        provider.run_worker()
+
+        assert procrastinate_logger.level == logging.INFO
+    finally:
+        procrastinate_logger.setLevel(logging.NOTSET)

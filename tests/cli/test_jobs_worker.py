@@ -1,8 +1,10 @@
 """Tests for the `fymo jobs-worker` CLI command."""
+import logging
 from pathlib import Path
 
 import pytest
 
+import fymo.core.logging as fymo_logging
 from fymo.cli.commands.jobs_worker import run_jobs_worker
 from fymo.jobs import reset_job_provider
 
@@ -12,6 +14,21 @@ def _reset():
     reset_job_provider()
     yield
     reset_job_provider()
+
+
+@pytest.fixture(autouse=True)
+def _reset_configured_handler():
+    """run_jobs_worker calls configure() before its SystemExit in several
+    tests here, installing a root handler + level with no cleanup of its
+    own — process-global logging state that must not leak between tests
+    (or into other test files)."""
+    yield
+    root = logging.getLogger()
+    if fymo_logging._installed_handler is not None:
+        root.removeHandler(fymo_logging._installed_handler)
+        fymo_logging._installed_handler.close()
+        fymo_logging._installed_handler = None
+    root.setLevel(logging.WARNING)
 
 
 def test_reports_a_clear_error_for_the_default_threaded_provider(tmp_path: Path, capsys):
@@ -41,9 +58,6 @@ def test_reports_a_clear_error_when_procrastinate_is_configured_but_database_url
 def test_jobs_worker_configures_logging_from_yml(tmp_path, monkeypatch):
     """The worker process must honor fymo.yml's logging section — it was
     previously a logging black box (no configure() call at all)."""
-    import logging as _logging
-    import fymo.core.logging as fymo_logging
-
     log_file = tmp_path / "worker.log"
     (tmp_path / "fymo.yml").write_text(
         "name: W\n"
@@ -56,16 +70,7 @@ def test_jobs_worker_configures_logging_from_yml(tmp_path, monkeypatch):
 
     # The default threaded provider has no separate worker loop — it exits
     # with SystemExit(1) AFTER configuration, which is all this test needs.
-    from fymo.cli.commands.jobs_worker import run_jobs_worker
-    try:
-        with pytest.raises(SystemExit):
-            run_jobs_worker(tmp_path)
-        assert fymo_logging._installed_handler is not None
-        assert isinstance(fymo_logging._installed_handler, _logging.FileHandler)
-    finally:
-        root = _logging.getLogger()
-        if fymo_logging._installed_handler is not None:
-            root.removeHandler(fymo_logging._installed_handler)
-            fymo_logging._installed_handler.close()
-            fymo_logging._installed_handler = None
-        root.setLevel(_logging.WARNING)
+    with pytest.raises(SystemExit):
+        run_jobs_worker(tmp_path)
+    assert fymo_logging._installed_handler is not None
+    assert isinstance(fymo_logging._installed_handler, logging.FileHandler)

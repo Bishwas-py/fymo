@@ -9,6 +9,7 @@ Procrastinate keeps its state in its own tables (`procrastinate_jobs`, etc).
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 from typing import Callable, Dict
 
@@ -83,6 +84,21 @@ class ProcrastinateJobProvider(BaseJobProvider):
                 return _run
 
             app.task(name=name)(_make(name, fn))
+
+        # procrastinate's own INFO lines include job.call_string, which
+        # renders every job kwarg value (worker.py "Starting job ...") --
+        # letting that through fymo's root-logger handler would leak job
+        # arguments into the log stream, violating fymo's PII rule (job
+        # arguments are never logged; fymo's own lifecycle lines carry
+        # name/status/duration only). Cap procrastinate to WARNING by
+        # default so errors still surface; an app that accepts the
+        # trade-off can explicitly setLevel(logging.INFO) on the
+        # "procrastinate" logger after startup, which this deliberately
+        # respects by only acting when the level is unset.
+        procrastinate_logger = logging.getLogger("procrastinate")
+        if procrastinate_logger.level == logging.NOTSET:
+            procrastinate_logger.setLevel(logging.WARNING)
+
         app.run_worker(**kwargs)
 
     def _get_app(self):

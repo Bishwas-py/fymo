@@ -277,7 +277,11 @@ logging:
 The same section drives both the web process and `fymo jobs-worker`,
 which also emits one line per background job (started/succeeded/failed,
 with duration). Job arguments, cookies, request bodies, and auth headers
-are never logged.
+are never logged. (fymo's own log lines never include them, and the
+`procrastinate` library's logger — whose INFO lines echo job arguments —
+is capped to WARNING by default in the worker; explicitly
+`setLevel(logging.INFO)` on the `procrastinate` logger only if you accept
+that its lines will include job arguments.)
 
 fymo owns a single handler on Python's root logger, so your app's own
 `logging.getLogger(...)` output and library logs share the destination
