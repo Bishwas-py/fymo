@@ -11,6 +11,7 @@ from typing import Iterable, Callable
 from fymo.remote import devalue
 from fymo.remote.adapters import validate_args
 from fymo.remote.context import request_scope
+from fymo.remote.discovery import is_exposed_remote_fn
 from fymo.remote.errors import RemoteError
 from fymo.remote.identity import _ensure_uid
 
@@ -132,9 +133,7 @@ def _resolve_fn_in_module(module_name: str, fn_name: str):
     except ImportError:
         return None, None, None
     fn = getattr(mod, fn_name, None)
-    if fn is None or not callable(fn) or getattr(fn, "__module__", None) != full:
-        return None, None, None
-    if _explicit_optin and not getattr(fn, "__fymo_remote__", False):
+    if fn is None or not is_exposed_remote_fn(fn, full, _explicit_optin):
         return None, None, None
     return fn, inspect.signature(fn), typing.get_type_hints(fn, include_extras=True)
 

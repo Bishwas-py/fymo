@@ -6,7 +6,6 @@ import mimetypes
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 
-from fymo.core.exceptions import AssetError
 
 
 class AssetManager:
@@ -59,8 +58,6 @@ class AssetManager:
 
             return "Asset not found", "404 NOT FOUND", "text/plain"
 
-        except AssetError as e:
-            return f"Asset error: {e.message}", "404 NOT FOUND", "text/plain"
         except Exception as e:
             return f"Asset serving error: {str(e)}", "500 INTERNAL SERVER ERROR", "text/plain"
 

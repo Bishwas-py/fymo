@@ -6,6 +6,7 @@ import os
 import shutil
 from pathlib import Path
 from fymo.utils.colors import Color
+from fymo.cli.commands._scaffold import render_fymo_yml
 
 
 def create_project(name: str, template: str = 'default'):
@@ -37,7 +38,6 @@ def create_project(name: str, template: str = 'default'):
         'app/static/css',
         'app/static/js',
         'app/static/images',
-        'config',
         'dist',
         'tests',
     ]
@@ -60,27 +60,7 @@ def create_project_files(project_path: Path, project_name: str):
     """Create default project files"""
     
     # fymo.yml
-    fymo_yml = f"""# Fymo project configuration
-name: {project_name}
-version: 1.0.0
-
-# Routing configuration
-routes:
-  root: home.index
-  resources:
-    - posts
-
-# Build configuration
-build:
-  output_dir: dist
-  minify: false
-  
-# Server configuration  
-server:
-  host: 127.0.0.1
-  port: 8000
-  reload: true
-"""
+    fymo_yml = render_fymo_yml(project_name)
     (project_path / 'fymo.yml').write_text(fymo_yml)
     
     # requirements.txt
@@ -190,21 +170,6 @@ if __name__ == "__main__":
     
     # app/__init__.py
     (project_path / 'app' / '__init__.py').write_text('"""Application package"""')
-    
-    # config/routes.py
-    routes_py = """\"\"\"Route configuration\"\"\"
-
-routes = {
-    '/': {
-        'controller': 'home',
-        'action': 'index',
-        'template': 'home/index.svelte'
-    }
-}
-
-resources = ['posts']
-"""
-    (project_path / 'config' / 'routes.py').write_text(routes_py)
     
     # app/controllers/home.py
     home_controller = """\"\"\"Home controller\"\"\"
@@ -317,7 +282,6 @@ fymo build
   - `templates/` - Svelte templates
   - `models/` - Data models
   - `static/` - Static assets
-- `config/` - Configuration files
 - `dist/` - Build output
 - `tests/` - Tests
 """

@@ -28,3 +28,25 @@ def test_scaffolds_tsconfig_with_lib_components_and_remote_aliases(tmp_path: Pat
     # the client bundle), so there's nothing under app/lib/ that needs its
     # own guarded sub-path.
     assert not any("server" in key for key in paths)
+
+
+def test_new_and_init_scaffold_identical_fymo_yml(tmp_path):
+    """fymo new and fymo init must scaffold the same fymo.yml — they had
+    silently drifted (init was missing the build: block). Audit finding #6."""
+    from fymo.cli.commands._scaffold import render_fymo_yml
+    content = render_fymo_yml("sample_app")
+    assert "routes:" in content
+    assert "build:" in content
+    assert "sample_app" in content
+
+
+def test_new_does_not_scaffold_dead_config_routes(tmp_path, monkeypatch):
+    """new.py used to ship config/routes.py into every project, but the
+    router only ever reads it when fymo.yml is ABSENT — and new.py always
+    writes fymo.yml, so the file was unreachable by construction."""
+    from fymo.cli.commands.new import create_project
+    monkeypatch.chdir(tmp_path)
+    create_project("deadfile_check")
+    project = tmp_path / "deadfile_check"
+    assert (project / "fymo.yml").is_file()
+    assert not (project / "config" / "routes.py").exists()

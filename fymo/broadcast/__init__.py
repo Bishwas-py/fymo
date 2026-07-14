@@ -65,8 +65,8 @@ def get_broadcast_provider() -> Any:
     global _provider
     with _lock:
         if _provider is None:
-            from fymo.broadcast.providers.postgres import PostgresBroadcastProvider
-            _provider = PostgresBroadcastProvider()
+            from fymo.broadcast.providers.registry import build_broadcast_provider
+            _provider = build_broadcast_provider(None)
         return _provider
 
 

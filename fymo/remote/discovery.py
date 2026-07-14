@@ -111,6 +111,22 @@ def discover_remote_modules(
     return out
 
 
+def is_exposed_remote_fn(obj, expected_module: str, explicit_optin: bool) -> bool:
+    """Single source of truth for 'may this attribute be called remotely':
+    it must be a function DEFINED in expected_module (not imported into
+    it), and when explicit opt-in is on, carry __fymo_remote__ = True.
+    Both discovery (build-time codegen) and the router (runtime dispatch)
+    call this — they once implemented it independently and could drift.
+    """
+    if not inspect.isfunction(obj):
+        return False
+    if getattr(obj, "__module__", None) != expected_module:
+        return False
+    if explicit_optin and not getattr(obj, "__fymo_remote__", False):
+        return False
+    return True
+
+
 def _collect_module_functions(
     mod, *, module_name: str, expected_module: str, mod_hash: str,
     explicit_optin: bool = False,
@@ -119,11 +135,7 @@ def _collect_module_functions(
     for name, obj in vars(mod).items():
         if name.startswith("_"):
             continue
-        if not inspect.isfunction(obj):
-            continue
-        if getattr(obj, "__module__", None) != expected_module:
-            continue
-        if explicit_optin and not getattr(obj, "__fymo_remote__", False):
+        if not is_exposed_remote_fn(obj, expected_module, explicit_optin):
             continue
         sig = inspect.signature(obj)
         try:

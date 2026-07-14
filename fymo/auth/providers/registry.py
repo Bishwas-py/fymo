@@ -7,7 +7,6 @@ themselves, never from the config.
 """
 from __future__ import annotations
 
-import importlib
 from typing import Any, List
 
 from fymo.auth.context import register_session_resolver, reset_session_resolvers
@@ -15,6 +14,8 @@ from fymo.auth.providers.base import AuthProvider, BaseProvider
 from fymo.auth.providers.clerk import ClerkProvider
 from fymo.auth.providers.oauth import GoogleProvider, OIDCProvider
 from fymo.auth.providers.password import PasswordProvider
+from fymo.core.providers import ProviderConfigError as _CoreProviderConfigError
+from fymo.core.providers import load_class
 
 # Built-in provider types. New providers register here as they land.
 _BUILTINS = {
@@ -25,19 +26,8 @@ _BUILTINS = {
 }
 
 
-class ProviderConfigError(Exception):
+class ProviderConfigError(_CoreProviderConfigError):
     """Raised when `auth.providers` can't be turned into provider instances."""
-
-
-def _load_class(dotted: str):
-    module_path, _, cls_name = dotted.rpartition(".")
-    if not module_path or not cls_name:
-        raise ProviderConfigError(f"invalid provider class path: {dotted!r}")
-    try:
-        mod = importlib.import_module(module_path)
-        return getattr(mod, cls_name)
-    except (ImportError, AttributeError) as e:
-        raise ProviderConfigError(f"provider class {dotted!r} could not be imported: {e}") from e
 
 
 def _instantiate(entry: Any) -> AuthProvider:
@@ -48,7 +38,7 @@ def _instantiate(entry: Any) -> AuthProvider:
 
     if isinstance(entry, dict):
         if "class" in entry:
-            cls = _load_class(entry["class"])
+            cls = load_class(entry["class"], ProviderConfigError)
         elif "type" in entry:
             type_ = entry["type"]
             if type_ not in _BUILTINS:

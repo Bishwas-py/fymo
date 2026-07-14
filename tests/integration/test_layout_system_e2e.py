@@ -10,26 +10,6 @@ import pytest
 from fymo.remote import devalue
 
 
-@pytest.fixture
-def blog_app(tmp_path: Path):
-    import shutil, sys
-    REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-    BLOG_DIR = REPO_ROOT / "examples" / "blog_app"
-    if not BLOG_DIR.is_dir():
-        pytest.skip("blog_app missing")
-    dest = tmp_path / "blog_app"
-    shutil.copytree(BLOG_DIR, dest, ignore=shutil.ignore_patterns("node_modules", "dist", ".fymo", "app/data"))
-    nm = BLOG_DIR / "node_modules"
-    if nm.is_dir():
-        (dest / "node_modules").symlink_to(nm)
-    sys.path.insert(0, str(dest))
-    yield dest
-    sys.path.remove(str(dest))
-    for name in list(sys.modules):
-        if name.startswith("app"):
-            del sys.modules[name]
-
-
 def _wsgi_get(app, path: str):
     responses = []
     def sr(s, h): responses.append((s, h))

@@ -1,20 +1,14 @@
 """Dev orchestrator: spawns Node watcher, parses its event stream, manages sidecar lifecycle."""
 import json
-import shutil
 import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from fymo.build.composition_generator import generate_ssr_tree
-from fymo.build.discovery import discover_routes, discover_all_layouts
-from fymo.build.entry_generator import write_client_entries
-from fymo.build.hygiene import check_directory_hygiene, format_hygiene_error
 from fymo.build.manifest import Manifest, RemoteModuleAssets
 from fymo.build.manifest_matching import match_esbuild_outputs
-from fymo.remote.codegen import emit_module, emit_runtime
-from fymo.remote.discovery import discover_remote_modules
+from fymo.build.prepare import BuildError, prepare_build_config
 
 
 class DevOrchestrator:
@@ -38,93 +32,29 @@ class DevOrchestrator:
         self._listeners.append(fn)
 
     def start(self) -> None:
-        # Pure filesystem check first, same ordering rationale as
-        # BuildPipeline.build() -- no external dependency, so it shouldn't
-        # be masked by (or wait on) the node-availability check.
-        hygiene_violations = check_directory_hygiene(self.project_root)
-        if hygiene_violations:
-            raise RuntimeError(format_hygiene_error(hygiene_violations))
-        if shutil.which("node") is None:
-            raise RuntimeError("node not found on PATH")
-        templates = self.project_root / "app" / "templates"
-        self._routes = discover_routes(templates)
-        client_entries = write_client_entries(self._routes, self.cache_dir, self.project_root, dev=True)
-
-        # Layout + global-CSS entries, mirroring BuildPipeline.build() so
-        # `fymo dev` and `fymo build` can't drift on what gets built --
-        # this file previously stopped at write_client_entries() and never
-        # discovered layouts or _global.css at all, which is exactly what
-        # let the manifest fields below go stale (see match_esbuild_outputs
-        # docstring for the bug this caused).
-        self._all_layouts = discover_all_layouts(templates)
-        layout_client_entries = {
-            f"_layout-{ref.id}": str(ref.svelte_path) for ref in self._all_layouts
-        }
-        global_css_path = templates / "_global.css"
-        self._has_global_css = global_css_path.is_file()
-        global_css_entry = {"_global": str(global_css_path)} if self._has_global_css else {}
-
-        # Discover app/remote/*.py (+ auth providers') remote functions and
-        # emit their dist/client/_remote/<name>.{js,d.ts} stubs, exactly like
-        # BuildPipeline does — otherwise a project that runs `fymo dev`
-        # without a prior `fymo build` has no $remote/* stubs to resolve,
-        # and every manifest fymo dev writes omits remote_modules entirely,
-        # so any SSR prop referencing a remote function (e.g. a controller
-        # passing a remote callable to a template) crashes with "remote
-        # module '...' has no hash in manifest" — even under `fymo serve`
-        # afterward, since serve just reads whatever fymo dev last wrote.
-        remote_out = self.dist_dir / "client" / "_remote"
-        project_root_str = str(self.project_root)
-        import sys as _sys
-        _added = project_root_str not in _sys.path
-        if _added:
-            _sys.path.insert(0, project_root_str)
+        # prepare_build_config raises BuildError for hygiene violations and a
+        # missing `node` executable; translate both to RuntimeError here so
+        # callers/tests see the same exception type this method has always
+        # raised for them (grep tests/build/test_dev_orchestrator.py -- they
+        # assert RuntimeError, not BuildError).
         try:
-            remote_modules = discover_remote_modules(
-                self.project_root, auth_config=self._read_yaml_section("auth"),
-                remote_config=self._read_yaml_section("remote"),
-            )
-        finally:
-            if _added and project_root_str in _sys.path:
-                _sys.path.remove(project_root_str)
-        if remote_modules:
-            emit_runtime(remote_out)
-            for module_name, fns in remote_modules.items():
-                emit_module(module_name, fns, remote_out)
+            config = prepare_build_config(self.project_root, self.dist_dir, self.cache_dir, dev=True)
+        except BuildError as e:
+            raise RuntimeError(str(e)) from e
 
-        # $broadcast client codegen — same shared entry point BuildPipeline
-        # uses, so dev and prod builds can't drift.
-        from fymo.broadcast.codegen import emit_broadcast_client
-        emit_broadcast_client(self.project_root, self.dist_dir)
+        self._routes = config.routes
+        self._all_layouts = config.all_layouts
+        self._has_global_css = config.has_global_css
+        self._remote_assets = config.remote_assets
 
-        self._remote_assets = {
-            module_name: RemoteModuleAssets(hash=next(iter(fns.values())).module_hash, fns=sorted(fns.keys()))
-            for module_name, fns in remote_modules.items()
-            if fns
-        }
-
-        # SSR entry points: composed tree file when a route has a layout
-        # chain, else the raw leaf -- same rule as BuildPipeline.build().
-        # Without this, the SSR bundle is always the bare leaf regardless of
-        # layout_chain, so a route with a real layout never renders its
-        # <RootLayout>/<ResourceLayout> wrapper at all under `fymo dev`.
-        ssr_entries = [
-            {"name": r.name, "entryPath": str(generate_ssr_tree(r, self.cache_dir) or r.entry_path)}
-            for r in self._routes
-        ]
-
-        config = {
+        dev_config = {
             "projectRoot": str(self.project_root),
             "distDir": str(self.dist_dir),
-            "routes": ssr_entries,
-            "clientEntries": {
-                **{n: str(p) for n, p in client_entries.items()},
-                **layout_client_entries,
-                **global_css_entry,
-            },
+            "routes": config.ssr_entries,
+            "clientEntries": config.client_entries,
         }
         self._proc = subprocess.Popen(
-            ["node", str(self.dev_script), json.dumps(config)],
+            ["node", str(self.dev_script), json.dumps(dev_config)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=str(self.project_root),
@@ -132,17 +62,6 @@ class DevOrchestrator:
         )
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
-
-    def _read_yaml_section(self, key: str) -> dict:
-        fymo_yml = self.project_root / "fymo.yml"
-        if not fymo_yml.is_file():
-            return {}
-        try:
-            import yaml
-            data = yaml.safe_load(fymo_yml.read_text()) or {}
-        except Exception:
-            return {}
-        return data.get(key) or {}
 
     def stop(self) -> None:
         self._stop_evt.set()

@@ -17,12 +17,3 @@ def build_project(output: str = 'dist', minify: bool = False):
         Color.print_error(str(e))
         raise SystemExit(1)
     Color.print_success(f"Built to {project_root / 'dist'}/")
-
-
-def build_runtime():
-    """Deprecated: kept for backwards compat with `fymo build-runtime`."""
-    Color.print_info(
-        "`fymo build-runtime` is deprecated; the runtime is bundled "
-        "per-route by `fymo build`."
-    )
-    return True
