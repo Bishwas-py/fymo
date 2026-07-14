@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from fymo.core.media import build_media_routes
+from fymo.storage.providers.local import LocalStorageProvider
 
 
 def _make_wsgi_env(path: str, method: str = "GET", range_header: str | None = None) -> dict:
@@ -44,16 +45,18 @@ def _capture():
     return captured, start_response
 
 
-def _one_route(tmp_path: Path, extensions=("webm",)):
+def _one_route(tmp_path: Path, extensions=("webm",), storage=None):
+    storage = storage or LocalStorageProvider(project_root=tmp_path)
     routes = build_media_routes(tmp_path, [
         {"prefix": "/media/videos/", "dir": "data/videos", "extensions": list(extensions)},
-    ])
+    ], storage=storage)
     assert len(routes) == 1
     return routes[0]
 
 
 def test_absent_media_config_registers_zero_routes(tmp_path: Path):
-    assert build_media_routes(tmp_path, []) == []
+    storage = LocalStorageProvider(project_root=tmp_path)
+    assert build_media_routes(tmp_path, [], storage=storage) == []
 
 
 def test_full_file_get_returns_200_with_content_length_and_type(tmp_path: Path):
@@ -119,16 +122,25 @@ def test_traversal_attempt_returns_400_via_route_handler(tmp_path: Path, filenam
     assert b"top secret" not in body
 
 
-def test_symlink_inside_media_dir_pointing_outside_is_rejected(tmp_path: Path):
+def test_symlink_inside_media_dir_pointing_outside_is_rejected(tmp_path: Path, tmp_path_factory):
     """A string-only traversal check (no '..', no leading '/') is not
     enough: a symlink physically planted inside the configured media dir
-    can point anywhere, including outside root_dir, and its own filename
-    contains neither '..' nor a leading '/'. The handler must resolve the
-    final path and verify it is still contained within root_dir before
-    serving it."""
+    can point anywhere, and its own filename contains neither '..' nor a
+    leading '/'. The handler must resolve the final path and verify it is
+    still contained within the storage provider's root before serving it.
+
+    The secret file lives in a directory unrelated to `tmp_path` (the
+    storage root here, since `_one_route` passes it as both
+    `build_media_routes`'s `project_root` and the storage provider's), not
+    merely a sibling of `data/videos` inside it. Once `dir:` is a
+    storage-key namespace rather than a physically served root (see
+    fymo.core.media's module docstring), containment is enforced against
+    the provider's root, not against each individual media entry's `dir:`,
+    so the attack has to actually cross that root to be meaningful."""
     video_dir = tmp_path / "data" / "videos"
     video_dir.mkdir(parents=True)
-    secret = tmp_path / "secret.webm"
+    outside_root = tmp_path_factory.mktemp("outside_storage_root")
+    secret = outside_root / "secret.webm"
     secret.write_bytes(b"top secret, outside the media dir")
     (video_dir / "evil.webm").symlink_to(secret)
 
@@ -220,8 +232,9 @@ def test_suffix_range_returns_the_actual_last_n_bytes(tmp_path: Path):
 def test_entry_missing_required_key_raises_value_error(tmp_path: Path, entry):
     """A raw KeyError at startup points at fymo's own code, not the bad
     fymo.yml entry. A descriptive ValueError names what's actually wrong."""
+    storage = LocalStorageProvider(project_root=tmp_path)
     with pytest.raises(ValueError, match="prefix.*dir|dir.*prefix"):
-        build_media_routes(tmp_path, [entry])
+        build_media_routes(tmp_path, [entry], storage=storage)
 
 
 @pytest.mark.parametrize("prefix", ["/dist/videos/", "/assets/videos/", "/dist/"])
@@ -230,9 +243,10 @@ def test_prefix_colliding_with_reserved_route_warns(tmp_path: Path, prefix, caps
     app-routes loop ever runs (fymo/core/server.py), so a media prefix
     under either would silently never be reached. Still registers the
     route (this is a warning, not a hard failure) but prints it loudly."""
+    storage = LocalStorageProvider(project_root=tmp_path)
     build_media_routes(tmp_path, [
         {"prefix": prefix, "dir": "data/videos", "extensions": ["webm"]},
-    ])
+    ], storage=storage)
     captured = capsys.readouterr()
     assert "Warning" in captured.out
     assert prefix in captured.out

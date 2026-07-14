@@ -170,6 +170,7 @@ def test_fymo_app_dispatches_declarative_media_route(example_app: Path, monkeypa
         "media": [
             {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
         ],
+        "storage": {"provider": "local"},
     })
     try:
         captured = {}
@@ -206,6 +207,7 @@ def test_fymo_app_rejects_media_traversal_through_full_dispatch(example_app: Pat
         "media": [
             {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
         ],
+        "storage": {"provider": "local"},
     })
     try:
         captured = {}
@@ -221,3 +223,23 @@ def test_fymo_app_rejects_media_traversal_through_full_dispatch(example_app: Pat
         assert b"top secret" not in body
     finally:
         app.shutdown()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_fymo_app_raises_when_media_configured_without_storage(example_app: Path, monkeypatch):
+    """`fymo build`'s hygiene check (tests/build/test_storage_hygiene.py) catches
+    this for the normal `fymo build` -> `fymo run` path, but `fymo dev` and a
+    stale `dist/` built before `media:` was added can both reach FymoApp.__init__
+    without ever running that check. Runtime has to refuse to silently assume
+    local storage too, not just build time."""
+    monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=example_app).build(dev=False)
+
+    from fymo import create_app
+    with pytest.raises(Exception, match="storage"):
+        create_app(example_app, config={
+            "media": [
+                {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+            ],
+        })

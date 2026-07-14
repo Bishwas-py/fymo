@@ -23,7 +23,11 @@ from fymo.broadcast.codegen import emit_broadcast_client
 from fymo.build.composition_generator import generate_ssr_tree
 from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
-from fymo.build.hygiene import check_directory_hygiene, format_hygiene_error
+from fymo.build.hygiene import (
+    check_directory_hygiene,
+    check_storage_required_for_media,
+    format_hygiene_error,
+)
 from fymo.build.manifest import RemoteModuleAssets
 from fymo.remote.codegen import emit_module, emit_runtime
 from fymo.remote.discovery import discover_remote_modules
@@ -95,6 +99,10 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     hygiene_violations = check_directory_hygiene(project_root)
     if hygiene_violations:
         raise BuildError(format_hygiene_error(hygiene_violations))
+
+    storage_violations = check_storage_required_for_media(project_root)
+    if storage_violations:
+        raise BuildError("\n".join(storage_violations))
 
     if shutil.which("node") is None:
         raise BuildError("node not found on PATH" if dev else "node executable not found on PATH")

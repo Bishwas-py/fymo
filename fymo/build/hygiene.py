@@ -38,6 +38,30 @@ def check_directory_hygiene(project_root: Path) -> List[str]:
     return violations
 
 
+def check_storage_required_for_media(project_root: Path) -> List[str]:
+    """`media:` routes always resolve the files they serve through a
+    StorageProvider (fymo.storage.registry), and storage has no default
+    provider on purpose (see fymo/storage/registry.py's docstring):
+    silently writing to local disk is exactly the footgun that works in
+    dev and quietly loses data behind a load balancer in production. So a
+    `media:` section with no accompanying `storage:` section would only
+    fail once a request actually reaches the route, deep inside
+    FymoApp.__init__, catching it here at build time points at the fix
+    (add `storage:` to fymo.yml) before that happens."""
+    from fymo.build.prepare import read_yaml_section
+
+    media_config = read_yaml_section(project_root, "media")
+    storage_config = read_yaml_section(project_root, "storage")
+    if media_config and not storage_config:
+        return [
+            "media: is configured in fymo.yml but storage: is missing. "
+            "media: routes resolve files through the configured "
+            "StorageProvider and there is no default, add a storage: "
+            "section (e.g. `storage: {provider: local}`)."
+        ]
+    return []
+
+
 def format_hygiene_error(violations: List[str]) -> str:
     bullet_list = "\n".join(f"  - {v}" for v in violations)
     return (
