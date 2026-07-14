@@ -1,6 +1,6 @@
 [project]
 name = "fymo"
-version = "0.8.0"
+version = "0.9.0"
 description = "Python SSR framework for Svelte 5 — esbuild pipeline, Node sidecar, SvelteKit-style remote functions"
 readme = "README.md"
 license = "MIT"
