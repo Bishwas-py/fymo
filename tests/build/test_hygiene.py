@@ -5,7 +5,11 @@ esbuild never bundles a stray .py) -- which is exactly why it needs an
 explicit check instead of relying on something erroring on its own."""
 from pathlib import Path
 
-from fymo.build.hygiene import check_directory_hygiene, format_hygiene_error
+from fymo.build.hygiene import (
+    check_directory_hygiene,
+    check_lib_directory_warnings,
+    format_hygiene_error,
+)
 
 
 def test_clean_project_has_no_violations(tmp_path: Path):
@@ -86,3 +90,63 @@ def test_format_hygiene_error_lists_every_violation():
     assert "app/templates/oops.py: bad" in msg
     assert "Python-only" in msg
     assert "frontend-only" in msg
+
+
+# check_lib_directory_warnings (soft, not a build error)
+
+
+def test_no_app_lib_dir_produces_no_warnings(tmp_path: Path):
+    assert check_lib_directory_warnings(tmp_path) == []
+
+
+def test_app_lib_with_only_ts_files_produces_no_warnings(tmp_path: Path):
+    (tmp_path / "app" / "lib").mkdir(parents=True)
+    (tmp_path / "app" / "lib" / "auth.ts").write_text("export const x = 1;\n")
+
+    assert check_lib_directory_warnings(tmp_path) == []
+
+
+def test_py_file_in_app_lib_produces_a_warning(tmp_path: Path):
+    (tmp_path / "app" / "lib").mkdir(parents=True)
+    (tmp_path / "app" / "lib" / "oops.py").write_text("x = 1\n")
+
+    warnings = check_lib_directory_warnings(tmp_path)
+    assert len(warnings) == 1
+    assert "app/lib/oops.py" in warnings[0]
+    assert "app/support" in warnings[0]
+
+
+def test_py_file_nested_in_app_lib_subdir_is_caught(tmp_path: Path):
+    (tmp_path / "app" / "lib" / "nested").mkdir(parents=True)
+    (tmp_path / "app" / "lib" / "nested" / "oops.py").write_text("x = 1\n")
+
+    warnings = check_lib_directory_warnings(tmp_path)
+    assert len(warnings) == 1
+    assert "app/lib/nested/oops.py" in warnings[0]
+
+
+def test_multiple_py_files_in_app_lib_all_reported(tmp_path: Path):
+    (tmp_path / "app" / "lib").mkdir(parents=True)
+    (tmp_path / "app" / "lib" / "a.py").write_text("x = 1\n")
+    (tmp_path / "app" / "lib" / "b.py").write_text("x = 1\n")
+
+    assert len(check_lib_directory_warnings(tmp_path)) == 2
+
+
+def test_check_lib_directory_warnings_does_not_affect_hard_errors(tmp_path: Path):
+    """The warning check and the existing hard-error check are independent:
+    a .py file in app/lib/ must not show up in check_directory_hygiene()'s
+    result, and a hard-error violation elsewhere must not show up in the
+    warning check's result."""
+    (tmp_path / "app" / "lib").mkdir(parents=True)
+    (tmp_path / "app" / "lib" / "oops.py").write_text("x = 1\n")
+    (tmp_path / "app" / "controllers").mkdir(parents=True)
+    (tmp_path / "app" / "controllers" / "oops.svelte").write_text("<div></div>")
+
+    hard_violations = check_directory_hygiene(tmp_path)
+    assert len(hard_violations) == 1
+    assert "app/controllers/oops.svelte" in hard_violations[0]
+
+    soft_warnings = check_lib_directory_warnings(tmp_path)
+    assert len(soft_warnings) == 1
+    assert "app/lib/oops.py" in soft_warnings[0]

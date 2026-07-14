@@ -23,10 +23,15 @@ from fymo.broadcast.codegen import emit_broadcast_client
 from fymo.build.composition_generator import generate_ssr_tree
 from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
-from fymo.build.hygiene import check_directory_hygiene, format_hygiene_error
+from fymo.build.hygiene import (
+    check_directory_hygiene,
+    check_lib_directory_warnings,
+    format_hygiene_error,
+)
 from fymo.build.manifest import RemoteModuleAssets
 from fymo.remote.codegen import emit_module, emit_runtime
 from fymo.remote.discovery import discover_remote_modules
+from fymo.utils.colors import Color
 
 
 class BuildError(RuntimeError):
@@ -95,6 +100,13 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     hygiene_violations = check_directory_hygiene(project_root)
     if hygiene_violations:
         raise BuildError(format_hygiene_error(hygiene_violations))
+
+    # Soft check, same point in the sequence as the hard one above but never
+    # raises; see check_lib_directory_warnings' docstring for why app/lib/
+    # doesn't get the hard-error treatment. Printed for both `fymo build` and
+    # `fymo dev` since both call prepare_build_config.
+    for warning in check_lib_directory_warnings(project_root):
+        Color.print_warning(warning)
 
     if shutil.which("node") is None:
         raise BuildError("node not found on PATH" if dev else "node executable not found on PATH")

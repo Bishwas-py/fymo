@@ -33,6 +33,21 @@ def test_hygiene_check_runs_even_without_node_on_path(example_app: Path, monkeyp
         DevOrchestrator(example_app).start()
 
 
+def test_start_warns_but_succeeds_on_py_file_in_lib(example_app: Path, node_available, capsys):
+    """Locked decision: app/lib/ is a warning, not a build failure. start()
+    must not raise, unlike the hard-error cases above."""
+    (example_app / "app" / "lib").mkdir(parents=True, exist_ok=True)
+    (example_app / "app" / "lib" / "oops.py").write_text("x = 1\n")
+    orch = DevOrchestrator(example_app)
+    try:
+        orch.start()
+    finally:
+        orch.stop()
+    out = capsys.readouterr().out
+    assert "app/lib/oops.py" in out
+    assert "app/support" in out
+
+
 def test_write_manifest_populates_layout_fields_from_synthetic_metafile(example_app: Path):
     """Fast, no real esbuild: proves _write_manifest()'s wiring to
     match_esbuild_outputs() is correct, independent of a real subprocess

@@ -35,6 +35,7 @@ def create_project(name: str, template: str = 'default'):
         'app/models',
         'app/lib',
         'app/components',
+        'app/support',
         'app/static/css',
         'app/static/js',
         'app/static/images',
@@ -170,7 +171,14 @@ if __name__ == "__main__":
     
     # app/__init__.py
     (project_path / 'app' / '__init__.py').write_text('"""Application package"""')
-    
+
+    # app/support/__init__.py: Python-only home for shared server-side
+    # utilities (db connection helpers, env config, etc.) that don't belong
+    # in app/lib/ (TypeScript/Svelte-only) or any of the other app/
+    # subpackages. Needs __init__.py like the other app/ subpackages so it
+    # imports as app.support.* from day one.
+    (project_path / 'app' / 'support' / '__init__.py').write_text('"""Shared server-side utilities"""')
+
     # app/controllers/home.py
     home_controller = """\"\"\"Home controller\"\"\"
 

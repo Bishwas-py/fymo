@@ -27,6 +27,36 @@ def test_hygiene_violation_raises_before_node_check(example_app: Path, monkeypat
         prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
 
 
+@pytest.mark.usefixtures("node_available")
+def test_py_file_in_app_lib_warns_but_does_not_fail_build(example_app: Path, capsys):
+    """Locked decision: unlike app/controllers, app/templates, and
+    app/components, a .py file in app/lib/ is a warning, not a build
+    failure. It must not raise, and prepare_build_config must still return
+    a usable BuildConfig."""
+    (example_app / "app" / "lib").mkdir(parents=True, exist_ok=True)
+    (example_app / "app" / "lib" / "oops.py").write_text("x = 1\n")
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+
+    config = prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
+
+    assert isinstance(config, BuildConfig)
+    out = capsys.readouterr().out
+    assert "app/lib/oops.py" in out
+    assert "app/support" in out
+
+
+@pytest.mark.usefixtures("node_available")
+def test_no_app_lib_py_file_produces_no_warning(example_app: Path, capsys):
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+
+    prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
+
+    out = capsys.readouterr().out
+    assert "app/lib" not in out
+
+
 def test_read_yaml_section_missing_file_returns_empty_dict(tmp_path: Path):
     assert read_yaml_section(tmp_path, "auth") == {}
 

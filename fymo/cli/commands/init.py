@@ -26,6 +26,11 @@ def initialize_project():
     # Create basic structure
     (current_dir / 'app' / 'controllers').mkdir(parents=True, exist_ok=True)
     (current_dir / 'app' / 'templates').mkdir(parents=True, exist_ok=True)
-    
+
+    # app/support/: Python-only home for shared server-side utilities, same
+    # rationale as `fymo new`'s scaffold (see fymo/cli/commands/new.py).
+    (current_dir / 'app' / 'support').mkdir(parents=True, exist_ok=True)
+    (current_dir / 'app' / 'support' / '__init__.py').write_text('"""Shared server-side utilities"""')
+
     Color.print_success("Fymo initialized successfully!")
     Color.print_info("Next steps: Create your controllers and templates in the app/ directory")

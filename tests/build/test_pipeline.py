@@ -233,6 +233,20 @@ def test_build_fails_on_py_file_in_templates(example_app: Path, node_available):
         BuildPipeline(example_app).build(dev=False)
 
 
+def test_build_warns_but_succeeds_on_py_file_in_lib(example_app: Path, node_available, capsys):
+    """Locked decision: app/lib/ is a warning, not a build failure, unlike
+    the hard-error checks above."""
+    (example_app / "app" / "lib").mkdir(parents=True, exist_ok=True)
+    (example_app / "app" / "lib" / "oops.py").write_text("x = 1\n")
+
+    result = BuildPipeline(example_app).build(dev=False)
+
+    assert result.ok
+    out = capsys.readouterr().out
+    assert "app/lib/oops.py" in out
+    assert "app/support" in out
+
+
 def test_hygiene_check_runs_even_without_node_on_path(example_app: Path, monkeypatch):
     """The violation must be reported even when node isn't available at all
     -- proves this is a fast, up-front filesystem check that doesn't depend
