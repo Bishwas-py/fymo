@@ -196,6 +196,69 @@ Provisioning rules:
   dev-only behavior (verbose tracebacks in 500s, cookies without the
   `Secure` flag) that must never run in production.
 
+## Environment variables in `fymo.yml`
+
+`fymo.yml` can reference environment variables directly, so a
+deployment-specific value (an auth issuer URL, an API base URL) doesn't
+force a custom Python class just to read `os.environ`:
+
+```yaml
+auth:
+  providers:
+    - class: fymo.auth.providers.clerk.ClerkProvider
+      issuer: ${CLERK_ISSUER}
+      jwks_url: ${CLERK_JWKS_URL:-https://example.clerk.accounts.dev/.well-known/jwks.json}
+```
+
+- `${VAR}` resolves to the environment variable's value. If it's unset,
+  config loading fails immediately with a `ConfigurationError` naming the
+  variable, rather than silently loading a config with the literal string
+  `${VAR}` in it.
+- `${VAR:-default}` falls back to `default` (including an empty default,
+  `${VAR:-}`) when `VAR` is unset. The default itself may reference
+  another placeholder, e.g. `${A:-${B}}`, resolved the same way and only
+  evaluated when `A` is actually unset.
+- The resolved value is always spliced back in as a quoted YAML string, so
+  a value can never be interpreted as YAML structure (an extra key, a new
+  list item) no matter what characters it contains, including a literal
+  newline. An env var populated from a less-trusted source than the yml
+  file itself (a build pipeline, a secrets manager with looser access)
+  still can't restructure the config, only supply a string value.
+- Interpolation runs on the raw YAML text before parsing, so it works
+  anywhere in the file, not just inside `auth:`, and that includes inside
+  `#` comments: a `${VAR}` written in a comment is still substituted and
+  validated (an unset required var there still raises), since the
+  substitution pass has no notion of YAML comments.
+
+### Conditional auth providers: `required: auto`
+
+A provider entry can carry `required: auto` to make its inclusion depend
+on whether it's actually configured, instead of the app crashing on a
+missing required constructor argument or silently registering a
+half-broken provider:
+
+```yaml
+auth:
+  providers:
+    - class: app.lib.clerk_env.ClerkFromEnv
+      required: auto
+```
+
+With `required: auto` set, the registry calls the provider class's
+`is_configured()` classmethod **before** constructing it. If that returns
+`False`, the provider is skipped entirely: no error, no instance, it
+contributes nothing to the app. This lets a provider stay dormant in local
+dev (no Clerk/Auth0/etc. env vars set) and activate once real values land
+in the environment, with no separate conditional wiring in app code.
+Any value other than the literal string `"auto"` for `required` (a typo
+like `Auto`, or anything else) raises a `ProviderConfigError` naming the
+bad value, rather than being silently ignored or crashing the provider's
+constructor with an unrelated `TypeError`.
+
+`is_configured()` defaults to `True` on `BaseProvider`, so every existing
+provider is unaffected: only an entry that both sets `required: auto` and
+points at a provider overriding the hook gets the conditional behavior.
+
 ## Worker sizing
 
 Each gunicorn worker costs one Python process **plus** one Node sidecar
@@ -293,3 +356,34 @@ second sink (e.g. Sentry).
 
 File output is append-only with no built-in rotation — use logrotate or
 your container platform's log driver.
+
+## Media routes (byte-range file serving)
+
+Apps that need to serve binary files with `Range` support (video/audio
+seeking and scrubbing, in particular) don't need to hand-write a raw WSGI
+route for it. Declare them in `fymo.yml` instead:
+
+```yaml
+media:
+  - prefix: /media/videos/
+    dir: data/videos
+    extensions: [webm]
+```
+
+`prefix` is matched against the request path the same way fymo's own
+`/dist/` and `/assets/` routes are (a path prefix, not a template). `dir`
+is resolved relative to the project root. `extensions` is the allow-list
+for the filename after the prefix; anything else, and any filename
+containing `..` or starting with `/`, gets a 400.
+
+fymo owns the rest: single-range `Range: bytes=start-end` requests get a
+206 with `Content-Range`, full-file requests get a 200 with `Content-Length`,
+missing files get a 404, and `Content-Type` is resolved from the filename
+via the standard library's `mimetypes` module. `media:` can list multiple
+entries with different prefixes/dirs/extensions, and the section is
+entirely optional, apps without one register no extra routes at all.
+
+See `fymo/core/media.py` for the implementation, and `fymo/core/http.py`
+for the lower-level raw-WSGI extension point (`app/routes.py`) this sits
+alongside, for the rarer case of a route that isn't just "serve a file
+from a directory" (webhooks, non-file responses, etc.).

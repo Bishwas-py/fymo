@@ -52,6 +52,17 @@ def test_new_and_init_scaffold_identical_fymo_yml(tmp_path):
     assert "sample_app" in content
 
 
+def test_new_scaffold_defaults_to_explicit_remote_optin(tmp_path):
+    """Issue #8: fresh projects should require @remote to expose a function,
+    not fall back to implicit file-placement exposure. Existing projects are
+    unaffected: this only changes what NEW projects generate."""
+    from fymo.cli.commands._scaffold import render_fymo_yml
+    import yaml
+    content = render_fymo_yml("sample_app")
+    data = yaml.safe_load(content)
+    assert data["remote"]["explicit_optin"] is True
+
+
 def test_new_does_not_scaffold_dead_config_routes(tmp_path, monkeypatch):
     """new.py used to ship config/routes.py into every project, but the
     router only ever reads it when fymo.yml is ABSENT — and new.py always

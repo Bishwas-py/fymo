@@ -91,6 +91,11 @@ class FymoApp:
         from fymo.remote import router as _remote_router
         _remote_router._dev_mode = self.dev
 
+        # Same flag into broadcasts: gates publish()'s payload-vs-TypedDict
+        # DX check, a warning-only aid that must add zero overhead in prod.
+        import fymo.broadcast as _broadcast_module
+        _broadcast_module._dev_mode = self.dev
+
         # Resolve and install the HMAC secret used to sign fymo_uid cookies.
         # Done eagerly at startup so production misconfiguration fails fast
         # instead of on the first remote call.
@@ -134,10 +139,17 @@ class FymoApp:
         _remote_router._explicit_optin = bool(remote_cfg.get("explicit_optin", False))
 
         self.asset_manager = AssetManager(self.project_root)
-        # App-level raw HTTP routes (e.g. media streaming) — optional
-        # extension point, independent of auth. See fymo/core/http.py.
+        # App-level raw HTTP routes (e.g. hand-written media streaming),
+        # an optional extension point, independent of auth. See fymo/core/http.py.
+        # Declarative media routes (fymo.yml `media:` section) are built the
+        # same way and appended to the same list, so both are checked by the
+        # single loop in `_dispatch` below. An app can mix hand-written
+        # raw-WSGI routes with config-driven ones. See fymo/core/media.py.
         from fymo.core.http import discover_app_http_routes
-        self._app_routes = discover_app_http_routes(self.project_root)
+        from fymo.core.media import build_media_routes
+        self._app_routes = discover_app_http_routes(self.project_root) + build_media_routes(
+            self.project_root, self.config_manager.get_media_config()
+        )
         self.router = self._initialize_router()
         self.template_renderer = TemplateRenderer(
             self.project_root,

@@ -47,3 +47,12 @@ class BaseProvider:
 
     def resolve_session(self, event: dict) -> Optional[User]:
         return None
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        """Whether this provider has what it needs (e.g. required env vars)
+        to be constructed. Only consulted when a fymo.yml entry opts in with
+        `required: auto`; default True keeps every existing provider
+        unaffected, since most providers have no optional-configuration
+        story at all."""
+        return True
