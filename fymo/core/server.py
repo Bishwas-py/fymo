@@ -91,6 +91,11 @@ class FymoApp:
         from fymo.remote import router as _remote_router
         _remote_router._dev_mode = self.dev
 
+        # Same flag into broadcasts: gates publish()'s payload-vs-TypedDict
+        # DX check, a warning-only aid that must add zero overhead in prod.
+        import fymo.broadcast as _broadcast_module
+        _broadcast_module._dev_mode = self.dev
+
         # Resolve and install the HMAC secret used to sign fymo_uid cookies.
         # Done eagerly at startup so production misconfiguration fails fast
         # instead of on the first remote call.
