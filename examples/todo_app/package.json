@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "date-fns": "^4.1.0",
-    "devalue": "^5.0.0",
-    "svelte": "^5.38.0"
+    "devalue": "^5.8.1",
+    "svelte": "^5.56.4"
   },
   "devDependencies": {
     "esbuild": "^0.25.9",
