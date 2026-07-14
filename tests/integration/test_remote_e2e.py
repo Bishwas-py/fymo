@@ -14,6 +14,8 @@ def test_remote_call_through_fymoapp(example_app: Path, monkeypatch):
     remote_dir.mkdir(parents=True, exist_ok=True)
     (remote_dir / "__init__.py").write_text("")
     (remote_dir / "greeter.py").write_text(
+        "from fymo.remote import remote\n"
+        "@remote\n"
         "def hello(name: str) -> str:\n    return f'hi {name}'\n"
     )
 

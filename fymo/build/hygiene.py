@@ -8,6 +8,8 @@ in a template/component directory -- which is exactly what makes it easy
 to miss without an explicit check: the file just silently does nothing,
 instead of erroring where a developer would notice.
 """
+import importlib
+import sys
 from pathlib import Path
 from typing import List
 
@@ -44,4 +46,85 @@ def format_hygiene_error(violations: List[str]) -> str:
         "Directory hygiene violation(s) found:\n" + bullet_list +
         "\n\napp/controllers/ is Python-only; app/templates/ and app/components/ "
         "are frontend-only."
+    )
+
+
+def check_remote_exposure_hygiene(project_root: Path, remote_config: "dict | None") -> List[str]:
+    """Return one violation per app/remote/*.py function that implicit-mode
+    discovery would expose to the browser but that carries no `@remote`
+    marker (issue #8: file placement alone used to be the only thing
+    deciding browser-callability, and a real app got that wrong: an
+    internal storage helper landed in app/remote/ with no auth guard and
+    turned out to be reachable over the wire).
+
+    A no-op (returns []) when `remote.explicit_optin` is true, since in that
+    mode an unmarked function is already excluded from the manifest and
+    the router by `discovery.is_exposed_remote_fn`, so there's nothing
+    silently exposed to warn about. Also a no-op when `remote.allow_implicit`
+    is true, the documented-unsafe escape hatch for apps that aren't ready
+    to migrate yet.
+
+    Imports every app/remote/*.py module to apply the exact same exposure
+    rule discovery uses at codegen time (`is_exposed_remote_fn` with
+    explicit_optin=False, i.e. "what would ship if opt-in were off"), so
+    this can never drift from what the manifest/router actually expose.
+    """
+    remote_config = remote_config or {}
+    if remote_config.get("explicit_optin", False):
+        return []
+    if remote_config.get("allow_implicit", False):
+        return []
+
+    remote_dir = project_root / "app" / "remote"
+    if not remote_dir.is_dir():
+        return []
+
+    from fymo.remote.discovery import _ensure_parent_packages, is_exposed_remote_fn
+
+    violations: List[str] = []
+    project_root_str = str(project_root)
+    added = project_root_str not in sys.path
+    if added:
+        sys.path.insert(0, project_root_str)
+    try:
+        _ensure_parent_packages(project_root)
+        for py in sorted(remote_dir.glob("*.py")):
+            if py.name == "__init__.py" or py.stem.startswith("_"):
+                continue
+            module_name = py.stem
+            full = f"app.remote.{module_name}"
+            if full in sys.modules:
+                mod = importlib.reload(sys.modules[full])
+            else:
+                mod = importlib.import_module(full)
+            for name, obj in vars(mod).items():
+                if name.startswith("_"):
+                    continue
+                # explicit_optin=False here on purpose: this asks "would
+                # implicit mode expose this", not "is it exposed right now".
+                if not is_exposed_remote_fn(obj, full, explicit_optin=False):
+                    continue
+                if getattr(obj, "__fymo_remote__", False):
+                    continue
+                violations.append(
+                    f"{py.relative_to(project_root)}: {name} is browser-callable "
+                    f"under implicit mode but has no @remote marker "
+                    f"(add @remote or rename it with a leading underscore to keep it private)"
+                )
+    finally:
+        if added and project_root_str in sys.path:
+            sys.path.remove(project_root_str)
+
+    return violations
+
+
+def format_remote_exposure_error(violations: List[str]) -> str:
+    bullet_list = "\n".join(f"  - {v}" for v in violations)
+    return (
+        "Unmarked remote function(s) would be exposed under implicit mode:\n" + bullet_list +
+        "\n\nEvery public function in app/remote/*.py is browser-callable by default "
+        "when remote.explicit_optin is false. Add @remote (from fymo.remote) to each "
+        "function above that's meant to be an endpoint, or rename it with a leading "
+        "underscore to keep it a private helper. To silence this check without fixing "
+        "it (unsafe, temporary), set remote.allow_implicit: true in fymo.yml."
     )

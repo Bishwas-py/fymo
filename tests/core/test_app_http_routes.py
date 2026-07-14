@@ -150,3 +150,74 @@ def test_fymo_app_boots_fine_with_no_app_routes_py(example_app: Path, monkeypatc
         assert app._app_routes == []
     finally:
         app.shutdown()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_fymo_app_dispatches_declarative_media_route(example_app: Path, monkeypatch):
+    """`media:` in fymo.yml must produce a working route through the same
+    `_app_routes` seam app/routes.py uses, with no app/routes.py involved at
+    all, config-only wiring end to end."""
+    monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=example_app).build(dev=False)
+
+    video_dir = example_app / "data" / "videos"
+    video_dir.mkdir(parents=True)
+    (video_dir / "clip.webm").write_bytes(b"video-bytes")
+
+    from fymo import create_app
+    app = create_app(example_app, config={
+        "media": [
+            {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+        ],
+    })
+    try:
+        captured = {}
+
+        def start_response(status, headers, exc_info=None):
+            captured["status"] = status
+            captured["headers"] = dict(headers)
+
+        body = b"".join(app(_make_wsgi_env("/media/videos/clip.webm"), start_response))
+        assert captured["status"] == "200 OK"
+        assert captured["headers"]["Content-Type"] == "video/webm"
+        assert body == b"video-bytes"
+    finally:
+        app.shutdown()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_fymo_app_rejects_media_traversal_through_full_dispatch(example_app: Path, monkeypatch):
+    """Same traversal attack as tests/core/test_media.py's route-handler-level
+    test, but driven through `app(environ, start_response)` (FymoApp.__call__)
+    end to end, so it also exercises the body-cap/rate-limit/security-header
+    chain and the prefix-matching loop in `_dispatch`, not just the media
+    route's own handler in isolation."""
+    monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=example_app).build(dev=False)
+
+    video_dir = example_app / "data" / "videos"
+    video_dir.mkdir(parents=True)
+    (example_app / "secret.webm").write_bytes(b"top secret")
+
+    from fymo import create_app
+    app = create_app(example_app, config={
+        "media": [
+            {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+        ],
+    })
+    try:
+        captured = {}
+
+        def start_response(status, headers, exc_info=None):
+            captured["status"] = status
+            captured["headers"] = dict(headers)
+
+        body = b"".join(app(
+            _make_wsgi_env("/media/videos/../../secret.webm"), start_response
+        ))
+        assert captured["status"] == "400 Bad Request"
+        assert b"top secret" not in body
+    finally:
+        app.shutdown()
