@@ -18,6 +18,34 @@ from fymo.jobs.providers.base import BaseJobProvider
 _DEFAULT_ENV_VAR = "DATABASE_URL"
 
 
+class DropProcrastinateJobErrorRecord(logging.Filter):
+    """Drop procrastinate's permanent-failure outcome record.
+
+    procrastinate's worker logs ``Job {call_string} ended with status:
+    Error`` at ERROR when a job permanently fails (retries exhausted) --
+    ``call_string`` renders every job kwarg value, so this record leaks
+    job arguments even past the WARNING level cap run_worker() applies to
+    the "procrastinate" logger (ERROR >= WARNING). It also duplicates
+    fymo's own ``job failed`` ERROR line, which already carries the job
+    name, status, duration, and traceback without the arguments.
+
+    The record is identified by the ``action == "job_error"`` extra that
+    procrastinate's Worker._log_job_outcome attaches; the other outcome
+    actions (job_success, job_aborted, job_aborted_retry, job_error_retry)
+    are INFO-only, so the level cap already handles them by default and
+    they stay available to an app that explicitly opts into INFO.
+
+    This filter must be attached to "procrastinate.worker" -- the record's
+    ORIGIN logger (worker.py's module-level ``logging.getLogger(__name__)``)
+    -- because stdlib logger-level filters only run on the logger a record
+    is logged through, never on ancestors, so attaching it to the
+    "procrastinate" parent would do nothing.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return getattr(record, "action", None) != "job_error"
+
+
 def _import_procrastinate():
     """Import procrastinate with an actionable error — it's an optional
     dependency, so `jobs: provider: procrastinate` without the extra
@@ -98,6 +126,17 @@ class ProcrastinateJobProvider(BaseJobProvider):
         procrastinate_logger = logging.getLogger("procrastinate")
         if procrastinate_logger.level == logging.NOTSET:
             procrastinate_logger.setLevel(logging.WARNING)
+
+        # The level cap can't stop the one argument-echoing record emitted
+        # at ERROR (permanent job failure) -- drop it at its origin logger.
+        # See DropProcrastinateJobErrorRecord. Guarded so repeated
+        # run_worker() calls don't stack duplicate filters.
+        worker_logger = logging.getLogger("procrastinate.worker")
+        if not any(
+            isinstance(f, DropProcrastinateJobErrorRecord)
+            for f in worker_logger.filters
+        ):
+            worker_logger.addFilter(DropProcrastinateJobErrorRecord())
 
         app.run_worker(**kwargs)
 

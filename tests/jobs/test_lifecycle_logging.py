@@ -25,10 +25,12 @@ def _reset_logging_and_runner():
         fymo_logging._installed_handler.close()
         fymo_logging._installed_handler = None
     root.setLevel(logging.WARNING)
-    # run_worker() caps the "procrastinate" logger's level as a side effect
-    # (see ProcrastinateJobProvider.run_worker) -- process-global state that
+    # run_worker() caps the "procrastinate" logger's level and attaches a
+    # filter to "procrastinate.worker" as side effects (see
+    # ProcrastinateJobProvider.run_worker) -- process-global state that
     # must not leak between tests in this file.
     logging.getLogger("procrastinate").setLevel(logging.NOTSET)
+    logging.getLogger("procrastinate.worker").filters.clear()
 
 
 def _configure_file(tmp_path: Path, level: str = "debug") -> Path:
@@ -188,6 +190,35 @@ def test_procrastinate_run_worker_wraps_tasks_with_lifecycle(monkeypatch, tmp_pa
         registered["boom"]()
 
 
+class _StubWorkerApp:
+    """Just enough of procrastinate.App for run_worker() tests that don't
+    need to capture task registrations."""
+
+    def __init__(self, connector):
+        pass
+
+    def task(self, name):
+        def register(fn):
+            return fn
+        return register
+
+    def run_worker(self, **kwargs):
+        pass
+
+
+class _StubProcrastinate:
+    PsycopgConnector = staticmethod(lambda **kw: object())
+    App = _StubWorkerApp
+
+
+def _stub_procrastinate(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgres://stub")
+    monkeypatch.setattr(
+        "fymo.jobs.providers.procrastinate._import_procrastinate",
+        lambda: _StubProcrastinate(),
+    )
+
+
 def test_procrastinate_run_worker_caps_procrastinate_logger_to_warning(monkeypatch, tmp_path: Path):
     """procrastinate's own INFO lines echo job.call_string (every job
     kwarg) -- letting those through fymo's root-logger handler would leak
@@ -195,39 +226,16 @@ def test_procrastinate_run_worker_caps_procrastinate_logger_to_warning(monkeypat
     WARNING by default so errors still surface without the leak."""
     from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
 
-    class StubApp:
-        def __init__(self, connector):
-            pass
-
-        def task(self, name):
-            def register(fn):
-                return fn
-            return register
-
-        def run_worker(self, **kwargs):
-            pass
-
-    class StubProcrastinate:
-        PsycopgConnector = lambda self=None, **kw: object()
-        App = StubApp
-
-    monkeypatch.setenv("DATABASE_URL", "postgres://stub")
-    monkeypatch.setattr(
-        "fymo.jobs.providers.procrastinate._import_procrastinate",
-        lambda: StubProcrastinate(),
-    )
+    _stub_procrastinate(monkeypatch)
 
     procrastinate_logger = logging.getLogger("procrastinate")
     assert procrastinate_logger.level == logging.NOTSET
-    try:
-        _configure_file(tmp_path)
-        provider = ProcrastinateJobProvider()
-        provider.register_tasks({"work": lambda: "done"})
-        provider.run_worker()
+    _configure_file(tmp_path)
+    provider = ProcrastinateJobProvider()
+    provider.register_tasks({"work": lambda: "done"})
+    provider.run_worker()
 
-        assert procrastinate_logger.level == logging.WARNING
-    finally:
-        procrastinate_logger.setLevel(logging.NOTSET)
+    assert procrastinate_logger.level == logging.WARNING
 
 
 def test_procrastinate_run_worker_respects_explicit_info_level(monkeypatch, tmp_path: Path):
@@ -237,37 +245,74 @@ def test_procrastinate_run_worker_respects_explicit_info_level(monkeypatch, tmp_
     overridden."""
     from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
 
-    class StubApp:
-        def __init__(self, connector):
-            pass
-
-        def task(self, name):
-            def register(fn):
-                return fn
-            return register
-
-        def run_worker(self, **kwargs):
-            pass
-
-    class StubProcrastinate:
-        PsycopgConnector = lambda self=None, **kw: object()
-        App = StubApp
-
-    monkeypatch.setenv("DATABASE_URL", "postgres://stub")
-    monkeypatch.setattr(
-        "fymo.jobs.providers.procrastinate._import_procrastinate",
-        lambda: StubProcrastinate(),
-    )
+    _stub_procrastinate(monkeypatch)
 
     procrastinate_logger = logging.getLogger("procrastinate")
     assert procrastinate_logger.level == logging.NOTSET
-    try:
-        procrastinate_logger.setLevel(logging.INFO)
-        _configure_file(tmp_path)
-        provider = ProcrastinateJobProvider()
-        provider.register_tasks({"work": lambda: "done"})
-        provider.run_worker()
+    procrastinate_logger.setLevel(logging.INFO)
+    _configure_file(tmp_path)
+    provider = ProcrastinateJobProvider()
+    provider.register_tasks({"work": lambda: "done"})
+    provider.run_worker()
 
-        assert procrastinate_logger.level == logging.INFO
-    finally:
-        procrastinate_logger.setLevel(logging.NOTSET)
+    assert procrastinate_logger.level == logging.INFO
+
+
+def test_procrastinate_run_worker_attaches_job_error_filter_exactly_once(monkeypatch, tmp_path: Path):
+    """The permanent-failure outcome record (ERROR, so it passes the
+    WARNING cap) must be filtered at its origin logger,
+    "procrastinate.worker" -- and repeated run_worker calls must not stack
+    duplicate filters."""
+    from fymo.jobs.providers.procrastinate import (
+        DropProcrastinateJobErrorRecord,
+        ProcrastinateJobProvider,
+    )
+
+    _stub_procrastinate(monkeypatch)
+    _configure_file(tmp_path)
+
+    provider = ProcrastinateJobProvider()
+    provider.register_tasks({"work": lambda: "done"})
+    provider.run_worker()
+    provider.run_worker()
+
+    worker_logger = logging.getLogger("procrastinate.worker")
+    filters = [
+        f for f in worker_logger.filters
+        if isinstance(f, DropProcrastinateJobErrorRecord)
+    ]
+    assert len(filters) == 1
+
+
+def test_job_error_filter_drops_outcome_record_but_passes_others():
+    """The filter must drop exactly the record procrastinate's
+    Worker._log_job_outcome emits on permanent failure (ERROR on
+    "procrastinate.worker" with an ``action="job_error"`` extra, message
+    embedding call_string == every job kwarg) and pass everything else."""
+    from fymo.jobs.providers.procrastinate import DropProcrastinateJobErrorRecord
+
+    filt = DropProcrastinateJobErrorRecord()
+
+    def _record(level, msg, action=None):
+        record = logging.LogRecord(
+            name="procrastinate.worker", level=level,
+            pathname="worker.py", lineno=240, msg=msg, args=(), exc_info=None,
+        )
+        if action is not None:
+            record.action = action  # how `extra={"action": ...}` lands
+        return record
+
+    leaky = _record(
+        logging.ERROR,
+        "Job task[1](email='a@b.c', reset_token='secret123') "
+        "ended with status: Error, lasted 0.100 s",
+        action="job_error",
+    )
+    assert filt.filter(leaky) is False
+
+    # Control records pass: same logger without the marker attribute, and
+    # a different-action worker record.
+    assert filt.filter(_record(logging.ERROR, "connector lost")) is True
+    assert filt.filter(
+        _record(logging.INFO, "Starting job task[1]()", action="start_job")
+    ) is True
