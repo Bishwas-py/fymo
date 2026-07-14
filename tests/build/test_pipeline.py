@@ -239,6 +239,6 @@ def test_hygiene_check_runs_even_without_node_on_path(example_app: Path, monkeyp
     on (or get masked by) the node-availability check, not something that
     only surfaces once a real build gets underway."""
     (example_app / "app" / "controllers" / "oops.svelte").write_text("<div></div>")
-    monkeypatch.setattr("fymo.build.pipeline.shutil.which", lambda cmd: None)
+    monkeypatch.setattr("fymo.build.prepare.shutil.which", lambda cmd: None)
     with pytest.raises(BuildError, match="app/controllers/oops.svelte"):
         BuildPipeline(example_app).build(dev=False)

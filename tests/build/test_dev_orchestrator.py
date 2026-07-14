@@ -28,7 +28,7 @@ def test_hygiene_check_runs_even_without_node_on_path(example_app: Path, monkeyp
     """Same ordering rationale as the BuildPipeline test: a pure filesystem
     check shouldn't be masked by (or wait on) the node-availability check."""
     (example_app / "app" / "controllers" / "oops.svelte").write_text("<div></div>")
-    monkeypatch.setattr("fymo.build.dev_orchestrator.shutil.which", lambda cmd: None)
+    monkeypatch.setattr("fymo.build.prepare.shutil.which", lambda cmd: None)
     with pytest.raises(RuntimeError, match="app/controllers/oops.svelte"):
         DevOrchestrator(example_app).start()
 
