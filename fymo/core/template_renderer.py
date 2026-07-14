@@ -11,7 +11,6 @@ from typing import Dict, Any, Tuple
 from fymo.core.router import Router
 from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
-from fymo.core.exceptions import TemplateError, CompilationError, RenderingError, ControllerError
 from fymo.core.ssr_controller import load_controller_context, ssr_request_scope, load_layout_props_and_docs, merge_docs
 from fymo.remote.errors import RemoteError
 from fymo.utils.colors import Color
@@ -103,15 +102,6 @@ class TemplateRenderer:
         """
         try:
             return self._render_via_sidecar(route_path, environ)
-        except TemplateError as e:
-            print(f"{Color.FAIL}Template error: {e.message}{Color.ENDC}")
-            return self._render_error(e, "Template Error", status="404 NOT FOUND")
-        except CompilationError as e:
-            print(f"{Color.FAIL}Compilation error: {e.message}{Color.ENDC}")
-            return self._render_error(e, "Compilation Error")
-        except RenderingError as e:
-            print(f"{Color.FAIL}Rendering error: {e.message}{Color.ENDC}")
-            return self._render_error(e, "Rendering Error")
         except RemoteError as e:
             # A controller's getContext() raised NotFound/Unauthorized/etc.
             # directly (not via a remote-function RPC call) -- e.g. a page

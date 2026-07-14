@@ -11,7 +11,7 @@ from pathlib import Path
 from fymo.build.manifest import RouteAssets
 from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
-from fymo.core.exceptions import TemplateError
+from fymo.core.exceptions import ConfigurationError
 from fymo.core.router import Router
 from fymo.core.template_renderer import TemplateRenderer
 
@@ -67,17 +67,17 @@ def test_render_template_generic_error_omits_text_in_prod(tmp_path, monkeypatch)
 
 
 def test_render_template_message_style_error_escapes_in_dev(tmp_path, monkeypatch):
-    """TemplateError/CompilationError/RenderingError carry `.message` instead
+    """FymoError subclasses carry `.message` instead
     of a plain str(); confirm that code path also routes through the
     escaping helper rather than interpolating `.message` raw into HTML."""
     r = _make_renderer(tmp_path, dev=True)
 
     def boom(route_path, environ=None):
-        raise TemplateError("<script>alert(1)</script>")
+        raise ConfigurationError("<script>alert(1)</script>")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
     html, status = r.render_template("/whatever")
-    assert status == "404 NOT FOUND"
+    assert status == "500 INTERNAL SERVER ERROR"
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
 
@@ -86,11 +86,11 @@ def test_render_template_message_style_error_omits_text_in_prod(tmp_path, monkey
     r = _make_renderer(tmp_path, dev=False)
 
     def boom(route_path, environ=None):
-        raise TemplateError("<script>alert(1)</script>")
+        raise ConfigurationError("<script>alert(1)</script>")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
     html, status = r.render_template("/whatever")
-    assert status == "404 NOT FOUND"
+    assert status == "500 INTERNAL SERVER ERROR"
     assert "<script>" not in html
     assert "alert(1)" not in html
     assert "&lt;script&gt;" not in html

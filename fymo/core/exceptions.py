@@ -19,31 +19,6 @@ class ConfigurationError(FymoError):
     pass
 
 
-class TemplateError(FymoError):
-    """Raised when there's a template-related error"""
-    pass
-
-
-class CompilationError(FymoError):
-    """Raised when Svelte compilation fails"""
-    pass
-
-
-class RenderingError(FymoError):
-    """Raised when SSR rendering fails"""
-    pass
-
-
-class AssetError(FymoError):
-    """Raised when asset serving fails"""
-    pass
-
-
 class RouterError(FymoError):
     """Raised when routing fails"""
-    pass
-
-
-class ControllerError(FymoError):
-    """Raised when controller loading fails"""
     pass
