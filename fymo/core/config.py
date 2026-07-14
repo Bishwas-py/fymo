@@ -3,14 +3,44 @@ Configuration management for Fymo applications
 """
 
 import os
+import re
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+from fymo.core.exceptions import ConfigurationError
 
 
 def env_truthy(name: str) -> bool:
     """Shared FYMO_DEV-style env flag check ("1"/"true"/"yes"/"on")."""
     return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
+
+
+# ${VAR} (required) or ${VAR:-default} (falls back when unset). Resolved on
+# the raw YAML text before yaml.safe_load parses it: the simplest correct
+# approach, and it applies uniformly to the whole file (any section, any
+# nesting depth) instead of needing a walk over the parsed structure.
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-(.*?))?\}")
+
+
+def _interpolate_env_vars(text: str) -> str:
+    """Substitute ${VAR}/${VAR:-default} placeholders with real env values.
+
+    A bare ${VAR} with nothing set raises loudly and names the var, since a
+    deployment-specific value silently resolving to the literal string
+    "${VAR}" would be a much worse failure mode than refusing to boot.
+    """
+    def replace(match: "re.Match[str]") -> str:
+        name, has_default, default = match.group(1), match.group(2), match.group(3)
+        if name in os.environ:
+            return os.environ[name]
+        if has_default is not None:
+            return default
+        raise ConfigurationError(
+            f"fymo.yml references undefined environment variable: {name}"
+        )
+
+    return _ENV_VAR_PATTERN.sub(replace, text)
 
 
 class ConfigManager:
@@ -34,8 +64,10 @@ class ConfigManager:
         if config_file.exists():
             try:
                 with open(config_file, 'r') as f:
-                    file_config = yaml.safe_load(f) or {}
-                    self.config.update(file_config)
+                    raw_text = f.read()
+                interpolated_text = _interpolate_env_vars(raw_text)
+                file_config = yaml.safe_load(interpolated_text) or {}
+                self.config.update(file_config)
             except (yaml.YAMLError, IOError) as e:
                 print(f"Warning: Could not load config from {config_file}: {e}")
     

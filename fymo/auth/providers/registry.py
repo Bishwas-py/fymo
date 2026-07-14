@@ -7,7 +7,7 @@ themselves, never from the config.
 """
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fymo.auth.context import register_session_resolver, reset_session_resolvers
 from fymo.auth.providers.base import AuthProvider, BaseProvider
@@ -30,7 +30,10 @@ class ProviderConfigError(_CoreProviderConfigError):
     """Raised when `auth.providers` can't be turned into provider instances."""
 
 
-def _instantiate(entry: Any) -> AuthProvider:
+def _instantiate(entry: Any) -> Optional[AuthProvider]:
+    """Returns None when a `required: auto` entry's provider declines
+    (is_configured() -> False); the caller filters those out rather than
+    including an inert placeholder in the provider list."""
     if isinstance(entry, str):
         if entry not in _BUILTINS:
             raise ProviderConfigError(f"unknown built-in provider: {entry!r}")
@@ -47,6 +50,14 @@ def _instantiate(entry: Any) -> AuthProvider:
         else:
             raise ProviderConfigError("provider config needs a 'type' or 'class' key")
         opts = {k: v for k, v in entry.items() if k not in ("type", "class")}
+        # `required: auto` is an explicit opt-in (never automatic); pop it
+        # before it can reach the constructor as a stray kwarg, and check
+        # is_configured() before construction so a provider whose __init__
+        # would crash on a missing env var is never even built.
+        if opts.get("required") == "auto":
+            opts.pop("required")
+            if not cls.is_configured():
+                return None
         # Providers with env-backed secrets expose from_config(opts); others
         # take plain kwargs.
         if hasattr(cls, "from_config"):
@@ -60,7 +71,8 @@ def build_providers(config: List[Any] | None) -> List[AuthProvider]:
     """Instantiate providers from `auth.providers`. Defaults to `[password]`."""
     if not config:
         return [PasswordProvider()]
-    return [_instantiate(entry) for entry in config]
+    instantiated = (_instantiate(entry) for entry in config)
+    return [provider for provider in instantiated if provider is not None]
 
 
 def system_remote_modules(providers: List[AuthProvider]) -> dict:

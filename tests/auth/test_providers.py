@@ -69,3 +69,120 @@ class DummyTokenProvider(BaseProvider):
 
     def resolve_session(self, event):
         return None
+
+
+# required: auto
+
+
+class AlwaysUnconfiguredProvider(BaseProvider):
+    """is_configured() always False; __init__ asserts if ever reached, so a
+    test that constructs this by mistake fails loudly instead of quietly
+    passing."""
+    id = "always-unconfigured"
+    constructed = False
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        return False
+
+    def __init__(self) -> None:
+        type(self).constructed = True
+
+
+class TogglableProvider(BaseProvider):
+    """is_configured() reflects a class attribute the test flips, standing in
+    for a provider that checks os.environ at is_configured() time."""
+    id = "togglable"
+    configured = True
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        return cls.configured
+
+
+class ConfigurableProvider(BaseProvider):
+    """Takes a constructor kwarg so tests can confirm `required` never leaks
+    into opts alongside real ones."""
+    id = "configurable"
+    configured = True
+
+    def __init__(self, greeting: str = "hi") -> None:
+        self.greeting = greeting
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        return cls.configured
+
+
+class OverridesIsConfiguredButNotOptedIn(BaseProvider):
+    """Overrides is_configured() to return False, but the fymo.yml entry
+    never sets `required: auto`; the flag, not the hook's existence, must
+    gate the behavior, so this should always construct."""
+    id = "not-opted-in"
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        return False
+
+
+def test_required_auto_provider_skipped_when_not_configured():
+    AlwaysUnconfiguredProvider.constructed = False
+    providers = build_providers([
+        {"class": "tests.auth.test_providers.AlwaysUnconfiguredProvider", "required": "auto"},
+    ])
+    assert providers == []
+    assert AlwaysUnconfiguredProvider.constructed is False
+
+
+def test_required_auto_provider_included_when_configured():
+    TogglableProvider.configured = True
+    try:
+        providers = build_providers([
+            {"class": "tests.auth.test_providers.TogglableProvider", "required": "auto"},
+        ])
+        assert len(providers) == 1
+        assert isinstance(providers[0], TogglableProvider)
+    finally:
+        TogglableProvider.configured = True
+
+
+def test_required_auto_reflects_configuration_state_both_ways():
+    """Same provider, same entry: flip is_configured()'s answer and the
+    result flips with it."""
+    TogglableProvider.configured = False
+    try:
+        assert build_providers([
+            {"class": "tests.auth.test_providers.TogglableProvider", "required": "auto"},
+        ]) == []
+    finally:
+        TogglableProvider.configured = True
+    providers = build_providers([
+        {"class": "tests.auth.test_providers.TogglableProvider", "required": "auto"},
+    ])
+    assert len(providers) == 1
+
+
+def test_required_auto_is_popped_before_construction():
+    ConfigurableProvider.configured = True
+    providers = build_providers([
+        {
+            "class": "tests.auth.test_providers.ConfigurableProvider",
+            "required": "auto",
+            "greeting": "hello",
+        },
+    ])
+    assert len(providers) == 1
+    assert providers[0].greeting == "hello"
+
+
+def test_provider_without_required_auto_is_always_constructed_even_with_is_configured_override():
+    """The flag gates the behavior, not the mere presence of the hook."""
+    providers = build_providers([
+        {"class": "tests.auth.test_providers.OverridesIsConfiguredButNotOptedIn"},
+    ])
+    assert len(providers) == 1
+    assert isinstance(providers[0], OverridesIsConfiguredButNotOptedIn)
+
+
+def test_base_provider_is_configured_defaults_to_true():
+    assert BaseProvider.is_configured() is True

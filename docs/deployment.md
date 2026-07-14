@@ -196,6 +196,55 @@ Provisioning rules:
   dev-only behavior (verbose tracebacks in 500s, cookies without the
   `Secure` flag) that must never run in production.
 
+## Environment variables in `fymo.yml`
+
+`fymo.yml` can reference environment variables directly, so a
+deployment-specific value (an auth issuer URL, an API base URL) doesn't
+force a custom Python class just to read `os.environ`:
+
+```yaml
+auth:
+  providers:
+    - class: fymo.auth.providers.clerk.ClerkProvider
+      issuer: ${CLERK_ISSUER}
+      jwks_url: ${CLERK_JWKS_URL:-https://example.clerk.accounts.dev/.well-known/jwks.json}
+```
+
+- `${VAR}` resolves to the environment variable's value. If it's unset,
+  config loading fails immediately with a `ConfigurationError` naming the
+  variable, rather than silently loading a config with the literal string
+  `${VAR}` in it.
+- `${VAR:-default}` falls back to `default` (including an empty default,
+  `${VAR:-}`) when `VAR` is unset.
+
+Interpolation runs on the raw YAML text before parsing, so it works
+anywhere in the file, not just inside `auth:`.
+
+### Conditional auth providers: `required: auto`
+
+A provider entry can carry `required: auto` to make its inclusion depend
+on whether it's actually configured, instead of the app crashing on a
+missing required constructor argument or silently registering a
+half-broken provider:
+
+```yaml
+auth:
+  providers:
+    - class: app.lib.clerk_env.ClerkFromEnv
+      required: auto
+```
+
+With `required: auto` set, the registry calls the provider class's
+`is_configured()` classmethod **before** constructing it. If that returns
+`False`, the provider is skipped entirely — no error, no instance, it
+contributes nothing to the app. This lets a provider stay dormant in local
+dev (no Clerk/Auth0/etc. env vars set) and activate once real values land
+in the environment, with no separate conditional wiring in app code.
+
+`is_configured()` defaults to `True` on `BaseProvider`, so every existing
+provider is unaffected — only an entry that both sets `required: auto` and
+points at a provider overriding the hook gets the conditional behavior.
+
 ## Worker sizing
 
 Each gunicorn worker costs one Python process **plus** one Node sidecar
