@@ -217,3 +217,33 @@ def access_log(environ: dict, status: str, duration_ms: float) -> None:
         message = f'{method} {path} {status_code} {duration}ms'
 
     logger.info(message)
+
+
+def job_log(
+    job_name: str,
+    status: str,
+    duration_ms: Optional[float] = None,
+    exc_info=None,
+) -> None:
+    """Emit one lifecycle line for a background job, mirroring access_log.
+
+    status: "started" (DEBUG) | "succeeded" (INFO) | "failed" (ERROR).
+    Job ARGUMENTS are never logged — they may carry PII or secrets, same
+    rule as access_log's cookies/bodies/headers.
+    """
+    payload = {"job": job_name, "status": status}
+    if duration_ms is not None:
+        payload["duration_ms"] = round(float(duration_ms), 2)
+
+    if _json_mode:
+        message = _json.dumps(payload)
+    else:
+        message = f"job {job_name} {status}"
+        if duration_ms is not None:
+            message += f" {payload['duration_ms']}ms"
+
+    level = {
+        "started": logging.DEBUG,
+        "failed": logging.ERROR,
+    }.get(status, logging.INFO)
+    logging.getLogger("fymo.jobs").log(level, message, exc_info=exc_info)

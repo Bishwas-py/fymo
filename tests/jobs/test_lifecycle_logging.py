@@ -1,0 +1,132 @@
+"""Per-job lifecycle logging: started/succeeded/failed with duration.
+
+Job ARGUMENTS must never appear in log output (PII rule)."""
+import json as jsonlib
+import logging
+import time
+from pathlib import Path
+
+import pytest
+
+import fymo.core.logging as fymo_logging
+from fymo.core.logging import configure
+from fymo.jobs.lifecycle import run_with_lifecycle
+from fymo.jobs.providers.threaded import ThreadedJobProvider
+from fymo.jobs import reset_shared_runner
+
+
+@pytest.fixture(autouse=True)
+def _reset_logging_and_runner():
+    yield
+    reset_shared_runner()
+    root = logging.getLogger()
+    if fymo_logging._installed_handler is not None:
+        root.removeHandler(fymo_logging._installed_handler)
+        fymo_logging._installed_handler.close()
+        fymo_logging._installed_handler = None
+    root.setLevel(logging.WARNING)
+
+
+def _configure_file(tmp_path: Path, level: str = "debug") -> Path:
+    log_file = tmp_path / "jobs.log"
+    configure(dev=False, config={
+        "destination": "file", "file": str(log_file), "level": level, "format": "json",
+    })
+    return log_file
+
+
+def _json_lines(log_file: Path) -> list:
+    return [jsonlib.loads(line) for line in log_file.read_text().strip().splitlines()]
+
+
+# ---------------- run_with_lifecycle ----------------
+
+
+def test_success_logs_started_and_succeeded_with_duration(tmp_path: Path):
+    log_file = _configure_file(tmp_path)
+    result = run_with_lifecycle("send_email", lambda to: f"sent:{to}", args=("x@y.z",))
+    assert result == "sent:x@y.z"
+    lines = _json_lines(log_file)
+    assert {"job": "send_email", "status": "started"} in [
+        {k: v for k, v in l.items() if k in ("job", "status")} for l in lines
+    ]
+    done = [l for l in lines if l.get("status") == "succeeded"]
+    assert len(done) == 1
+    assert done[0]["job"] == "send_email"
+    assert isinstance(done[0]["duration_ms"], float)
+
+
+def test_failure_logs_failed_with_traceback_and_reraises(tmp_path: Path):
+    log_file = _configure_file(tmp_path)
+
+    def boom():
+        raise RuntimeError("kaput")
+
+    with pytest.raises(RuntimeError, match="kaput"):
+        run_with_lifecycle("boom_job", boom)
+    failed = [l for l in _json_lines(log_file) if l.get("status") == "failed"]
+    assert len(failed) == 1
+    assert "RuntimeError: kaput" in failed[0]["exc_info"]
+
+
+def test_failure_swallowed_when_reraise_false(tmp_path: Path):
+    log_file = _configure_file(tmp_path)
+
+    def boom():
+        raise RuntimeError("kaput")
+
+    run_with_lifecycle("boom_job", boom, reraise=False)  # must not raise
+    failed = [l for l in _json_lines(log_file) if l.get("status") == "failed"]
+    assert len(failed) == 1
+
+
+def test_job_arguments_never_logged(tmp_path: Path):
+    log_file = _configure_file(tmp_path)
+    secret = "hunter2-super-secret"
+    run_with_lifecycle("login_job", lambda password: None, kwargs={"password": secret})
+    assert secret not in log_file.read_text()
+
+
+def test_started_is_debug_level_hidden_at_info(tmp_path: Path):
+    log_file = _configure_file(tmp_path, level="info")
+    run_with_lifecycle("quiet_job", lambda: None)
+    statuses = [l["status"] for l in _json_lines(log_file)]
+    assert "started" not in statuses
+    assert "succeeded" in statuses
+
+
+# ---------------- ThreadedJobProvider integration ----------------
+
+
+def _wait_for(predicate, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_threaded_provider_logs_lifecycle(tmp_path: Path):
+    log_file = _configure_file(tmp_path)
+    provider = ThreadedJobProvider()
+    provider.register_tasks({"work": lambda: None})
+    provider.submit("work")
+    assert _wait_for(lambda: log_file.exists() and "succeeded" in log_file.read_text())
+
+
+def test_threaded_provider_failed_job_logs_once(tmp_path: Path):
+    """The lifecycle wrapper swallows (reraise=False) so JobRunner's own
+    _log_if_failed doesn't produce a SECOND error line for the same job."""
+    log_file = _configure_file(tmp_path)
+
+    def boom():
+        raise RuntimeError("kaput")
+
+    provider = ThreadedJobProvider()
+    provider.register_tasks({"boom": boom})
+    provider.submit("boom")
+    assert _wait_for(lambda: log_file.exists() and "failed" in log_file.read_text())
+    lines = _json_lines(log_file)
+    error_lines = [l for l in lines if l.get("status") == "failed" or l.get("level") == "ERROR"]
+    assert len(error_lines) == 1
