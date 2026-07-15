@@ -28,13 +28,12 @@ def new(name, template):
 @cli.command()
 @click.option('--host', '-h', default='127.0.0.1', help='Host to bind to')
 @click.option('--port', '-p', default=8000, type=int, help='Port to bind to')
-@click.option('--reload', '-r', is_flag=True, default=True, help='Enable auto-reload')
 @click.option('--prod', is_flag=True, default=False, help='Serve via gunicorn instead of the dev server')
 @click.option('--workers', '-w', default=4, type=int, help='Gunicorn worker processes (--prod only)')
-def serve(host, port, reload, prod, workers):
-    """Start the server (dev by default, or production via --prod)"""
+def serve(host, port, prod, workers):
+    """Alias for `fymo dev`, or production via --prod"""
     from fymo.cli.commands.serve import run_server
-    run_server(host, port, reload, prod=prod, workers=workers)
+    run_server(host, port, prod=prod, workers=workers)
 
 
 @cli.command()

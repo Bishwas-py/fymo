@@ -8,6 +8,14 @@ from fymo.build.dev_orchestrator import DevOrchestrator
 
 def run_dev(host: str = "127.0.0.1", port: int = 8000):
     project_root = Path.cwd()
+
+    # Set FYMO_DEV so anything downstream that reads it (subprocesses, the
+    # sidecar) sees dev mode too, and also pass dev=True explicitly below
+    # rather than relying on FymoApp's env-var fallback. Issue #26: this
+    # used to be silently skipped, so `fymo dev` without a separately
+    # exported FYMO_DEV=1 booted with production security defaults.
+    os.environ["FYMO_DEV"] = "1"
+
     Color.print_info("Starting dev server with watcher")
 
     orch = DevOrchestrator(project_root=project_root)
@@ -28,7 +36,7 @@ def run_dev(host: str = "127.0.0.1", port: int = 8000):
     os.environ["FYMO_NEW_PIPELINE"] = "1"
 
     from fymo import create_app
-    app = create_app(project_root)
+    app = create_app(project_root, dev=True)
     app.dev_orchestrator = orch
 
     # Respawn sidecar after every successful server-rebuild so Node's ESM
