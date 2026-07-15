@@ -1,4 +1,4 @@
-# Journal Entry 013: The Provider Nobody Could Reach
+# Journal Entry 014: The Provider Nobody Could Reach
 
 **Date**: July 15, 2026
 **Focus**: A runtime accessor for the configured StorageProvider
