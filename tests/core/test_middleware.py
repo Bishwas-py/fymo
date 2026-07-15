@@ -12,6 +12,7 @@ from fymo.core.middleware import (
     wrap_start_response,
     _TokenBucket,
 )
+from fymo.core.exceptions import ConfigurationError
 
 
 # ---------------- Token bucket ----------------
@@ -364,3 +365,37 @@ def test_settings_skips_malformed_extra_headers():
         security={"headers": {"extra": [["ok", "val"], "garbage", ["one-elem-only"]]}},
     )
     assert s.extra_security_headers == [("ok", "val")]
+
+
+# ---------------- Typed config values (issue #30) ----------------
+
+
+def test_rate_limit_enabled_string_false_from_interpolation_resolves_false():
+    """fymo.yml values that flowed through ${VAR} interpolation are always
+    strings (see fymo.core.config._yaml_quote) -- a bare bool("false")
+    would truthy-coerce this to True."""
+    s = MiddlewareSettings.from_yaml(
+        limits={"rate_limit": {"enabled": "false"}}, security={}, dev=False,
+    )
+    assert s.rate_limit_config.enabled is False
+
+
+def test_trust_proxy_string_false_from_interpolation_resolves_false():
+    s = MiddlewareSettings.from_yaml(
+        limits={"rate_limit": {"trust_proxy": "false"}}, security={},
+    )
+    assert s.rate_limit_config.trust_proxy is False
+
+
+def test_security_headers_enabled_string_false_from_interpolation_resolves_false():
+    s = MiddlewareSettings.from_yaml(
+        limits={}, security={"headers": {"enabled": "false"}},
+    )
+    assert s.security_headers_enabled is False
+
+
+def test_settings_raises_configuration_error_on_garbage_bool_string():
+    with pytest.raises(ConfigurationError, match="limits.rate_limit.enabled"):
+        MiddlewareSettings.from_yaml(
+            limits={"rate_limit": {"enabled": "enabeld"}}, security={},
+        )
