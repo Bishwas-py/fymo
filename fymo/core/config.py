@@ -21,12 +21,12 @@ def parse_bool(value: Any, *, field: str) -> bool:
 
     A value that flowed through ${VAR} interpolation is always a plain YAML
     string (see _yaml_quote below), so a bare bool(value) downstream would
-    truthy-coerce any non-empty string -- including the string "false" --
+    truthy-coerce any non-empty string, including the string "false",
     to True. A real bool passes through unchanged (a literal true/false
     YAML scalar untouched by interpolation, or a Python default like
     `not dev`). A string is accepted only as "true"/"false", case- and
     whitespace-insensitive. Anything else raises ConfigurationError naming
-    `field` and the value, instead of silently guessing -- deliberately
+    `field` and the value, instead of silently guessing. Deliberately
     narrower than env_truthy above, which is fine defaulting an optional
     dev flag to False on an unrecognized token but wrong here, where a
     typo (e.g. "enabeld") should raise, not silently resolve to False.

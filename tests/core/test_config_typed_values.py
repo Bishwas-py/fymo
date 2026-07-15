@@ -1,7 +1,7 @@
 """Tests for typed values flowing through fymo.yml.
 
 ${VAR} interpolation always produces a plain YAML string (see
-fymo.core.config._yaml_quote -- a deliberate anti-injection fix, not a
+fymo.core.config._yaml_quote, a deliberate anti-injection fix, not a
 typing decision), so a consumer that needs a real int/bool must cast
 explicitly instead of trusting the YAML type. See issue #30.
 """
