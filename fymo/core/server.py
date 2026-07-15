@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fymo.core.config import ConfigManager
+from fymo.core.config import ConfigManager, load_dotenv, parse_bool
 from fymo.core.assets import AssetManager
 from fymo.core.template_renderer import TemplateRenderer
 from fymo.core.router import Router
@@ -86,6 +86,13 @@ class FymoApp:
         self.project_root = Path(project_root) if project_root else Path.cwd()
         self.dev = dev if dev is not None else _env_truthy("FYMO_DEV")
 
+        # Local dev often needs values (API keys, DATABASE_URL, ...) that
+        # shouldn't be exported in every shell. Load them from .env before
+        # anything reads os.environ, so both this constructor and
+        # ConfigManager's ${VAR} interpolation of fymo.yml see them.
+        if self.dev:
+            load_dotenv(self.project_root)
+
         # Wire the dev flag into the remote router so its 500 path knows whether
         # to include traceback details.
         from fymo.remote import router as _remote_router
@@ -136,7 +143,9 @@ class FymoApp:
         # (fymo/build/pipeline.py) — otherwise a function could be listed in
         # the client manifest but 404 at dispatch, or vice versa.
         remote_cfg = self.config_manager.get_remote_config()
-        _remote_router._explicit_optin = bool(remote_cfg.get("explicit_optin", False))
+        _remote_router._explicit_optin = parse_bool(
+            remote_cfg.get("explicit_optin", False), field="remote.explicit_optin"
+        )
 
         self.asset_manager = AssetManager(self.project_root)
         # App-level raw HTTP routes (e.g. hand-written media streaming),
@@ -147,6 +156,20 @@ class FymoApp:
         # raw-WSGI routes with config-driven ones. See fymo/core/media.py.
         from fymo.core.http import discover_app_http_routes
         from fymo.core.media import build_media_routes
+
+        # Storage: built once, whenever storage: is configured, independent
+        # of whether media: is also configured. App code (a remote function,
+        # a job) reaches this same instance process-wide via
+        # fymo.storage.get_storage_provider() (issue #31); gating
+        # construction on media_config would leave that accessor unusable
+        # for an app that only writes files itself and never declares
+        # media: routes.
+        from fymo.storage import init_storage_provider
+        storage_config = self.config_manager.get_storage_config()
+        self.storage_provider = None
+        if storage_config is not None:
+            self.storage_provider = init_storage_provider(self.project_root, storage_config)
+
         media_config = self.config_manager.get_media_config()
         media_routes = []
         if media_config:
@@ -157,17 +180,15 @@ class FymoApp:
             # startup path shares. The message is phrased for a running app (fix
             # fymo.yml and restart) rather than build_storage_provider's own
             # build-context wording.
-            from fymo.storage.registry import StorageConfigError, build_storage_provider
-            storage_config = self.config_manager.get_storage_config()
-            if storage_config is None:
+            if self.storage_provider is None:
+                from fymo.storage.registry import StorageConfigError
                 raise StorageConfigError(
                     "media: is configured in fymo.yml but storage: is missing. "
                     "media: routes resolve files through the configured "
                     "StorageProvider and there is no default, add a storage: "
                     "section (e.g. `storage: {provider: local}`) to fymo.yml."
                 )
-            storage = build_storage_provider(storage_config, self.project_root)
-            media_routes = build_media_routes(self.project_root, media_config, storage)
+            media_routes = build_media_routes(self.project_root, media_config, self.storage_provider)
         self._app_routes = discover_app_http_routes(self.project_root) + media_routes
         self.router = self._initialize_router()
         self.template_renderer = TemplateRenderer(
@@ -203,7 +224,7 @@ class FymoApp:
         # appear in the manifest like any other remote function.
         self.auth_enabled = False
         auth_cfg = self.config_manager.get_auth_config()
-        if auth_cfg.get("enabled"):
+        if parse_bool(auth_cfg.get("enabled", False), field="auth.enabled"):
             self._init_auth(auth_cfg)
         # Mirror onto the renderer (constructed above, before auth_enabled was
         # known) so SSR only opens a request scope for apps that use auth --

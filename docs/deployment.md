@@ -205,9 +205,13 @@ force a custom Python class just to read `os.environ`:
 ```yaml
 auth:
   providers:
-    - class: fymo.auth.providers.clerk.ClerkProvider
-      issuer: ${CLERK_ISSUER}
-      jwks_url: ${CLERK_JWKS_URL:-https://example.clerk.accounts.dev/.well-known/jwks.json}
+    - type: oidc
+      id: auth0
+      authorize_endpoint: ${AUTH0_AUTHORIZE_ENDPOINT}
+      token_endpoint: ${AUTH0_TOKEN_ENDPOINT}
+      userinfo_endpoint: ${AUTH0_USERINFO_ENDPOINT}
+      client_id_env: AUTH0_CLIENT_ID
+      client_secret_env: AUTH0_CLIENT_SECRET
 ```
 
 - `${VAR}` resolves to the environment variable's value. If it's unset,
@@ -230,6 +234,31 @@ auth:
   validated (an unset required var there still raises), since the
   substitution pass has no notion of YAML comments.
 
+### `.env` for local development
+
+In dev mode (`dev=True` / `FYMO_DEV=1`), Fymo loads a `.env` file from the
+project root into the process environment before `fymo.yml` is parsed, so
+`${VAR}` placeholders and any code reading `os.environ` can see it:
+
+```
+CLERK_ISSUER=https://example.clerk.accounts.dev
+DATABASE_URL=postgres://localhost/myapp_dev
+```
+
+- One `KEY=value` per line. Blank lines and lines starting with `#` are
+  ignored. A value may be wrapped in matching single or double quotes,
+  which are stripped.
+- A real environment variable already set (exported in the shell, set by
+  the process manager, etc.) always wins — `.env` never overwrites it. Use
+  this to override a single value for a one-off run without editing the
+  file.
+- **Never read in production.** `.env` is only loaded when `dev=True`; a
+  production process (`dev=False`, the default when `FYMO_DEV` is unset)
+  never touches it, even if a `.env` file exists on disk (e.g. committed by
+  accident).
+- Add `.env` to `.gitignore` in your project — Fymo doesn't do this for
+  you, since project scaffolding and `.gitignore` are separate concerns.
+
 ### Conditional auth providers: `required: auto`
 
 A provider entry can carry `required: auto` to make its inclusion depend
@@ -240,7 +269,7 @@ half-broken provider:
 ```yaml
 auth:
   providers:
-    - class: app.lib.clerk_env.ClerkFromEnv
+    - type: clerk
       required: auto
 ```
 
@@ -254,6 +283,14 @@ Any value other than the literal string `"auto"` for `required` (a typo
 like `Auto`, or anything else) raises a `ProviderConfigError` naming the
 bad value, rather than being silently ignored or crashing the provider's
 constructor with an unrelated `TypeError`.
+
+`ClerkProvider` implements this fully out of the box: `is_configured()`
+checks for `CLERK_ISSUER`, falling back to decoding the Frontend API domain
+out of `PUBLIC_CLERK_PUBLISHABLE_KEY` (Clerk's own `pk_test_`/`pk_live_` key
+shape), and `from_config()` derives `jwks_url` as
+`{issuer}/.well-known/jwks.json` when it isn't given explicitly. Neither
+env var needs a custom wrapper class or an explicit `issuer:`/`jwks_url:`
+in `fymo.yml` -- the config block above is the entire setup.
 
 `is_configured()` defaults to `True` on `BaseProvider`, so every existing
 provider is unaffected: only an entry that both sets `required: auto` and

@@ -11,6 +11,8 @@ present, and tests inject a fake. Core stays dependency-free.
 """
 from __future__ import annotations
 
+import base64
+import os
 from typing import Callable, Optional
 
 from fymo.auth.context import get_user_store
@@ -20,6 +22,38 @@ from fymo.auth.store import User
 
 # verify(token) -> claims dict, or None if the token is invalid/expired.
 Verifier = Callable[[str], Optional[dict]]
+
+_ISSUER_ENV = "CLERK_ISSUER"
+_PUBLISHABLE_KEY_ENV = "PUBLIC_CLERK_PUBLISHABLE_KEY"
+
+
+def _issuer_from_publishable_key(key: str) -> Optional[str]:
+    """Clerk publishable keys (`pk_test_<b64>` / `pk_live_<b64>`) base64-encode
+    the Frontend API domain, terminated with a literal `$` -- Clerk's own
+    documented key shape, e.g. `pk_test_Y2xlcmsuZXhhbXBsZS5jb20k` decodes to
+    `clerk.example.com$`. Returns None on any key that doesn't match, rather
+    than raising, so callers (is_configured included) can treat it as "not
+    configured" instead of crashing on a typo'd key."""
+    parts = key.split("_", 2)
+    if len(parts) != 3 or parts[0] != "pk":
+        return None
+    encoded = parts[2]
+    padded = encoded + "=" * (-len(encoded) % 4)
+    try:
+        domain = base64.b64decode(padded).decode("ascii").rstrip("$")
+    except Exception:
+        return None
+    return f"https://{domain}" if domain else None
+
+
+def _issuer_from_env() -> Optional[str]:
+    """CLERK_ISSUER wins when set; otherwise derive it from the publishable
+    key, which every Clerk app already has lying around in its frontend env."""
+    issuer = os.environ.get(_ISSUER_ENV)
+    if issuer:
+        return issuer
+    key = os.environ.get(_PUBLISHABLE_KEY_ENV)
+    return _issuer_from_publishable_key(key) if key else None
 
 
 class ClerkProvider(BaseProvider):
@@ -42,12 +76,29 @@ class ClerkProvider(BaseProvider):
 
     @classmethod
     def from_config(cls, opts: dict) -> "ClerkProvider":
+        issuer = opts.get("issuer") or _issuer_from_env()
+        if not issuer:
+            raise RuntimeError(
+                f"ClerkProvider has no issuer: set {_ISSUER_ENV}, or "
+                f"{_PUBLISHABLE_KEY_ENV} (Clerk's pk_test_/pk_live_ key) so it "
+                "can be derived, or pass issuer= explicitly in fymo.yml"
+            )
         return cls(
-            issuer=opts["issuer"],
-            jwks_url=opts["jwks_url"],
+            issuer=issuer,
+            jwks_url=opts.get("jwks_url") or f"{issuer}/.well-known/jwks.json",
             audience=opts.get("audience"),
             cookie_name=opts.get("cookie_name", "__session"),
         )
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        """Only consulted when a fymo.yml entry opts in with `required: auto`
+        (see BaseProvider); reasons purely from the environment since the
+        registry calls this with no opts, so an explicit literal `issuer:` in
+        yml without either env var set won't count as configured here -- that
+        app doesn't need `required: auto` anyway, it already knows it's
+        configured."""
+        return _issuer_from_env() is not None
 
     def _token(self, event: dict) -> Optional[str]:
         cookie = event.get("cookies", {}).get(self.cookie_name)

@@ -179,6 +179,13 @@ def require_auth(fn: F) -> F:
         if current_user() is None:
             raise AuthRequired()
         return fn(*args, **kwargs)
+    # Marker attribute, same pattern as fymo.remote.decorators.remote's
+    # __fymo_remote__. Lets build-time checks (see fymo.build.hygiene's
+    # check_auth_enforcement_hygiene) find every @require_auth site without
+    # re-deriving the answer from runtime behavior. functools.wraps already
+    # copied fn.__dict__ onto wrapper, so this must be set after that call
+    # to survive regardless of decorator stacking order with @remote.
+    wrapper.__fymo_require_auth__ = True
     return wrapper  # type: ignore[return-value]
 
 
