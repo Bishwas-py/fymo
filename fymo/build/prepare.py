@@ -36,6 +36,7 @@ from fymo.build.hygiene import (
 from fymo.build.manifest import RemoteModuleAssets
 from fymo.remote.codegen import emit_module, emit_runtime
 from fymo.remote.discovery import discover_remote_modules
+from fymo.remote.mode import RemoteModeConfigError, uses_deprecated_remote_flags
 from fymo.utils.colors import Color
 
 
@@ -118,11 +119,23 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     # risk the two calls drifting if the file changes mid-build.
     remote_config = read_yaml_section(project_root, "remote")
 
+    # remote.explicit_optin / remote.allow_implicit still work for one
+    # deprecation cycle but are superseded by remote.mode; nudge toward the
+    # new key without failing the build over it.
+    if uses_deprecated_remote_flags(remote_config):
+        Color.print_warning(
+            "remote.explicit_optin and remote.allow_implicit are deprecated. "
+            "Use remote.mode: strict or remote.mode: implicit-legacy instead."
+        )
+
     # Also a pure-Python check (imports app/remote/*.py but does not touch
     # node/esbuild), so it runs alongside directory hygiene rather than
     # waiting on the node check below: a developer shipping an unguarded
     # endpoint should hear about it even on a machine without node installed.
-    remote_exposure_violations = check_remote_exposure_hygiene(project_root, remote_config)
+    try:
+        remote_exposure_violations = check_remote_exposure_hygiene(project_root, remote_config)
+    except RemoteModeConfigError as e:
+        raise BuildError(str(e))
     if remote_exposure_violations:
         raise BuildError(format_remote_exposure_error(remote_exposure_violations))
 

@@ -13,8 +13,6 @@ import sys
 from pathlib import Path
 from typing import List
 
-from fymo.core.config import parse_bool
-
 _FRONTEND_ONLY_DIRS = ("templates", "components")
 
 
@@ -111,22 +109,26 @@ def check_remote_exposure_hygiene(project_root: Path, remote_config: "dict | Non
     internal storage helper landed in app/remote/ with no auth guard and
     turned out to be reachable over the wire).
 
-    A no-op (returns []) when `remote.explicit_optin` is true, since in that
-    mode an unmarked function is already excluded from the manifest and
-    the router by `discovery.is_exposed_remote_fn`, so there's nothing
-    silently exposed to warn about. Also a no-op when `remote.allow_implicit`
-    is true, the documented-unsafe escape hatch for apps that aren't ready
-    to migrate yet.
+    A no-op (returns []) whenever `fymo.remote.mode.resolve_remote_mode`
+    resolves `hygiene_enforced=False` for the given config: that covers
+    `remote.mode: strict` (an unmarked function is already excluded from the
+    manifest and the router by `discovery.is_exposed_remote_fn`, so there's
+    nothing silently exposed to warn about), `remote.mode: implicit-legacy`,
+    and the deprecated `explicit_optin`/`allow_implicit` spellings of both.
+
+    Lets `RemoteModeConfigError` propagate uncaught (an invalid `mode:`
+    value, or `mode:` combined with a deprecated key) so the caller
+    (`fymo/build/prepare.py`) can surface it as a distinct `BuildError`
+    rather than folding it into "found unmarked functions".
 
     Imports every app/remote/*.py module to apply the exact same exposure
     rule discovery uses at codegen time (`is_exposed_remote_fn` with
     explicit_optin=False, i.e. "what would ship if opt-in were off"), so
     this can never drift from what the manifest/router actually expose.
     """
-    remote_config = remote_config or {}
-    if parse_bool(remote_config.get("explicit_optin", False), field="remote.explicit_optin"):
-        return []
-    if parse_bool(remote_config.get("allow_implicit", False), field="remote.allow_implicit"):
+    from fymo.remote.mode import resolve_remote_mode
+
+    if not resolve_remote_mode(remote_config).hygiene_enforced:
         return []
 
     remote_dir = project_root / "app" / "remote"
@@ -180,7 +182,7 @@ def format_remote_exposure_error(violations: List[str]) -> str:
         "when remote.explicit_optin is false. Add @remote (from fymo.remote) to each "
         "function above that's meant to be an endpoint, or rename it with a leading "
         "underscore to keep it a private helper. To silence this check without fixing "
-        "it (unsafe, temporary), set remote.allow_implicit: true in fymo.yml."
+        "it (unsafe, temporary), set remote.mode: implicit-legacy in fymo.yml."
     )
 
 
