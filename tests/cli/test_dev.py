@@ -8,7 +8,27 @@ full rate limiting.
 """
 import os
 
+import pytest
+
 import fymo.cli.commands.dev as dev_mod
+
+
+@pytest.fixture(autouse=True)
+def _restore_fymo_dev_env():
+    """run_dev() sets os.environ["FYMO_DEV"] directly (by design -- a real
+    `fymo dev` process wants that var visible to anything it spawns), not
+    through monkeypatch. monkeypatch.delenv on an already-absent key
+    registers no undo, so without this fixture that mutation survives past
+    the test and leaks FYMO_DEV=1 into every later test in the same pytest
+    process -- silently flipping unrelated dev=None call sites (rate
+    limiting, HSTS) into dev mode. Snapshot and restore regardless of what
+    the code under test does to the var."""
+    original = os.environ.get("FYMO_DEV")
+    yield
+    if original is None:
+        os.environ.pop("FYMO_DEV", None)
+    else:
+        os.environ["FYMO_DEV"] = original
 
 
 class _FakeOrchestrator:
