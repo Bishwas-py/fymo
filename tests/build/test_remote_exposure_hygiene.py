@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from fymo.core.exceptions import ConfigurationError
 from fymo.build.hygiene import check_remote_exposure_hygiene, format_remote_exposure_error
 
 
@@ -174,3 +175,43 @@ def test_format_remote_exposure_error_names_the_functions():
     assert "insert_version" in msg
     assert "app/remote/versions.py" in msg
     assert "allow_implicit" in msg
+
+
+def test_explicit_optin_string_false_from_interpolation_does_not_skip_the_check(tmp_path: Path):
+    """Regression for issue #30: a bare truthy check on an interpolated
+    remote.explicit_optin: ${VAR} would treat the resolved string "false"
+    as on and silently skip this check, the opposite of what was asked."""
+    project = _scaffold(tmp_path, {
+        "app/__init__.py": "",
+        "app/remote/__init__.py": "",
+        "app/remote/versions.py": MARKED_AND_UNMARKED,
+    })
+    sys.path.insert(0, str(project))
+    try:
+        violations = check_remote_exposure_hygiene(project, {"explicit_optin": "false"})
+    finally:
+        sys.path.remove(str(project))
+
+    assert len(violations) == 1
+    assert "insert_version" in violations[0]
+
+
+def test_allow_implicit_string_false_from_interpolation_does_not_skip_the_check(tmp_path: Path):
+    project = _scaffold(tmp_path, {
+        "app/__init__.py": "",
+        "app/remote/__init__.py": "",
+        "app/remote/versions.py": MARKED_AND_UNMARKED,
+    })
+    sys.path.insert(0, str(project))
+    try:
+        violations = check_remote_exposure_hygiene(project, {"allow_implicit": "false"})
+    finally:
+        sys.path.remove(str(project))
+
+    assert len(violations) == 1
+    assert "insert_version" in violations[0]
+
+
+def test_raises_configuration_error_on_garbage_explicit_optin(tmp_path: Path):
+    with pytest.raises(ConfigurationError, match="remote.explicit_optin"):
+        check_remote_exposure_hygiene(tmp_path, {"explicit_optin": "enabeld"})
