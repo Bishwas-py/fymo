@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import List
 
+from fymo.core.config import parse_bool
+
 _FRONTEND_ONLY_DIRS = ("templates", "components")
 
 
@@ -122,9 +124,9 @@ def check_remote_exposure_hygiene(project_root: Path, remote_config: "dict | Non
     this can never drift from what the manifest/router actually expose.
     """
     remote_config = remote_config or {}
-    if remote_config.get("explicit_optin", False):
+    if parse_bool(remote_config.get("explicit_optin", False), field="remote.explicit_optin"):
         return []
-    if remote_config.get("allow_implicit", False):
+    if parse_bool(remote_config.get("allow_implicit", False), field="remote.allow_implicit"):
         return []
 
     remote_dir = project_root / "app" / "remote"
