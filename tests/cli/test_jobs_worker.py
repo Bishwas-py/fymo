@@ -7,13 +7,16 @@ import pytest
 import fymo.core.logging as fymo_logging
 from fymo.cli.commands.jobs_worker import run_jobs_worker
 from fymo.jobs import reset_job_provider
+from fymo.storage import reset_storage_provider
 
 
 @pytest.fixture(autouse=True)
 def _reset():
     reset_job_provider()
+    reset_storage_provider()
     yield
     reset_job_provider()
+    reset_storage_provider()
 
 
 @pytest.fixture(autouse=True)
@@ -74,3 +77,32 @@ def test_jobs_worker_configures_logging_from_yml(tmp_path, monkeypatch):
         run_jobs_worker(tmp_path)
     assert fymo_logging._installed_handler is not None
     assert isinstance(fymo_logging._installed_handler, logging.FileHandler)
+
+
+def test_jobs_worker_initializes_storage_when_configured(tmp_path: Path):
+    """Issue #31: a job running in the worker process (a separate OS process
+    from the web process) needs fymo.storage.get_storage_provider() to work
+    too, the same way it already needs init_broadcasts() to make publish()
+    work here. The default threaded provider still exits with SystemExit(1)
+    (no separate worker loop), but storage must be wired up before that."""
+    (tmp_path / "fymo.yml").write_text("storage:\n  provider: local\n")
+
+    with pytest.raises(SystemExit):
+        run_jobs_worker(tmp_path)
+
+    from fymo.storage import get_storage_provider
+    from fymo.storage.providers.local import LocalStorageProvider
+
+    assert isinstance(get_storage_provider(), LocalStorageProvider)
+
+
+def test_jobs_worker_leaves_storage_uninitialized_when_not_configured(tmp_path: Path):
+    """No storage: section => no default provider (same guarantee as
+    FymoApp itself); get_storage_provider() must still raise."""
+    with pytest.raises(SystemExit):
+        run_jobs_worker(tmp_path)
+
+    from fymo.storage import get_storage_provider
+
+    with pytest.raises(RuntimeError, match="storage is not initialized"):
+        get_storage_provider()

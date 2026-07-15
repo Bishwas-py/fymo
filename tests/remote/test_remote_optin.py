@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from fymo.core.exceptions import ConfigurationError
 from fymo.remote import devalue
 from fymo.remote.decorators import remote as remote_decorator
 from fymo.remote.discovery import discover_remote_modules, file_hash
@@ -91,6 +92,42 @@ def test_discovery_exposes_all_functions_when_optin_disabled_default(tmp_path):
 
     assert "marked" in result["posts"]
     assert "unmarked" in result["posts"]
+
+
+def test_discovery_string_false_from_interpolation_does_not_gate_like_true(tmp_path):
+    """Regression for issue #30: remote.explicit_optin: ${VAR} interpolates
+    to the plain string "false" (fymo.core.config._yaml_quote always
+    produces a string). A bare bool("false") would truthy-coerce this to
+    True and start gating on @remote markers nobody asked for."""
+    project = _scaffold(tmp_path, {
+        "app/__init__.py": "",
+        "app/remote/__init__.py": "",
+        "app/remote/posts.py": MODULE_SOURCE,
+    })
+    sys.path.insert(0, str(project))
+    try:
+        result = discover_remote_modules(project, remote_config={"explicit_optin": "false"})
+    finally:
+        sys.path.remove(str(project))
+        _cleanup_app_modules()
+
+    assert "marked" in result["posts"]
+    assert "unmarked" in result["posts"]
+
+
+def test_discovery_raises_configuration_error_on_garbage_explicit_optin(tmp_path):
+    project = _scaffold(tmp_path, {
+        "app/__init__.py": "",
+        "app/remote/__init__.py": "",
+        "app/remote/posts.py": MODULE_SOURCE,
+    })
+    sys.path.insert(0, str(project))
+    try:
+        with pytest.raises(ConfigurationError, match="remote.explicit_optin"):
+            discover_remote_modules(project, remote_config={"explicit_optin": "enabeld"})
+    finally:
+        sys.path.remove(str(project))
+        _cleanup_app_modules()
 
 
 # --- Router (dispatch time) --------------------------------------------------

@@ -243,3 +243,80 @@ def test_fymo_app_raises_when_media_configured_without_storage(example_app: Path
                 {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
             ],
         })
+
+
+@pytest.mark.usefixtures("node_available")
+def test_fymo_app_registers_storage_provider_without_media_configured(example_app: Path, monkeypatch):
+    """Issue #31: app code (a job) needs the configured StorageProvider even
+    when the app never declares `media:` routes. storage: alone must be
+    enough to make fymo.storage.get_storage_provider() usable."""
+    monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=example_app).build(dev=False)
+
+    from fymo import create_app
+    from fymo.storage import get_storage_provider, reset_storage_provider
+    from fymo.storage.providers.local import LocalStorageProvider
+
+    reset_storage_provider()
+    app = create_app(example_app, config={"storage": {"provider": "local"}})
+    try:
+        assert isinstance(app.storage_provider, LocalStorageProvider)
+        assert get_storage_provider() is app.storage_provider
+    finally:
+        app.shutdown()
+        reset_storage_provider()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_fymo_app_media_routes_reuse_the_process_wide_storage_provider(example_app: Path, monkeypatch):
+    """The instance FymoApp hands to build_media_routes must be the exact
+    same object fymo.storage.get_storage_provider() returns elsewhere in the
+    process, not a second provider built separately, since a real provider
+    (an S3 client, once #17 lands) shouldn't be constructed twice per app."""
+    monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=example_app).build(dev=False)
+
+    video_dir = example_app / "data" / "videos"
+    video_dir.mkdir(parents=True)
+    (video_dir / "clip.webm").write_bytes(b"video-bytes")
+
+    from fymo import create_app
+    from fymo.storage import get_storage_provider, reset_storage_provider
+
+    reset_storage_provider()
+    app = create_app(example_app, config={
+        "media": [
+            {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+        ],
+        "storage": {"provider": "local"},
+    })
+    try:
+        assert get_storage_provider() is app.storage_provider
+    finally:
+        app.shutdown()
+        reset_storage_provider()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_fymo_app_leaves_storage_uninitialized_when_not_configured(example_app: Path, monkeypatch):
+    """No storage: section at all (and no media: to require one) must not
+    silently register a default provider — get_storage_provider() should
+    still raise, matching build_storage_provider's no-default guarantee."""
+    monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=example_app).build(dev=False)
+
+    from fymo import create_app
+    from fymo.storage import get_storage_provider, reset_storage_provider
+
+    reset_storage_provider()
+    app = create_app(example_app)
+    try:
+        assert app.storage_provider is None
+        with pytest.raises(RuntimeError, match="storage is not initialized"):
+            get_storage_provider()
+    finally:
+        app.shutdown()
+        reset_storage_provider()
