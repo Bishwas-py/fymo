@@ -205,7 +205,7 @@ class FymoApp:
         # appear in the manifest like any other remote function.
         self.auth_enabled = False
         auth_cfg = self.config_manager.get_auth_config()
-        if auth_cfg.get("enabled"):
+        if parse_bool(auth_cfg.get("enabled", False), field="auth.enabled"):
             self._init_auth(auth_cfg)
         # Mirror onto the renderer (constructed above, before auth_enabled was
         # known) so SSR only opens a request scope for apps that use auth --
