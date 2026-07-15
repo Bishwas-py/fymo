@@ -372,7 +372,7 @@ def test_settings_skips_malformed_extra_headers():
 
 def test_rate_limit_enabled_string_false_from_interpolation_resolves_false():
     """fymo.yml values that flowed through ${VAR} interpolation are always
-    strings (see fymo.core.config._yaml_quote) -- a bare bool("false")
+    strings (see fymo.core.config._yaml_quote). A bare bool("false")
     would truthy-coerce this to True."""
     s = MiddlewareSettings.from_yaml(
         limits={"rate_limit": {"enabled": "false"}}, security={}, dev=False,
