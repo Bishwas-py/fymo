@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fymo.core.config import ConfigManager
+from fymo.core.config import ConfigManager, parse_bool
 from fymo.core.assets import AssetManager
 from fymo.core.template_renderer import TemplateRenderer
 from fymo.core.router import Router
@@ -136,7 +136,9 @@ class FymoApp:
         # (fymo/build/pipeline.py) — otherwise a function could be listed in
         # the client manifest but 404 at dispatch, or vice versa.
         remote_cfg = self.config_manager.get_remote_config()
-        _remote_router._explicit_optin = bool(remote_cfg.get("explicit_optin", False))
+        _remote_router._explicit_optin = parse_bool(
+            remote_cfg.get("explicit_optin", False), field="remote.explicit_optin"
+        )
 
         self.asset_manager = AssetManager(self.project_root)
         # App-level raw HTTP routes (e.g. hand-written media streaming),

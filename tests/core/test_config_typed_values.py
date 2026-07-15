@@ -58,3 +58,35 @@ def test_parse_bool_rejects_empty_string():
 def test_parse_bool_rejects_non_string_non_bool():
     with pytest.raises(ConfigurationError, match="rate_limit.enabled"):
         parse_bool(1, field="rate_limit.enabled")
+
+
+# ---------------- server.py explicit_optin wiring ----------------
+
+
+def test_fymo_app_explicit_optin_string_false_from_interpolation_resolves_false(
+    tmp_path: Path, monkeypatch,
+):
+    """Regression for issue #30: remote.explicit_optin: ${VAR} interpolates
+    to the plain string "false" (see fymo.core.config._yaml_quote); a bare
+    bool("false") would truthy-coerce this to True and silently enable the
+    dispatch gate the config asked to leave off.
+
+    FymoApp construction reaches _explicit_optin resolution well before it
+    needs dist/ (that check is the last thing __init__ does), so a bare
+    fymo.yml with an empty routes: section is enough to exercise this
+    without a real build. routes: {} avoids the router trying to treat the
+    whole fymo.yml as a routes mapping and choking on top-level scalar
+    keys, unrelated to this bug, just the minimal scaffolding FymoApp's
+    constructor needs to get as far as raising on the missing dist/.
+    """
+    monkeypatch.setenv("FYMO_TEST_EXPLICIT_OPTIN", "false")
+    _write_yml(
+        tmp_path,
+        "name: OptinTest\nroutes: {}\nremote:\n  explicit_optin: ${FYMO_TEST_EXPLICIT_OPTIN}\n",
+    )
+    from fymo.core.server import FymoApp
+    from fymo.remote import router as remote_router
+
+    with pytest.raises(RuntimeError, match="dist/ not found"):
+        FymoApp(tmp_path, dev=True)
+    assert remote_router._explicit_optin is False
