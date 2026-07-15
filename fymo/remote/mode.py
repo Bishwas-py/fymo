@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from fymo.core.config import parse_bool
+
 
 class RemoteModeConfigError(Exception):
     """Raised when a remote.mode value is invalid or conflicts with deprecated keys."""
@@ -90,8 +92,12 @@ def resolve_remote_mode(remote_config: Optional[Dict[str, Any]]) -> RemoteMode:
             )
 
     # Fall back to deprecated keys. Both flags default to False if absent.
-    explicit_optin = config.get("explicit_optin", False)
-    allow_implicit = config.get("allow_implicit", False)
+    # parse_bool rather than a bare truthy check: a value that flowed through
+    # ${VAR} interpolation is always a plain YAML string (see fymo.core.config's
+    # _yaml_quote), so explicit_optin: "false" would otherwise evaluate truthy
+    # and silently invert what the user asked for (issue #30).
+    explicit_optin = parse_bool(config.get("explicit_optin", False), field="remote.explicit_optin")
+    allow_implicit = parse_bool(config.get("allow_implicit", False), field="remote.allow_implicit")
 
     # If either flag is true, apply its meaning. The discovery gate uses
     # explicit_optin; the hygiene check returns [] if EITHER is true (checks
