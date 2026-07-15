@@ -1,8 +1,8 @@
 """Remote mode resolution: collapse explicit_optin + allow_implicit into a tristate.
 
 The remote: section of fymo.yml originally used two independent booleans:
-- explicit_optin: true/false — gates whether only @remote-decorated functions dispatch
-- allow_implicit: true/false — silences the build-time hygiene check (only read when
+- explicit_optin: true/false, gates whether only @remote-decorated functions dispatch
+- allow_implicit: true/false, silences the build-time hygiene check (only read when
   explicit_optin is false)
 
 These are not independent: they're one three-state decision wearing two boolean flags.

@@ -185,8 +185,11 @@ class ConfigManager:
         return self.get('broadcasts', {}) or {}
 
     def get_remote_config(self) -> Dict[str, Any]:
-        """`remote:` section. Holds explicit_optin (require @remote to expose
-        an app/remote/*.py function; default False for back-compat)."""
+        """`remote:` section. Holds remote.mode (strict or implicit-legacy),
+        controlling whether an app/remote/*.py function needs @remote to be
+        browser-callable; default is implicit for back-compat. The deprecated
+        explicit_optin/allow_implicit booleans still resolve through
+        fymo.remote.mode.resolve_remote_mode."""
         return self.get('remote', {}) or {}
 
     def get_logging_config(self) -> Dict[str, Any]:

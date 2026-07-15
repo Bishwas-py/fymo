@@ -12,7 +12,7 @@ tribal knowledge.
 | `app/controllers` | Python | Page controllers, one module per route, exposing `getContext()`/`getDoc()` to the matching template. |
 | `app/templates` | Svelte / TS | The page components the router renders, one file per route (plus `_layout.svelte` files and `_global.css`). |
 | `app/components` | Svelte / TS | Reusable UI components shared across templates. |
-| `app/remote` | Python | Functions callable from the browser via the generated `$remote` client. Public, type-annotated top-level functions are exposed by default; mark with `@remote` (`fymo.remote.remote`) to opt into `remote.explicit_optin` mode. |
+| `app/remote` | Python | Functions callable from the browser via the generated `$remote` client. Public, type-annotated top-level functions are exposed by default; mark with `@remote` (`fymo.remote.remote`) to opt into `remote.mode: strict`. |
 | `app/jobs` | Python | Background task registry, submitted through a `JobProvider`. Every non-underscore top-level function becomes a submittable task; mark task entry points with `@task` (`fymo.jobs.task`) to say so explicitly (see below). |
 | `app/broadcasts` | Python | SSE channel definitions, discovered the same way as `app/jobs`. |
 | `app/lib` | TypeScript / Svelte | The `$lib/*` alias target (see `tsconfig.json`). TypeScript-only, there is no Python here, because nothing under `app/lib` ever runs server-side. |

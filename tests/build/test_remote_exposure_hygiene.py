@@ -217,4 +217,4 @@ def test_format_remote_exposure_error_names_the_functions():
     ])
     assert "insert_version" in msg
     assert "app/remote/versions.py" in msg
-    assert "allow_implicit" in msg
+    assert "implicit-legacy" in msg

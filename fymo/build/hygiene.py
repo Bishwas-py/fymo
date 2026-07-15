@@ -182,5 +182,5 @@ def format_remote_exposure_error(violations: List[str]) -> str:
         "when remote.explicit_optin is false. Add @remote (from fymo.remote) to each "
         "function above that's meant to be an endpoint, or rename it with a leading "
         "underscore to keep it a private helper. To silence this check without fixing "
-        "it (unsafe, temporary), set remote.allow_implicit: true in fymo.yml."
+        "it (unsafe, temporary), set remote.mode: implicit-legacy in fymo.yml."
     )
