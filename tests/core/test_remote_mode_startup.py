@@ -1,7 +1,7 @@
 """FymoApp.__init__ wires remote.mode into the router's dispatch gate
 (fymo/core/server.py). An invalid remote: config must fail startup loudly,
 the same posture as the existing StorageConfigError check a few lines below
-it in the same function -- see test_fymo_app_invalid_logging_config_fails_at_startup
+it in the same function, see test_fymo_app_invalid_logging_config_fails_at_startup
 in tests/core/test_logging.py for the sibling pattern this mirrors."""
 from pathlib import Path
 
