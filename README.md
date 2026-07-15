@@ -39,11 +39,11 @@ npm install
 ### Build and Serve
 
 ```bash
-fymo build      # produces dist/ with hashed JS/CSS bundles
-fymo serve      # production-style WSGI server
+fymo dev             # incremental rebuild + browser auto-reload (development)
 
-# or, for development:
-fymo dev        # incremental rebuild + browser auto-reload
+# or, for production:
+fymo build           # produces dist/ with hashed JS/CSS bundles
+fymo serve --prod    # gunicorn
 ```
 
 Visit `http://127.0.0.1:8000`.
@@ -98,9 +98,9 @@ def getContext():
 ## CLI Commands
 
 - `fymo new <project>` — Create a new project
-- `fymo build` — Build for production (produces `dist/`)
-- `fymo serve` — Serve a built project
 - `fymo dev` — Dev server with file watcher and live reload
+- `fymo serve` — Alias for `fymo dev`; `fymo serve --prod` serves a built project via gunicorn
+- `fymo build` — Build for production (produces `dist/`)
 - `fymo generate <type> <name>` — Generate components/controllers
 
 ## Configuration

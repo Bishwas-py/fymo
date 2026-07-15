@@ -352,7 +352,10 @@ job arguments.)
 fymo owns a single handler on Python's root logger, so your app's own
 `logging.getLogger(...)` output and library logs share the destination
 and format. Attach additional handlers in `server.py` if you need a
-second sink (e.g. Sentry).
+second sink (e.g. Sentry) — this only takes effect under `fymo serve
+--prod`, which imports `server.py`. `fymo dev` and bare `fymo serve`
+build the app directly and never import it, so module-level code in
+`server.py` doesn't run locally.
 
 File output is append-only with no built-in rotation — use logrotate or
 your container platform's log driver.

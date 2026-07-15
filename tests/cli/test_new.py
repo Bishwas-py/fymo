@@ -73,3 +73,35 @@ def test_new_does_not_scaffold_dead_config_routes(tmp_path, monkeypatch):
     project = tmp_path / "deadfile_check"
     assert (project / "fymo.yml").is_file()
     assert not (project / "config" / "routes.py").exists()
+
+
+def test_new_scaffolds_server_py_as_plain_wsgi_entrypoint(tmp_path, monkeypatch):
+    """Issue #26: server.py's `if __name__ == "__main__":` block called
+    run_dev_server(app) directly, a path that never set dev=True or
+    FYMO_DEV and bypassed fymo dev's watcher/esbuild/sidecar pipeline
+    entirely. Generated server.py is now just the WSGI entrypoint, for
+    handing to gunicorn/uwsgi or `fymo serve --prod`; `fymo dev` (or its
+    `fymo serve` alias) is the one true way to run it locally."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    content = (tmp_path / "myapp" / "server.py").read_text()
+    assert "create_app" in content
+    assert "__main__" not in content
+    assert "run_dev_server" not in content
+
+
+def test_new_prints_fymo_dev_as_next_step(tmp_path, monkeypatch, capsys):
+    """Next-steps output should point at the command that's actually named
+    for what it does, not the alias."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    out = capsys.readouterr().out
+    assert "fymo dev" in out
+
+
+def test_new_scaffolds_package_json_dev_script_using_fymo_dev(tmp_path, monkeypatch):
+    import json
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    package_json = json.loads((tmp_path / "myapp" / "package.json").read_text())
+    assert package_json["scripts"]["dev"] == "fymo dev"
