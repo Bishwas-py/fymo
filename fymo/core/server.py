@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fymo.core.config import ConfigManager
+from fymo.core.config import ConfigManager, load_dotenv
 from fymo.core.assets import AssetManager
 from fymo.core.template_renderer import TemplateRenderer
 from fymo.core.router import Router
@@ -85,6 +85,13 @@ class FymoApp:
         """
         self.project_root = Path(project_root) if project_root else Path.cwd()
         self.dev = dev if dev is not None else _env_truthy("FYMO_DEV")
+
+        # Local dev often needs values (API keys, DATABASE_URL, ...) that
+        # shouldn't be exported in every shell. Load them from .env before
+        # anything reads os.environ, so both this constructor and
+        # ConfigManager's ${VAR} interpolation of fymo.yml see them.
+        if self.dev:
+            load_dotenv(self.project_root)
 
         # Wire the dev flag into the remote router so its 500 path knows whether
         # to include traceback details.
