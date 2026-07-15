@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from fymo.remote.mode import resolve_remote_mode
+
 
 def file_hash(path: Path) -> str:
     """Return a 12-char lowercase hex SHA-256 prefix of the file's contents."""
@@ -69,17 +71,18 @@ def discover_remote_modules(
     remote functions are added too (e.g. password's under `auth`), discovered
     from the providers rather than any hardcoded module.
 
-    `remote_config` holds the `remote:` section of fymo.yml. When its
-    `explicit_optin` flag is true, only app-module functions decorated with
-    `@remote` (fymo.remote.decorators.remote, which stamps
+    `remote_config` holds the `remote:` section of fymo.yml, resolved through
+    `fymo.remote.mode.resolve_remote_mode`. Under `remote.mode: strict` (or
+    the deprecated `explicit_optin: true`), only app-module functions
+    decorated with `@remote` (fymo.remote.decorators.remote, which stamps
     `__fymo_remote__ = True`) are discovered — everything else in
-    app/remote/*.py is treated as a private helper. Default is false (every
-    public typed function is discovered, today's back-compat behavior). This
-    only applies to app modules; provider/system remote functions (below)
-    always ship regardless of the flag.
+    app/remote/*.py is treated as a private helper. Default is implicit
+    (every public typed function is discovered, today's back-compat
+    behavior). This only applies to app modules; provider/system remote
+    functions (below) always ship regardless of the mode.
     """
     out: dict[str, dict[str, RemoteFunction]] = {}
-    explicit_optin = bool((remote_config or {}).get("explicit_optin", False))
+    explicit_optin = resolve_remote_mode(remote_config).strict
 
     remote_dir = project_root / "app" / "remote"
     if remote_dir.is_dir():

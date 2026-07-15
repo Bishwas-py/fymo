@@ -159,6 +159,86 @@ def test_explicit_optin_true_lets_unmarked_function_build_with_no_warning(exampl
     assert "versions" not in config.remote_assets
 
 
+def test_mode_strict_lets_unmarked_function_build_with_no_warning(example_app: Path, monkeypatch, capsys):
+    """remote.mode: strict must enforce identically to explicit_optin: true:
+    build succeeds, the unmarked function stays a private helper, and no
+    deprecation warning is printed for the new spelling."""
+    (example_app / "app" / "remote").mkdir(parents=True, exist_ok=True)
+    (example_app / "app" / "remote" / "__init__.py").write_text("")
+    (example_app / "app" / "remote" / "versions.py").write_text(
+        "def insert_version(x: str) -> str: return x\n"
+    )
+    (example_app / "fymo.yml").write_text(
+        (example_app / "fymo.yml").read_text() + "\nremote:\n  mode: strict\n"
+    )
+    monkeypatch.setattr("fymo.build.prepare.shutil.which", lambda cmd: "/usr/bin/node")
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+    config = prepare_build_config(example_app, dist_dir, cache_dir, dev=True)
+    assert isinstance(config, BuildConfig)
+    assert "versions" not in config.remote_assets
+    out = capsys.readouterr().out
+    assert "deprecat" not in out.lower()
+
+
+def test_mode_implicit_legacy_lets_unmarked_function_build(example_app: Path, monkeypatch):
+    """remote.mode: implicit-legacy must silence the hygiene check identically
+    to allow_implicit: true today."""
+    (example_app / "app" / "remote").mkdir(parents=True, exist_ok=True)
+    (example_app / "app" / "remote" / "__init__.py").write_text("")
+    (example_app / "app" / "remote" / "versions.py").write_text(
+        "def insert_version(x: str) -> str: return x\n"
+    )
+    (example_app / "fymo.yml").write_text(
+        (example_app / "fymo.yml").read_text() + "\nremote:\n  mode: implicit-legacy\n"
+    )
+    monkeypatch.setattr("fymo.build.prepare.shutil.which", lambda cmd: "/usr/bin/node")
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+    config = prepare_build_config(example_app, dist_dir, cache_dir, dev=True)
+    assert isinstance(config, BuildConfig)
+
+
+def test_invalid_remote_mode_raises_build_error(example_app: Path):
+    """remote.mode: <bogus value> must surface as a BuildError naming the bad
+    value, not a raw RemoteModeConfigError escaping to the CLI."""
+    (example_app / "fymo.yml").write_text(
+        (example_app / "fymo.yml").read_text() + "\nremote:\n  mode: bogus\n"
+    )
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+    with pytest.raises(BuildError, match="bogus"):
+        prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
+
+
+def test_deprecated_explicit_optin_prints_deprecation_warning(example_app: Path, monkeypatch, capsys):
+    """remote.explicit_optin (deprecated spelling) must trigger a non-fatal
+    build-time warning pointing at remote.mode."""
+    (example_app / "fymo.yml").write_text(
+        (example_app / "fymo.yml").read_text() + "\nremote:\n  explicit_optin: true\n"
+    )
+    monkeypatch.setattr("fymo.build.prepare.shutil.which", lambda cmd: "/usr/bin/node")
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+    prepare_build_config(example_app, dist_dir, cache_dir, dev=True)
+    out = capsys.readouterr().out
+    assert "explicit_optin" in out
+    assert "remote.mode" in out
+
+
+def test_mode_strict_prints_no_deprecation_warning(example_app: Path, monkeypatch, capsys):
+    (example_app / "fymo.yml").write_text(
+        (example_app / "fymo.yml").read_text() + "\nremote:\n  mode: strict\n"
+    )
+    monkeypatch.setattr("fymo.build.prepare.shutil.which", lambda cmd: "/usr/bin/node")
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+    prepare_build_config(example_app, dist_dir, cache_dir, dev=True)
+    out = capsys.readouterr().out
+    assert "explicit_optin" not in out
+    assert "remote.mode" not in out
+
+
 @pytest.mark.usefixtures("node_available")
 def test_prepare_build_config_reflects_blog_app_facts(blog_app: Path):
     """blog_app has index/, posts/ (with a resource _layout.svelte and

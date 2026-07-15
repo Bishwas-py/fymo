@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from fymo.build.hygiene import check_remote_exposure_hygiene, format_remote_exposure_error
+from fymo.remote.mode import RemoteModeConfigError
 
 
 def _scaffold(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -128,6 +129,49 @@ def test_explicit_optin_true_skips_the_check_entirely(tmp_path: Path):
         sys.path.remove(str(project))
 
     assert violations == []
+
+
+def test_mode_strict_skips_the_check_entirely(tmp_path: Path):
+    """remote.mode: strict must resolve to the same hygiene_enforced=False as
+    explicit_optin: true: dispatch is already gated, so there's nothing
+    silently exposed to warn about."""
+    project = _scaffold(tmp_path, {
+        "app/__init__.py": "",
+        "app/remote/__init__.py": "",
+        "app/remote/versions.py": MARKED_AND_UNMARKED,
+    })
+    sys.path.insert(0, str(project))
+    try:
+        violations = check_remote_exposure_hygiene(project, {"mode": "strict"})
+    finally:
+        sys.path.remove(str(project))
+
+    assert violations == []
+
+
+def test_mode_implicit_legacy_skips_the_check_entirely(tmp_path: Path):
+    """remote.mode: implicit-legacy is the new spelling of allow_implicit:
+    true, the acknowledged-unsafe escape hatch."""
+    project = _scaffold(tmp_path, {
+        "app/__init__.py": "",
+        "app/remote/__init__.py": "",
+        "app/remote/versions.py": MARKED_AND_UNMARKED,
+    })
+    sys.path.insert(0, str(project))
+    try:
+        violations = check_remote_exposure_hygiene(project, {"mode": "implicit-legacy"})
+    finally:
+        sys.path.remove(str(project))
+
+    assert violations == []
+
+
+def test_invalid_mode_raises_remote_mode_config_error(tmp_path: Path):
+    """An unresolvable remote.mode must surface as RemoteModeConfigError, not
+    a silent [] or a hygiene violation list. Wrapping into a BuildError is
+    the caller's job (fymo/build/prepare.py), not this function's."""
+    with pytest.raises(RemoteModeConfigError, match="bogus"):
+        check_remote_exposure_hygiene(tmp_path, {"mode": "bogus"})
 
 
 def test_multiple_unmarked_functions_across_modules_all_reported(tmp_path: Path):

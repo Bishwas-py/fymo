@@ -52,15 +52,19 @@ def test_new_and_init_scaffold_identical_fymo_yml(tmp_path):
     assert "sample_app" in content
 
 
-def test_new_scaffold_defaults_to_explicit_remote_optin(tmp_path):
+def test_new_scaffold_defaults_to_remote_mode_strict(tmp_path):
     """Issue #8: fresh projects should require @remote to expose a function,
     not fall back to implicit file-placement exposure. Existing projects are
-    unaffected: this only changes what NEW projects generate."""
+    unaffected: this only changes what NEW projects generate.
+
+    Issue #25: new projects must be scaffolded on the current remote.mode
+    spelling, not the deprecated explicit_optin boolean."""
     from fymo.cli.commands._scaffold import render_fymo_yml
     import yaml
     content = render_fymo_yml("sample_app")
     data = yaml.safe_load(content)
-    assert data["remote"]["explicit_optin"] is True
+    assert data["remote"]["mode"] == "strict"
+    assert "explicit_optin" not in data["remote"]
 
 
 def test_new_does_not_scaffold_dead_config_routes(tmp_path, monkeypatch):

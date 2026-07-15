@@ -134,9 +134,18 @@ class FymoApp:
         # Wire the remote `@remote` opt-in flag into the router, mirroring
         # _dev_mode above. Must agree with what discovery used at build time
         # (fymo/build/pipeline.py) — otherwise a function could be listed in
-        # the client manifest but 404 at dispatch, or vice versa.
+        # the client manifest but 404 at dispatch, or vice versa. Resolved
+        # through the same fymo.remote.mode.resolve_remote_mode as discovery
+        # and the build-time hygiene check so all three call sites can never
+        # drift on the truth table. An invalid remote: config (bad mode:
+        # value, or mode: combined with a deprecated key) raises
+        # RemoteModeConfigError here and is left to propagate, same posture
+        # as the StorageConfigError raised below for a bad media:/storage:
+        # combination: loud startup failure beats a server silently running
+        # with an ambiguous dispatch gate.
+        from fymo.remote.mode import resolve_remote_mode
         remote_cfg = self.config_manager.get_remote_config()
-        _remote_router._explicit_optin = bool(remote_cfg.get("explicit_optin", False))
+        _remote_router._explicit_optin = resolve_remote_mode(remote_cfg).strict
 
         self.asset_manager = AssetManager(self.project_root)
         # App-level raw HTTP routes (e.g. hand-written media streaming),
