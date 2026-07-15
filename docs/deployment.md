@@ -230,6 +230,31 @@ auth:
   validated (an unset required var there still raises), since the
   substitution pass has no notion of YAML comments.
 
+### `.env` for local development
+
+In dev mode (`dev=True` / `FYMO_DEV=1`), Fymo loads a `.env` file from the
+project root into the process environment before `fymo.yml` is parsed, so
+`${VAR}` placeholders and any code reading `os.environ` can see it:
+
+```
+CLERK_ISSUER=https://example.clerk.accounts.dev
+DATABASE_URL=postgres://localhost/myapp_dev
+```
+
+- One `KEY=value` per line. Blank lines and lines starting with `#` are
+  ignored. A value may be wrapped in matching single or double quotes,
+  which are stripped.
+- A real environment variable already set (exported in the shell, set by
+  the process manager, etc.) always wins — `.env` never overwrites it. Use
+  this to override a single value for a one-off run without editing the
+  file.
+- **Never read in production.** `.env` is only loaded when `dev=True`; a
+  production process (`dev=False`, the default when `FYMO_DEV` is unset)
+  never touches it, even if a `.env` file exists on disk (e.g. committed by
+  accident).
+- Add `.env` to `.gitignore` in your project — Fymo doesn't do this for
+  you, since project scaffolding and `.gitignore` are separate concerns.
+
 ### Conditional auth providers: `required: auto`
 
 A provider entry can carry `required: auto` to make its inclusion depend
