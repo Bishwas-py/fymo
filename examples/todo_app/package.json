@@ -4,7 +4,7 @@
   "type": "module",
   "description": "A Fymo project",
   "scripts": {
-    "dev": "fymo serve",
+    "dev": "fymo dev",
     "build": "fymo build"
   },
   "dependencies": {

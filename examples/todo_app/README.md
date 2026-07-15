@@ -35,13 +35,8 @@ fymo build
 ### 3. Serve
 
 ```bash
-fymo serve     # production-like, port 8000
-```
-
-Or, for development with auto-rebuild and browser reload:
-
-```bash
-fymo dev
+fymo dev              # development, with auto-rebuild and browser reload
+fymo serve --prod     # production, via gunicorn
 ```
 
 Visit `http://127.0.0.1:8000` to see the app.

@@ -16,6 +16,64 @@ def env_truthy(name: str) -> bool:
     return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
 
 
+def load_dotenv(project_root: Path) -> None:
+    """Load KEY=value pairs from a .env file at the project root into
+    os.environ, without overwriting a variable that's already set there.
+
+    Callers gate this on dev mode and call it before constructing a
+    ConfigManager, so ${VAR} interpolation in fymo.yml can see .env values
+    alongside real env vars, while a real env var set outside .env always
+    wins (so a one-off override doesn't require editing the file) and
+    production never reads .env at all, even if one exists on disk.
+
+    Hand-rolled rather than a python-dotenv dependency: the subset of the
+    format actually needed (KEY=value, # comments, blank lines, optional
+    matching quotes) is small and stable, matching the lazy-optional-dep
+    philosophy already used for pyjwt in auth/providers/clerk.py rather
+    than adding a hard dependency for a few lines of parsing.
+    """
+    dotenv_path = project_root / ".env"
+    if not dotenv_path.is_file():
+        return
+    for raw_line in dotenv_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def parse_bool(value: Any, *, field: str) -> bool:
+    """Strictly coerce a fymo.yml config value to bool.
+
+    A value that flowed through ${VAR} interpolation is always a plain YAML
+    string (see _yaml_quote below), so a bare bool(value) downstream would
+    truthy-coerce any non-empty string, including the string "false",
+    to True. A real bool passes through unchanged (a literal true/false
+    YAML scalar untouched by interpolation, or a Python default like
+    `not dev`). A string is accepted only as "true"/"false", case- and
+    whitespace-insensitive. Anything else raises ConfigurationError naming
+    `field` and the value, instead of silently guessing. Deliberately
+    narrower than env_truthy above, which is fine defaulting an optional
+    dev flag to False on an unrecognized token but wrong here, where a
+    typo (e.g. "enabeld") should raise, not silently resolve to False.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    raise ConfigurationError(f"{field} must be true or false, got {value!r}")
+
+
 # ${VAR} (required) or ${VAR:-default} (falls back when unset). Resolved on
 # the raw YAML text before yaml.safe_load parses it: the simplest correct
 # approach, and it applies uniformly to the whole file (any section, any

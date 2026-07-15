@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from fymo.core.config import parse_bool
 from fymo.remote.mode import resolve_remote_mode
 
 
@@ -103,7 +104,7 @@ def discover_remote_modules(
                 explicit_optin=explicit_optin,
             )
 
-    if auth_config and auth_config.get("enabled"):
+    if auth_config and parse_bool(auth_config.get("enabled", False), field="auth.enabled"):
         from fymo.auth.providers.registry import build_providers, system_remote_modules
         providers = build_providers(auth_config.get("providers"))
         for module_name, fns in system_remote_modules(providers).items():

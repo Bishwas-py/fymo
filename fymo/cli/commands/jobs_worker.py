@@ -24,16 +24,24 @@ def run_jobs_worker(project_root: Optional[Path] = None) -> None:
     `procrastinate` with no `DATABASE_URL`).
     """
     project_root = Path(project_root) if project_root else Path.cwd()
+
+    # Resolved before ConfigManager so both this dev-only .env load and
+    # ConfigManager's ${VAR} interpolation of fymo.yml see the same env,
+    # matching FymoApp.__init__'s ordering (fymo/core/server.py).
+    from fymo.core.config import env_truthy, load_dotenv
+    dev = env_truthy("FYMO_DEV")
+    if dev:
+        load_dotenv(project_root)
+
     config_manager = ConfigManager(project_root)
 
     # The worker is its own OS process — FymoApp's logging configuration
     # happened in the web process, not here. Same config source, same
     # dev-detection (FYMO_DEV), so both processes log to the same place in
     # the same format.
-    from fymo.core.config import env_truthy
     from fymo.core.logging import configure as _configure_logging
     _configure_logging(
-        dev=env_truthy("FYMO_DEV"),
+        dev=dev,
         config=config_manager.get_logging_config(),
         project_root=project_root,
     )
@@ -47,6 +55,16 @@ def run_jobs_worker(project_root: Optional[Path] = None) -> None:
     # (FymoApp's happened in the web process, not here).
     from fymo.broadcast import init_broadcasts
     init_broadcasts(project_root, config_manager.get_broadcasts_config().get("provider"))
+
+    # Same reasoning for storage (issue #31): a job that writes a file
+    # (e.g. a finished video recording) calls fymo.storage.get_storage_provider(),
+    # and this worker is a separate process from the one FymoApp initialized
+    # it in. Only wired up when storage: is actually configured, mirroring
+    # FymoApp's own no-default treatment, see fymo/storage/registry.py.
+    storage_config = config_manager.get_storage_config()
+    if storage_config is not None:
+        from fymo.storage import init_storage_provider
+        init_storage_provider(project_root, storage_config)
 
     Color.print_info(f"Starting job worker ({provider.id}) for {project_root}")
     try:

@@ -184,3 +184,95 @@ def format_remote_exposure_error(violations: List[str]) -> str:
         "underscore to keep it a private helper. To silence this check without fixing "
         "it (unsafe, temporary), set remote.mode: implicit-legacy in fymo.yml."
     )
+
+
+def check_auth_enforcement_hygiene(project_root: Path, auth_config: "dict | None") -> List[str]:
+    """Return one violation per app/remote/*.py function decorated with
+    @require_auth for which nobody could ever actually authenticate (issue
+    #29). require_auth itself fails closed correctly: no session means 401,
+    every time, regardless of why there's no session. The gap is upstream of
+    that. Nothing stops an app from shipping @require_auth while auth.enabled
+    is false, or while every configured provider has declined via
+    `required: auto` (its is_configured() classmethod returned False, see
+    fymo/auth/providers/base.py). Either way, the endpoint can never
+    authenticate anyone, and a real app was found papering over exactly
+    that: a hand-rolled wrapper that treated "auth isn't configured" as
+    "must be local dev" and quietly skipped the check instead.
+
+    Note this only catches providers that actually implement is_configured()
+    (custom providers are the common case today, see docs/deployment.md's
+    `required: auto` section). BaseProvider.is_configured() defaults to
+    True, and none of the built-in google/oidc/clerk providers override it
+    yet, so a built-in provider with a missing client-id/secret env var
+    still constructs (with blank credentials) and counts as active here,
+    even though it can't actually authenticate anyone at runtime. That gap
+    lives in the providers themselves, not this check.
+
+    Scans for the __fymo_require_auth__ marker fymo.auth.context.require_auth
+    stamps on its wrapper, the same way check_remote_exposure_hygiene scans
+    for __fymo_remote__. Returns [] immediately when nothing is marked, so
+    apps that don't use @require_auth pay no cost and see no noise regardless
+    of their auth config.
+    """
+    remote_dir = project_root / "app" / "remote"
+    if not remote_dir.is_dir():
+        return []
+
+    from fymo.remote.discovery import _ensure_parent_packages
+
+    guarded_sites: List[str] = []
+    project_root_str = str(project_root)
+    added = project_root_str not in sys.path
+    if added:
+        sys.path.insert(0, project_root_str)
+    try:
+        _ensure_parent_packages(project_root)
+        for py in sorted(remote_dir.glob("*.py")):
+            if py.name == "__init__.py" or py.stem.startswith("_"):
+                continue
+            module_name = py.stem
+            full = f"app.remote.{module_name}"
+            if full in sys.modules:
+                mod = importlib.reload(sys.modules[full])
+            else:
+                mod = importlib.import_module(full)
+            for name, obj in vars(mod).items():
+                if name.startswith("_"):
+                    continue
+                if getattr(obj, "__fymo_require_auth__", False):
+                    guarded_sites.append(f"{py.relative_to(project_root)}: {name}")
+    finally:
+        if added and project_root_str in sys.path:
+            sys.path.remove(project_root_str)
+
+    if not guarded_sites:
+        return []
+
+    auth_config = auth_config or {}
+    if not auth_config.get("enabled"):
+        return [f"{site} is decorated with @require_auth but auth.enabled is not true in fymo.yml"
+                for site in guarded_sites]
+
+    from fymo.auth.providers.registry import build_providers
+
+    providers = build_providers(auth_config.get("providers"))
+    if not providers:
+        return [
+            f"{site} is decorated with @require_auth but auth.providers resolves to "
+            "zero active providers (every entry with required: auto declined)"
+            for site in guarded_sites
+        ]
+
+    return []
+
+
+def format_auth_enforcement_error(violations: List[str]) -> str:
+    bullet_list = "\n".join(f"  - {v}" for v in violations)
+    return (
+        "@require_auth site(s) that nobody can ever authenticate against:\n" + bullet_list +
+        "\n\nWith auth off or zero active providers, these endpoints either stay "
+        "permanently unreachable or (more dangerously) invite app code to route "
+        "around @require_auth instead of fixing the underlying config. Enable "
+        "auth.enabled and configure at least one provider in fymo.yml, or remove "
+        "@require_auth from the function(s) above if the guard is no longer needed."
+    )

@@ -54,7 +54,7 @@ def create_project(name: str, template: str = 'default'):
     print(f"  cd {name}")
     print(f"  pip install -r requirements.txt")
     print(f"  npm install")
-    print(f"  fymo serve")
+    print(f"  fymo dev")
 
 
 def create_project_files(project_path: Path, project_name: str):
@@ -77,7 +77,7 @@ gunicorn>=23.0.0
   "type": "module",
   "description": "A Fymo project",
   "scripts": {{
-    "dev": "fymo serve",
+    "dev": "fymo dev",
     "build": "fymo build"
   }},
   "dependencies": {{
@@ -148,7 +148,11 @@ npm-debug.log*
 """
     (project_path / '.gitignore').write_text(gitignore)
     
-    # server.py
+    # server.py — plain WSGI entrypoint, for gunicorn/uwsgi/`fymo serve
+    # --prod`. Local development runs through `fymo dev` (or its `fymo
+    # serve` alias) instead, which builds its own FymoApp with dev=True and
+    # a dev orchestrator; a `python server.py` entrypoint here would bypass
+    # that pipeline entirely, so it's deliberately not offered.
     server_py = """#!/usr/bin/env python3
 \"\"\"Entry point for Fymo application\"\"\"
 
@@ -160,11 +164,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 # Create the WSGI application
 app = create_app(PROJECT_ROOT)
-
-if __name__ == "__main__":
-    # Run development server
-    from fymo.cli.commands.serve import run_dev_server
-    run_dev_server(app)
 """
     (project_path / 'server.py').write_text(server_py)
     os.chmod(project_path / 'server.py', 0o755)
@@ -269,12 +268,7 @@ A Fymo project - Python SSR framework for Svelte 5
 
 Start the development server:
 ```bash
-fymo serve
-```
-
-Or:
-```bash
-python server.py
+fymo dev
 ```
 
 ## Build for Production
