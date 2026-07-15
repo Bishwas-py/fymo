@@ -24,10 +24,12 @@ from fymo.build.composition_generator import generate_ssr_tree
 from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
 from fymo.build.hygiene import (
+    check_auth_enforcement_hygiene,
     check_directory_hygiene,
     check_lib_directory_warnings,
     check_remote_exposure_hygiene,
     check_storage_required_for_media,
+    format_auth_enforcement_error,
     format_hygiene_error,
     format_remote_exposure_error,
 )
@@ -128,6 +130,20 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     if storage_violations:
         raise BuildError("\n".join(storage_violations))
 
+    # Same `auth:` section discover_remote_modules reads below, read once
+    # here too so both calls agree on it.
+    auth_config = read_yaml_section(project_root, "auth")
+
+    # Build-only, same as the "no routes" check further down (issue #29):
+    # @require_auth shipped with auth off or zero active providers means
+    # nobody can ever authenticate against that endpoint, but during `fymo
+    # dev` an app is routinely mid-setup (auth not wired up yet), so this
+    # only fails a real `fymo build`, not local dev.
+    if not dev:
+        auth_enforcement_violations = check_auth_enforcement_hygiene(project_root, auth_config)
+        if auth_enforcement_violations:
+            raise BuildError(format_auth_enforcement_error(auth_enforcement_violations))
+
     if shutil.which("node") is None:
         raise BuildError("node not found on PATH" if dev else "node executable not found on PATH")
 
@@ -166,7 +182,7 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
         # normal manifest -- discovered from the providers, not hardcoded.
         remote_modules = discover_remote_modules(
             project_root,
-            auth_config=read_yaml_section(project_root, "auth"),
+            auth_config=auth_config,
             remote_config=remote_config,
         )
     except ValueError as e:

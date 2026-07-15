@@ -205,9 +205,13 @@ force a custom Python class just to read `os.environ`:
 ```yaml
 auth:
   providers:
-    - class: fymo.auth.providers.clerk.ClerkProvider
-      issuer: ${CLERK_ISSUER}
-      jwks_url: ${CLERK_JWKS_URL:-https://example.clerk.accounts.dev/.well-known/jwks.json}
+    - type: oidc
+      id: auth0
+      authorize_endpoint: ${AUTH0_AUTHORIZE_ENDPOINT}
+      token_endpoint: ${AUTH0_TOKEN_ENDPOINT}
+      userinfo_endpoint: ${AUTH0_USERINFO_ENDPOINT}
+      client_id_env: AUTH0_CLIENT_ID
+      client_secret_env: AUTH0_CLIENT_SECRET
 ```
 
 - `${VAR}` resolves to the environment variable's value. If it's unset,
@@ -265,7 +269,7 @@ half-broken provider:
 ```yaml
 auth:
   providers:
-    - class: app.lib.clerk_env.ClerkFromEnv
+    - type: clerk
       required: auto
 ```
 
@@ -279,6 +283,14 @@ Any value other than the literal string `"auto"` for `required` (a typo
 like `Auto`, or anything else) raises a `ProviderConfigError` naming the
 bad value, rather than being silently ignored or crashing the provider's
 constructor with an unrelated `TypeError`.
+
+`ClerkProvider` implements this fully out of the box: `is_configured()`
+checks for `CLERK_ISSUER`, falling back to decoding the Frontend API domain
+out of `PUBLIC_CLERK_PUBLISHABLE_KEY` (Clerk's own `pk_test_`/`pk_live_` key
+shape), and `from_config()` derives `jwks_url` as
+`{issuer}/.well-known/jwks.json` when it isn't given explicitly. Neither
+env var needs a custom wrapper class or an explicit `issuer:`/`jwks_url:`
+in `fymo.yml` -- the config block above is the entire setup.
 
 `is_configured()` defaults to `True` on `BaseProvider`, so every existing
 provider is unaffected: only an entry that both sets `required: auto` and

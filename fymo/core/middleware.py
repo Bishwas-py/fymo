@@ -42,6 +42,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+from fymo.core.config import parse_bool
+
 
 # ---------------- Rate limiter ----------------
 
@@ -389,16 +391,16 @@ class MiddlewareSettings:
             # exhaust during ordinary local testing. Still fully overridable
             # either direction via an explicit `rate_limit.enabled` in
             # fymo.yml, in prod or in dev.
-            enabled=bool(rl.get("enabled", not dev)),
+            enabled=parse_bool(rl.get("enabled", not dev), field="limits.rate_limit.enabled"),
             default_rpm=int(rl.get("requests_per_minute", 60)),
             path_rules=path_rules,
-            trust_proxy=bool(rl.get("trust_proxy", False)),
+            trust_proxy=parse_bool(rl.get("trust_proxy", False), field="limits.rate_limit.trust_proxy"),
         )
 
         max_body_bytes = int((limits or {}).get("max_body_bytes", DEFAULT_MAX_BODY_BYTES))
 
         sec = (security or {}).get("headers", {}) or {}
-        security_enabled = bool(sec.get("enabled", True))
+        security_enabled = parse_bool(sec.get("enabled", True), field="security.headers.enabled")
         extra: List[Tuple[str, str]] = []
         for entry in sec.get("extra", []) or []:
             if isinstance(entry, (list, tuple)) and len(entry) == 2:

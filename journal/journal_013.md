@@ -1,111 +1,116 @@
-# Journal Entry 013: The .env File That Never Existed
+# Journal Entry 013: The Provider That Made Every App Reinvent Itself
 
 **Date**: July 15, 2026
-**Focus**: Loading a `.env` file into the process environment, dev-only, before `fymo.yml` gets parsed
+**Focus**: ClerkProvider derives its own config instead of making every app write a wrapper for it
 **Status**: Shipped
 
-## The Gap
+## What a Real App Was Doing
 
-Went looking for something specific this time, not tripping over it by
-accident: does fymo load a `.env` file anywhere? It doesn't. `${VAR}`
-interpolation in `fymo.yml` reads straight from `os.environ`, which is
-correct in production, but means every local session starts with exporting
-half a dozen variables into the shell by hand before `fymo dev` resolves
-anything. Clone a project, open a new terminal, forget you did that
-yesterday, watch `fymo.yml` blow up with "references undefined environment
-variable." Not a bug exactly. Just friction nobody had gotten around to
-fixing.
+I went looking at a live app built on fymo and found a file called
+`app/lib/clerk_env.py`, about seventy lines, whose entire job was: read
+`CLERK_ISSUER` or decode it out of `PUBLIC_CLERK_PUBLISHABLE_KEY`, build a
+JWKS URL from it, and only construct the real `ClerkProvider` if any of that
+actually resolved to something. None of that is specific to that app. It's
+just what Clerk is. Every single app that wires up Clerk on fymo would need
+to write the same seventy lines, because `ClerkProvider.from_config` took
+`issuer` and `jwks_url` as flat required keys with no derivation, and never
+overrode `is_configured()` even though the framework already has a
+mechanism built for exactly this — `required: auto`, which skips a provider
+entirely if it isn't configured instead of crashing or half-registering it.
+The mechanism existed. Clerk just never plugged into it.
 
-The open question was whether to hand-roll a parser or pull in
-`python-dotenv`. Checked what the codebase already does with optional
-dependencies before deciding: `pyjwt[crypto]` is used for Clerk token
-verification, and it's not even in `pyproject.toml` — it's a bare `import
-jwt` inside a `try/except ImportError` that only fires if you actually
-exercise Clerk auth. That's the house style: core stays dependency-free,
-anything not needed by every install is either declared optional or lazily
-imported with a clear failure message. `.env` parsing is fifteen lines of
-`KEY=value`, comments, and quote-stripping. Adding a dependency for that
-would have been the wrong kind of consistency — consistent with what other
-frameworks do, inconsistent with what this one already does.
+## What Clerk Actually Publishes
 
-## Where It Actually Has to Go
+The publishable key Clerk hands out (`pk_test_...` / `pk_live_...`) isn't
+an opaque token — the part after the prefix is base64 for the Frontend API
+domain with a trailing `$`. Decode `pk_test_Y2xlcmsuZXhhbXBsZS5jb20k` and
+you get `clerk.example.com$`. Every Clerk app already has this key sitting
+in its frontend env for the client widget, so there's no reason the backend
+should need a second, separately-configured issuer URL when it can just
+read the same key and derive one. That's the whole crux of the fix: the
+issuer resolves from `CLERK_ISSUER` if it's set, and falls back to decoding
+the publishable key if it's not, and the JWKS URL derives from whichever
+issuer it lands on (`{issuer}/.well-known/jwks.json`, Clerk's own
+convention) unless something explicit overrides it.
 
-The interpolation itself lives in `config.py`, resolved on the raw YAML
-text before `yaml.safe_load` ever sees it. So the loader has to run before
-`ConfigManager` gets constructed, not before `fymo.yml` gets read — those
-aren't the same moment, and `ConfigManager.__init__` does both back to
-back. `FymoApp.__init__` resolves `self.dev` and then builds a
-`ConfigManager` thirty-some lines later in the same function. That gap is
-exactly where the load needs to sit: after `dev` is known, before config
-parsing starts.
+## The Design Calls the Issue Left Open
 
-There's a second place `ConfigManager` gets built: `fymo jobs-worker`, its
-own OS process, separate from the web app entirely. And it had a real
-ordering problem already, unrelated to `.env` — it constructed
-`ConfigManager` first and only figured out `dev` nine lines later, purely
-for a logging call. Nobody had ever needed dev-mode to be known before
-config parsing there, so nobody noticed the ordering was backwards. Adding
-`.env` support meant fixing that ordering too, otherwise the worker would
-be the one place `.env` quietly didn't work, which is precisely the kind
-of inconsistency the original bug report was about in the first place.
+A couple of things weren't fully pinned down and I had to just decide:
 
-One thing I deliberately didn't try to fix: `FYMO_DEV` itself only ever
-comes from a real environment variable, read before `.env` loads. You
-can't put `FYMO_DEV=1` in `.env` and have it flip a process into dev mode,
-because by the time anything would read `.env`, it's already decided
-whether it's allowed to. That's not an oversight, it's the only ordering
-that isn't circular — checking `.env` to decide whether to read `.env`
-doesn't have a sane answer. Wrote it down as a known limitation instead of
-quietly working around it with something clever, because the clever
-version would have been a chicken-and-egg bug wearing a feature costume.
+- **What counts as "configured."** `is_configured()` is called by the
+  registry with no arguments — it can't see whatever's actually written in
+  `fymo.yml`, only the environment. So it can only ever answer "does the
+  environment have enough to build this," not "does this specific config
+  entry have enough." An app that hardcodes a literal `issuer:` in its yml
+  without setting either env var, and also opts into `required: auto`, will
+  see Clerk silently skipped even though `from_config` would have worked
+  fine with the literal value. I decided that's fine, because an app in
+  that position doesn't need `required: auto` in the first place — it
+  already knows Clerk is configured, that's why it hardcoded the value.
+  `required: auto` exists for the "maybe configured, maybe not, depends on
+  environment" case, and that's exactly what env-only `is_configured()`
+  answers correctly.
 
-## What Constructing a FymoApp in a Test Actually Costs
+- **What happens when nothing resolves.** Previously this was a bare
+  `KeyError: 'issuer'` if you forgot the config and weren't using
+  `required: auto`. I made it a real error message naming both env vars,
+  since a stack trace pointing at a dict lookup inside the framework isn't
+  something an app author should have to decode.
 
-Wanted a test proving that a value loaded from `.env` really does flow
-through to `${VAR}` interpolation in `fymo.yml`, not just that `os.environ`
-gets populated. Building a real `FymoApp` for that turned out to need more
-than a `.env` file and a `fymo.yml` — the constructor unconditionally wants
-`dist/sidecar.mjs` to exist and raises a clean `RuntimeError` if it
-doesn't, no dev-mode bypass. `test_logging.py` had already solved this by
-hand-rolling the smallest possible sidecar stub, just enough of the
-length-prefixed JSON protocol to answer a startup ping. Reused the same
-stub rather than inventing a second way to fake the same thing. For the
-two tests that only needed to check whether `os.environ` got touched, I
-skipped the stub entirely and let the `RuntimeError` happen — `.env` loads
-early enough in `__init__` that the assertion still holds true by the time
-construction fails later for an unrelated reason.
+- **Malformed keys degrade instead of crashing.** A key with the wrong
+  prefix, bad padding, or garbage where the domain should be just resolves
+  to "not configured" rather than raising out of `is_configured()`. Getting
+  that classification wrong (treating a bad key as valid) would be worse
+  than getting it right slowly, so the decode function fails closed.
 
-## The Test That Would Have Passed Either Way
+## Doing It the Way the Repo Already Does It
 
-Got this one wrong on the first pass and a review caught it before it
-shipped. The `jobs-worker` test asserted that a `.env` value ended up in
-`os.environ` after calling `run_jobs_worker` — true, but it would have
-been just as true if `.env` loaded *after* `ConfigManager` instead of
-before. The assertion didn't actually depend on the ordering it was named
-after. Fixed it by making `fymo.yml` require the `.env`-provided variable
-through `${VAR}` interpolation: if the ordering were ever wrong, config
-parsing would raise `ConfigurationError` instead of the worker's normal
-`SystemExit(1)`, and the test would fail on the wrong exception type.
-Didn't just trust that reasoning — reverted the ordering fix by hand for a
-minute, watched the test fail with exactly the `ConfigurationError` it was
-supposed to catch, then put the fix back. A test that can't fail isn't
-testing anything, it's just decoration that happens to be green.
+Wrote the failing tests first — explicit issuer without env, `CLERK_ISSUER`
+alone, publishable-key derivation alone, one env winning over the other,
+explicit values winning over both, the missing-everything error, and
+`is_configured()` in each of those states, plus the full path through
+`build_providers()` with `required: auto`. Watched all of them fail for the
+right reason: the derivation tests died on the same `KeyError` the app's
+wrapper existed to work around, and the `is_configured()` tests failed
+because `BaseProvider`'s default just always says yes. Then wrote the
+actual derivation and the override, and watched the same tests turn green
+without touching anything else about the provider — the constructor still
+takes plain `issuer=`/`jwks_url=` kwargs exactly like before, so nothing
+that constructs `ClerkProvider` directly noticed a thing.
 
-## What's Still Manual
+Full suite stayed green throughout, and I ran the zero-config path for
+real — set only the publishable key in the environment, called
+`build_providers` with `{type: clerk, required: auto}`, and confirmed it
+produced a working provider with the right derived issuer and JWKS URL,
+then cleared the environment and confirmed the same config just quietly
+produced nothing instead of an error. That's the actual behavior an app
+depending on this would see, not just an assertion on a return value.
 
-Fymo doesn't add `.env` to a new project's `.gitignore` for you. Scaffolding
-and the loader are separate concerns, and `fymo new`'s gitignore template
-not knowing about `.env` yet is a small, honest gap rather than something
-this change should have quietly absorbed. Worth a follow-up, not worth
-blocking on.
+Independent review came back clean — traced the base64 edge cases (wrong
+prefix, bad padding, non-ascii, empty domain after stripping the
+terminator) and didn't find a gap, confirmed the explicit-wins-over-env
+precedence matches how the existing OAuth and OIDC providers already do
+config resolution, and confirmed nothing in the diff broke backward
+compatibility for apps already passing explicit values. It did point out
+two thin spots in the test matrix — explicit issuer against a conflicting
+env var, and a key with the right shape but a body that just isn't valid
+base64 — so I added both before calling it finished.
 
-Also ran into issue #26 while tracing where `dev` gets decided: `fymo dev`
-doesn't actually pass `dev=True` today, it falls through to whatever
-`FYMO_DEV` happens to be in the shell. That's a real, separate problem —
-once it's fixed, `.env` loading here will just start working for `fymo dev`
-without either issue having to know about the other, since both key off
-the same `self.dev`. Left it alone. Not every gap you notice while working
-is a gap you should be the one to close today.
+## What This Actually Changes
+
+`fymo.yml` goes from a custom wrapper class plus explicit issuer and JWKS
+URL, down to:
+
+```yaml
+auth:
+  providers:
+    - type: clerk
+      required: auto
+```
+
+Dormant until Clerk env vars show up, active the moment they do, no app
+code standing between "I have a Clerk account" and "this works." The
+seventy-line file that started this doesn't need to exist anywhere anymore.
 
 ---
 

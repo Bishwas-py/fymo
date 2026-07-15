@@ -56,6 +56,16 @@ def run_jobs_worker(project_root: Optional[Path] = None) -> None:
     from fymo.broadcast import init_broadcasts
     init_broadcasts(project_root, config_manager.get_broadcasts_config().get("provider"))
 
+    # Same reasoning for storage (issue #31): a job that writes a file
+    # (e.g. a finished video recording) calls fymo.storage.get_storage_provider(),
+    # and this worker is a separate process from the one FymoApp initialized
+    # it in. Only wired up when storage: is actually configured, mirroring
+    # FymoApp's own no-default treatment, see fymo/storage/registry.py.
+    storage_config = config_manager.get_storage_config()
+    if storage_config is not None:
+        from fymo.storage import init_storage_provider
+        init_storage_provider(project_root, storage_config)
+
     Color.print_info(f"Starting job worker ({provider.id}) for {project_root}")
     try:
         provider.run_worker()
