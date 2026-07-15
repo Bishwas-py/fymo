@@ -16,6 +16,38 @@ def env_truthy(name: str) -> bool:
     return os.environ.get(name, "").lower() in ("1", "true", "yes", "on")
 
 
+def load_dotenv(project_root: Path) -> None:
+    """Load KEY=value pairs from a .env file at the project root into
+    os.environ, without overwriting a variable that's already set there.
+
+    Callers gate this on dev mode and call it before constructing a
+    ConfigManager, so ${VAR} interpolation in fymo.yml can see .env values
+    alongside real env vars, while a real env var set outside .env always
+    wins (so a one-off override doesn't require editing the file) and
+    production never reads .env at all, even if one exists on disk.
+
+    Hand-rolled rather than a python-dotenv dependency: the subset of the
+    format actually needed (KEY=value, # comments, blank lines, optional
+    matching quotes) is small and stable, matching the lazy-optional-dep
+    philosophy already used for pyjwt in auth/providers/clerk.py rather
+    than adding a hard dependency for a few lines of parsing.
+    """
+    dotenv_path = project_root / ".env"
+    if not dotenv_path.is_file():
+        return
+    for raw_line in dotenv_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def parse_bool(value: Any, *, field: str) -> bool:
     """Strictly coerce a fymo.yml config value to bool.
 
