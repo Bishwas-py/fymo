@@ -149,6 +149,20 @@ class FymoApp:
         # raw-WSGI routes with config-driven ones. See fymo/core/media.py.
         from fymo.core.http import discover_app_http_routes
         from fymo.core.media import build_media_routes
+
+        # Storage: built once, whenever storage: is configured, independent
+        # of whether media: is also configured. App code (a remote function,
+        # a job) reaches this same instance process-wide via
+        # fymo.storage.get_storage_provider() (issue #31); gating
+        # construction on media_config would leave that accessor unusable
+        # for an app that only writes files itself and never declares
+        # media: routes.
+        from fymo.storage import init_storage_provider
+        storage_config = self.config_manager.get_storage_config()
+        self.storage_provider = None
+        if storage_config is not None:
+            self.storage_provider = init_storage_provider(self.project_root, storage_config)
+
         media_config = self.config_manager.get_media_config()
         media_routes = []
         if media_config:
@@ -159,17 +173,15 @@ class FymoApp:
             # startup path shares. The message is phrased for a running app (fix
             # fymo.yml and restart) rather than build_storage_provider's own
             # build-context wording.
-            from fymo.storage.registry import StorageConfigError, build_storage_provider
-            storage_config = self.config_manager.get_storage_config()
-            if storage_config is None:
+            if self.storage_provider is None:
+                from fymo.storage.registry import StorageConfigError
                 raise StorageConfigError(
                     "media: is configured in fymo.yml but storage: is missing. "
                     "media: routes resolve files through the configured "
                     "StorageProvider and there is no default, add a storage: "
                     "section (e.g. `storage: {provider: local}`) to fymo.yml."
                 )
-            storage = build_storage_provider(storage_config, self.project_root)
-            media_routes = build_media_routes(self.project_root, media_config, storage)
+            media_routes = build_media_routes(self.project_root, media_config, self.storage_provider)
         self._app_routes = discover_app_http_routes(self.project_root) + media_routes
         self.router = self._initialize_router()
         self.template_renderer = TemplateRenderer(

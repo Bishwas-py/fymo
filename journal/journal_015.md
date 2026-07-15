@@ -1,4 +1,4 @@
-# Journal Entry 013: The String That Was Always False
+# Journal Entry 015: The String That Was Always False
 
 **Date**: July 15, 2026
 **Focus**: A typing gap in fymo.yml's ${VAR} interpolation, and three quiet copies of the same bool bug it was hiding
