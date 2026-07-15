@@ -1,5 +1,6 @@
 """Tests for the `fymo jobs-worker` CLI command."""
 import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -74,3 +75,30 @@ def test_jobs_worker_configures_logging_from_yml(tmp_path, monkeypatch):
         run_jobs_worker(tmp_path)
     assert fymo_logging._installed_handler is not None
     assert isinstance(fymo_logging._installed_handler, logging.FileHandler)
+
+
+def test_jobs_worker_loads_dotenv_before_config_manager_when_dev(tmp_path, monkeypatch):
+    """.env must be loaded (dev-only) before ConfigManager parses fymo.yml,
+    same ordering as FymoApp.__init__, so ${VAR} interpolation and any
+    os.environ read by provider setup both see .env values."""
+    monkeypatch.delenv("FYMO_TEST_WORKER_DOTENV", raising=False)
+    monkeypatch.setenv("FYMO_DEV", "1")
+    (tmp_path / ".env").write_text("FYMO_TEST_WORKER_DOTENV=loaded\n")
+
+    # Default threaded provider exits with SystemExit(1) quickly and
+    # predictably, same mechanism the other tests in this file rely on.
+    with pytest.raises(SystemExit):
+        run_jobs_worker(tmp_path)
+
+    assert os.environ["FYMO_TEST_WORKER_DOTENV"] == "loaded"
+
+
+def test_jobs_worker_ignores_dotenv_when_not_dev(tmp_path, monkeypatch):
+    monkeypatch.delenv("FYMO_TEST_WORKER_DOTENV_PROD", raising=False)
+    monkeypatch.delenv("FYMO_DEV", raising=False)
+    (tmp_path / ".env").write_text("FYMO_TEST_WORKER_DOTENV_PROD=should-not-load\n")
+
+    with pytest.raises(SystemExit):
+        run_jobs_worker(tmp_path)
+
+    assert "FYMO_TEST_WORKER_DOTENV_PROD" not in os.environ
