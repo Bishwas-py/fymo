@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from fymo.core.config import parse_bool
+
 
 def file_hash(path: Path) -> str:
     """Return a 12-char lowercase hex SHA-256 prefix of the file's contents."""
@@ -79,7 +81,7 @@ def discover_remote_modules(
     always ship regardless of the flag.
     """
     out: dict[str, dict[str, RemoteFunction]] = {}
-    explicit_optin = bool((remote_config or {}).get("explicit_optin", False))
+    explicit_optin = parse_bool((remote_config or {}).get("explicit_optin", False), field="remote.explicit_optin")
 
     remote_dir = project_root / "app" / "remote"
     if remote_dir.is_dir():
