@@ -247,6 +247,7 @@ pydantic = [
 [package.dev-dependencies]
 dev = [
     { name = "granian" },
+    { name = "procrastinate" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
@@ -271,6 +272,7 @@ provides-extras = ["pydantic", "procrastinate", "postgres", "granian", "clerk", 
 [package.metadata.requires-dev]
 dev = [
     { name = "granian", specifier = ">=2.0,<3" },
+    { name = "procrastinate", specifier = ">=3.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.1" },
     { name = "pydantic", specifier = ">=2.5" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.0" },

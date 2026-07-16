@@ -98,6 +98,20 @@ class PostgresUserStore:
         self._lock = threading.Lock()
         self._pool = None
 
+    @classmethod
+    def owned_schema_objects(cls):
+        """Every object schema_postgres.sql creates, plus the implicit
+        identity sequence, for `fymo schema provider-tables` (issue #51).
+        Derived by parsing the packaged SQL, never a second hardcoded list.
+
+        A classmethod on purpose: __init__ is boot-loud about DATABASE_URL
+        and _get_pool() connects, while the schema command's contract is
+        no database and no environment. The CLI resolves the configured
+        class from `auth.user_store` and asks it directly, without ever
+        constructing a store. Needs neither psycopg nor a connection."""
+        from fymo.core.schema import parse_schema_sql
+        return parse_schema_sql(_SCHEMA_PATH.read_text())
+
     def _get_pool(self):
         """Open the pool and bootstrap the schema on first use, the pooled
         analogue of SqliteUserStore._connect. Deliberately small with no

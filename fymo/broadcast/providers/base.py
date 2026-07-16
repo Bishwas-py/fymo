@@ -9,8 +9,10 @@ app code or the generated client.
 """
 from __future__ import annotations
 
-from typing import Iterator, Optional, Protocol, runtime_checkable
+from typing import Iterator, Optional, Protocol, Tuple, runtime_checkable
 import threading
+
+from fymo.core.schema import SchemaObject
 
 
 @runtime_checkable
@@ -42,3 +44,11 @@ class BaseBroadcastProvider:
         writing the keepalive to a gone client raises, closing this
         generator and releasing the provider's resources."""
         raise NotImplementedError
+
+    def owned_schema_objects(self) -> Tuple[SchemaObject, ...]:
+        """The database objects this provider creates for itself (`fymo
+        schema provider-tables`). The built-in postgres provider is pure
+        LISTEN/NOTIFY and creates none, so this default stands for it. Kept
+        off the BroadcastProvider Protocol for the same isinstance()
+        compatibility reason as BaseJobProvider.owned_schema_objects."""
+        return ()

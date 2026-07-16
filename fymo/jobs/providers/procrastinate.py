@@ -100,6 +100,18 @@ class ProcrastinateJobProvider(BaseJobProvider):
         bound.apply_defaults()
         self._get_app().configure_task(name=task_name).defer(**bound.arguments)
 
+    def owned_schema_objects(self):
+        """Every table/type/function/index/trigger (plus implicit serial
+        sequences) Procrastinate creates, derived from the installed
+        package's own bundled schema (SchemaManager.get_schema()) so the
+        list can never drift from the version actually running. Needs the
+        procrastinate package but no database connection."""
+        _import_procrastinate()
+        from procrastinate import schema as procrastinate_schema
+
+        from fymo.core.schema import parse_schema_sql
+        return parse_schema_sql(procrastinate_schema.SchemaManager.get_schema())
+
     def run_worker(self, **kwargs) -> None:
         """Block, actually executing submitted jobs — the `fymo jobs-worker`
         entry point. Runs in its own OS process, separate from the web

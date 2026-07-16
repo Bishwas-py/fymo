@@ -78,6 +78,7 @@ dev = [
     "pydantic>=2.5",
     "granian>=2.0,<3",
     "pyjwt[crypto]>=2.0",
+    "procrastinate>=3.0",
     "psycopg[binary,pool]>=3.1",
 ]
 

@@ -40,3 +40,9 @@ def test_base_provider_list_recent_jobs_returns_none():
 
 def test_base_provider_close_is_inert_by_default():
     BaseJobProvider().close()  # must not raise
+
+
+def test_base_provider_owns_no_schema_objects_by_default():
+    """A provider that creates nothing in the database (threaded, custom
+    in-memory queues) declares nothing, and the schema CLI stays quiet."""
+    assert BaseJobProvider().owned_schema_objects() == ()

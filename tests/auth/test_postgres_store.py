@@ -135,3 +135,36 @@ def test_bootstrap_failure_closes_the_pool(monkeypatch, tmp_path: Path):
     assert store._pool is None
     assert len(created) == 1
     assert created[0].closed is True
+
+
+def test_owned_schema_objects_needs_no_construction_and_no_database_url(monkeypatch):
+    """`fymo schema provider-tables` promises no-database operation, while
+    __init__ is deliberately boot-loud about DATABASE_URL. The declaration
+    therefore lives on the class: callable without constructing a store,
+    without the env var, without a connection."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    objs = PostgresUserStore.owned_schema_objects()
+    assert objs
+
+
+def test_owned_schema_objects_match_the_packaged_schema():
+    """Derived from schema_postgres.sql via the same parser the
+    procrastinate provider uses, never a re-hardcoded list. Constraint
+    backed pkey indexes are implicit through their tables and stay out,
+    consistent with the procrastinate enumeration."""
+    assert {
+        (o.kind, o.name) for o in PostgresUserStore.owned_schema_objects()
+    } == {
+        ("table", "fymo_users"),
+        ("sequence", "fymo_users_id_seq"),
+        ("index", "fymo_users_email_lower_idx"),
+        ("table", "fymo_user_oauth_identities"),
+    }
+
+
+def test_sqlite_store_declares_no_schema_objects(tmp_path: Path):
+    """SqliteUserStore's objects live in its own auth.db file, not in a
+    shared Postgres schema, so it has nothing to declare."""
+    from fymo.core.schema import owned_schema_objects
+    assert owned_schema_objects(SqliteUserStore) == ()
+    assert owned_schema_objects(SqliteUserStore(tmp_path)) == ()

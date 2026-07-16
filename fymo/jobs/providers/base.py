@@ -34,7 +34,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+
+from fymo.core.schema import SchemaObject
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,15 @@ class BaseJobProvider:
 
     def register_tasks(self, tasks: Dict[str, Callable]) -> None:
         pass
+
+    def owned_schema_objects(self) -> Tuple[SchemaObject, ...]:
+        """The database objects this provider creates for itself, so schema
+        diff tooling can be told to leave them alone (`fymo schema
+        provider-tables`). Deliberately not part of the JobProvider
+        Protocol: it's runtime-checkable, and requiring the method would
+        break isinstance() for custom providers that predate the seam.
+        Providers that create nothing declare nothing."""
+        return ()
 
     def submit(self, task_name: str, *args, **kwargs) -> None:
         raise NotImplementedError
