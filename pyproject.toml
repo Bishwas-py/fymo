@@ -29,6 +29,7 @@ classifiers = [
 [project.optional-dependencies]
 pydantic = ["pydantic>=2.5"]
 procrastinate = ["procrastinate>=3.0", "psycopg[binary,pool]>=3.1"]
+postgres = ["psycopg[binary,pool]>=3.1"]
 granian = ["granian>=2.0,<3"]
 
 [project.scripts]

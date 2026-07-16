@@ -76,6 +76,9 @@ dependencies = [
 granian = [
     { name = "granian" },
 ]
+postgres = [
+    { name = "psycopg", extra = ["binary", "pool"] },
+]
 procrastinate = [
     { name = "procrastinate" },
     { name = "psycopg", extra = ["binary", "pool"] },
@@ -100,11 +103,12 @@ requires-dist = [
     { name = "granian", marker = "extra == 'granian'", specifier = ">=2.0,<3" },
     { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "procrastinate", marker = "extra == 'procrastinate'", specifier = ">=3.0" },
+    { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'procrastinate'", specifier = ">=3.1" },
     { name = "pydantic", marker = "extra == 'pydantic'", specifier = ">=2.5" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
-provides-extras = ["pydantic", "procrastinate", "granian"]
+provides-extras = ["pydantic", "procrastinate", "postgres", "granian"]
 
 [package.metadata.requires-dev]
 dev = [
