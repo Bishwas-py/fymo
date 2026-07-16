@@ -72,6 +72,17 @@ def jobs_worker_cmd(dev):
     run_jobs_worker(dev=dev)
 
 
+@cli.command(name="jobs-status")
+@click.option("--limit", "-n", default=10, type=int,
+              help="How many recent jobs to show")
+@click.option("--dev", is_flag=True, default=False,
+              help="Run in dev mode (sets FYMO_DEV=1, enables .env loading)")
+def jobs_status_cmd(limit, dev):
+    """Show job counts by status and the most recent jobs."""
+    from fymo.cli.commands.jobs_status import run_jobs_status
+    run_jobs_status(limit=limit, dev=dev)
+
+
 def main():
     """Main entry point"""
     try:
