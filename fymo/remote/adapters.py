@@ -161,10 +161,38 @@ def _coerce_dict_key(key: Any, key_hint: Any):
     return _coerce_value(key, key_hint)
 
 
+def _reject_undefined(value: Any) -> None:
+    """devalue's UNDEFINED sentinel means "argument omitted" at a top-level
+    slot (validate_args handles that before coercion) and nothing anywhere
+    else. A JS call like fn([undefined]) parses to the raw sentinel nested
+    in a container; letting it through guarantees a downstream 500 (no user
+    code or DB driver can handle it), so every pass-through path scans for
+    it before returning the value unvalidated."""
+    from fymo.remote.devalue import UNDEFINED
+    if value is UNDEFINED:
+        raise TypeError("undefined is only valid as a whole omitted argument")
+    if isinstance(value, list):
+        for v in value:
+            _reject_undefined(v)
+    elif isinstance(value, dict):
+        for v in value.values():
+            _reject_undefined(v)
+
+
 def _coerce_value(value: Any, hint: Any):
     """Validate `value` against `hint`. Raises TypeError or ValidationError on mismatch."""
-    if hint is Any or hint is type(None):
+    from fymo.remote.devalue import UNDEFINED
+    if value is UNDEFINED:
+        raise TypeError("undefined is only valid as a whole omitted argument")
+    if hint is Any:
+        _reject_undefined(value)
         return value
+    if hint is type(None):
+        # The NoneType branch of a union must actually check for None;
+        # returning the value unchecked made `str | None` accept anything.
+        if value is not None:
+            raise TypeError(f"expected None, got {type(value).__name__}")
+        return None
     origin = get_origin(hint)
 
     if _is_pydantic_model(hint):
@@ -192,6 +220,7 @@ def _coerce_value(value: Any, hint: Any):
             raise TypeError(f"expected list, got {type(value).__name__}")
         args = get_args(hint)
         if not args:
+            _reject_undefined(value)
             return value
         # Fixed-length tuple: tuple[int, str] validates each position against
         # its own type. tuple[int, ...] (and list/set/frozenset) validate
@@ -208,6 +237,7 @@ def _coerce_value(value: Any, hint: Any):
             raise TypeError(f"expected dict, got {type(value).__name__}")
         args = get_args(hint)
         if not args:
+            _reject_undefined(value)
             return value
         key_hint, val_hint = args
         return {
@@ -234,6 +264,7 @@ def _coerce_value(value: Any, hint: Any):
         return _validate_structured(value, hint)
 
     # Unknown/unhandled annotation — no validator available, pass through.
+    _reject_undefined(value)
     return value
 
 

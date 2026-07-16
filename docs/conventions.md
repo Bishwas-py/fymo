@@ -129,8 +129,11 @@ The pieces, all from `fymo.remote`:
   opaque cursor is just base64url-encoded JSON of the last-seen sort-key
   value(s). `decode_cursor` raises a `RemoteError` that the router turns
   into a 400 `bad_cursor` envelope on any garbage input (bad base64,
-  non-JSON, wrong arity, nested values), so a tampered cursor can never
-  become a 500.
+  non-JSON, wrong arity, nested values, ints beyond the JS safe-integer
+  range), so a tampered cursor can never become a 500. One thing it
+  cannot detect: a *well-formed* cursor pasted from a different paginated
+  function with the same arity decodes fine and just yields a wrong or
+  empty page — cursors are opaque, not authenticated.
 - **The fetch-one-extra idiom** — query `LIMIT limit + 1`. Getting
   `limit + 1` rows back proves there's a next page without a second
   `COUNT(*)` query; `paginate(rows, limit, key=...)` drops the extra row

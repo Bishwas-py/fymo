@@ -86,3 +86,31 @@ def test_paginate_composite_key():
     last = rows[2]
     assert page["next_cursor"] == encode_cursor(last["ts"], last["id"])
     assert decode_cursor(page["next_cursor"], expect=2) == [last["ts"], last["id"]]
+
+
+def test_cursor_int_outside_js_safe_range_is_bad_cursor():
+    """A tampered cursor holding an oversized int must be a clean 400, not
+    an OverflowError 500 at the database bind (sqlite3 rejects ints beyond
+    64 bits; JSON ints are unbounded). Legitimate cursors only ever hold
+    values that came from JS, so the JS safe-integer range is the bound."""
+    for huge in (10**300, -(10**300), 2**53 + 1, -(2**53) - 1):
+        with pytest.raises(RemoteError) as e:
+            decode_cursor(encode_cursor(huge, "x"))
+        assert e.value.code == "bad_cursor"
+
+
+def test_cursor_int_at_js_safe_boundary_round_trips():
+    assert decode_cursor(encode_cursor(2**53, "x")) == [2**53, "x"]
+    assert decode_cursor(encode_cursor(-(2**53), "x")) == [-(2**53), "x"]
+
+
+def test_paginate_rejects_nonpositive_limit():
+    """limit=0 silently ends pagination and a negative limit produces a
+    bogus next_cursor pointing at the wrong row; both are caller bugs that
+    must fail loudly (blog_app clamps before calling, but the helper is
+    public API)."""
+    rows = [1, 2, 3]
+    with pytest.raises(ValueError):
+        paginate(rows, 0, key=lambda r: r)
+    with pytest.raises(ValueError):
+        paginate(rows, -1, key=lambda r: r)

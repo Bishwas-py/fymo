@@ -15,6 +15,7 @@ from typing import Any, Callable
 from fymo.remote.errors import RemoteError
 
 _CURSOR_MAX = 1024
+_JS_SAFE_INT = 2**53  # Number.MAX_SAFE_INTEGER + 1's magnitude boundary
 
 
 def _bad_cursor() -> RemoteError:
@@ -49,6 +50,13 @@ def decode_cursor(cursor: str, *, expect: "int | None" = None) -> list:
     # must not leak through to whatever query binds the values.
     if not all(v is None or isinstance(v, (str, int, float, bool)) for v in values):
         raise _bad_cursor()
+    # JSON ints are unbounded but every legitimate cursor value came from
+    # JS, so anything beyond Number.MAX_SAFE_INTEGER is tampering. Without
+    # this bound an oversized int passes here and 500s at the database
+    # bind instead (sqlite3 raises OverflowError past 64 bits).
+    if any(isinstance(v, int) and not isinstance(v, bool) and abs(v) > _JS_SAFE_INT
+           for v in values):
+        raise _bad_cursor()
     return values
 
 
@@ -59,7 +67,13 @@ def paginate(rows: list, limit: int, *, key: Callable[[Any], Any]) -> dict:
     is a next page: keep `limit` rows and encode the last kept row's sort
     key(s) as `next_cursor`. `key` maps a row to its sort-key value, or a
     tuple of values for composite sort keys.
+
+    `limit` must be positive: 0 silently ends pagination with rows left,
+    and a negative slice would emit a next_cursor pointing at the wrong
+    row, so both fail loudly as caller bugs.
     """
+    if limit < 1:
+        raise ValueError(f"paginate limit must be >= 1, got {limit}")
     items = rows[:limit]
     next_cursor = None
     if len(rows) > limit and items:
