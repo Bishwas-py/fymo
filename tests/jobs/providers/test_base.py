@@ -24,3 +24,9 @@ def test_base_provider_run_worker_raises_a_clear_error():
     provider = BaseJobProvider()
     with pytest.raises(RuntimeError, match="has no separate worker process"):
         provider.run_worker()
+
+
+def test_base_provider_owns_no_schema_objects_by_default():
+    """A provider that creates nothing in the database (threaded, custom
+    in-memory queues) declares nothing, and the schema CLI stays quiet."""
+    assert BaseJobProvider().owned_schema_objects() == ()
