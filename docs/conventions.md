@@ -53,3 +53,31 @@ compatibility, but an undecorated one now also logs a one-line deprecation
 warning suggesting `@task` be added. Real implementation that a task calls
 into belongs in `app/support/`, not underscore-prefixed helpers living next
 to the task in the same module.
+
+## `$route`: reactive current-route state
+
+`location.pathname` read inside `$effect` never re-runs after a soft
+navigation — it's a plain DOM property, not something Svelte's reactivity
+tracks. `$route` is fymo's answer: a `svelte/store` writable, resolved the
+same way `$remote/<name>` and `$broadcast/<name>` are (a virtual import
+`fymo/build/js/plugins/router.mjs` resolves at build time), carrying the
+current path, query string, and any matched `:id`-style route params:
+
+```svelte
+<script>
+  import { route } from '$route';
+</script>
+
+<p>Current: {$route.pathname}, id={$route.params.id}</p>
+```
+
+`route.pathname` / `route.search` come from `window.location` and update
+on every soft nav; `route.params` comes from the same server-side
+`Router.match()` result a controller's `getContext(params)` already
+receives — it's a guaranteed field, not something a controller has to echo
+back into props for the client to see. Seeded before `hydrate()` and
+updated by the soft-nav router, not by the SSR render pass: reads inside
+`$effect`/event handlers are correct from first paint on, but a `$route`
+read in top-level template markup during the very first render may
+briefly differ from what the server rendered, the same as any other value
+that legitimately differs between server and client.
