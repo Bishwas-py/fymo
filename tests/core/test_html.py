@@ -135,7 +135,7 @@ def test_global_css_links_before_route_css():
 def test_route_params_island_emitted():
     """Issue #42: the initial page load must expose resolved :id-style
     params the same way the soft-nav envelope does, so fymo/build/js/runtime
-    /route.svelte.js can seed the reactive route object before hydrate()."""
+    /route.js can seed the reactive route object before hydrate()."""
     assets = RouteAssets(ssr="x", client="x.js", css=None, preload=[])
     html = build_html(
         body="", head_extra="", props={}, assets=assets, title="t",

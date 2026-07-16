@@ -102,17 +102,109 @@ fix back. It did, cleanly, the same missing-resolution failure mode as the
 original bug. That's the test that would have caught this before it ever
 reached anyone running `fymo dev` locally.
 
+## The Bug Every Test Missed
+
+Everything above passed. Full suite green, the new dev.mjs test caught its
+bug and stayed caught, a structural check confirmed the reactive object's
+default value showed up exactly once in the built output, not duplicated
+per route. By every check I had, this was done. So I opened a real browser
+instead of trusting that.
+
+Built the blog example for real, added a small debug line to its root
+layout, the one component that stays mounted through every soft nav
+instead of getting swapped: an `$effect` logging the route on every run,
+with an explicit counter so I couldn't fool myself about whether it had
+actually re-executed or just showed a value that happened to already be
+right. Loaded the page. Counter said 1, value correct. Clicked a link to a
+post. URL changed, page content changed, everything looked like a normal
+soft nav. Counter still said 1.
+
+Not "showed the wrong value." Never ran again. I mutated the route object
+by hand from the browser console, same result: the value on the object
+changed, provably, I could read the new value back off it immediately.
+The effect just never noticed. Whatever I'd built, it wasn't reactive at
+all, it was a shared bucket that happened to hold the right data with
+nothing watching it.
+
+## Two Copies of the Thing That's Supposed to Be One
+
+Traced it by reading the actual bytes of the built output, not the source,
+the built output. Svelte's own internal reactivity machinery, the code
+that creates a signal and the code that notifies whoever's reading it, was
+bundled twice, into two different files, completely disconnected from
+each other. One copy backed the object my route module created. A
+different copy backed the effect tracking inside the layout component. My
+mutation updated one graph. The layout's effect was subscribed to the
+other. Neither side was broken on its own; they just weren't talking.
+
+The reason took a bit to run down: Svelte's compiler has two separate
+code-generation paths, one for ordinary `.svelte` components, a different
+one for the `.svelte.js` "module" files the reactive-state pattern I'd
+used depends on. In this exact build, those two paths ended up emitting
+imports that resolved to two different, un-deduplicated bundles of the
+same runtime. My earlier "does the file appear only once" check had been
+checking the wrong thing entirely. It confirmed my own small file wasn't
+duplicated. It said nothing about whether the actual reactivity engine
+underneath it was, and it was.
+
+Once I knew what to look for, checking became trivial: one particular
+error message Svelte's runtime carries, a string that survives minifying
+because it's used at runtime and not just a source comment, showed up in
+two separate files instead of one. That was the whole bug, confirmed in a
+single grep once I knew which two files to compare.
+
+## The Fix Was Smaller Than the Bug
+
+Swapped the `.svelte.js`/`$state` pattern for a plain `svelte/store`
+`writable`. A store isn't special-compiled where it's defined at all,
+nothing about creating one asks the compiler to pick a code-generation
+path; only the `$store` shorthand used inside a component that *reads* it
+goes through compilation, and that's the same, unremarkable path this
+app's own auth state (`user`, `ready` in app/lib/auth.ts) already uses
+successfully in this exact build. No special module type, no duplicated
+runtime possible, because there was never a second code path for it to
+diverge through in the first place.
+
+Rebuilt, same debug layout, same real browser. Counter went 1, clicked,
+counter went 2, correct path, correct params, visible in the actual page
+text. Clicked again, back to the previous route, counter went 3,
+everything cleared correctly. Did it twice more to be sure it wasn't
+something timing-dependent that happened to line up once.
+
+This time I didn't just trust that and move on. Wrote an automated
+version of the exact same check: build a real app with a temporary
+component that reads the route state into visible text, boot the actual
+compiled bundle in a real DOM environment, call the framework's own
+navigation-update function directly, and assert the text changed. Then,
+specifically to prove the test wasn't just passing by accident, I put the
+old broken version back, temporarily, and watched that same test fail,
+for the right reason, the runtime genuinely duplicated across two files
+exactly like it had in the browser. Put the fix back, watched it pass
+again. Added a second, cheaper test that just checks for that duplication
+directly, so a future change that reintroduces this exact mistake gets
+caught in milliseconds instead of needing a browser at all.
+
+Also cleaned up something the rewrite made obvious once it existed: the
+seed-and-update logic had been copied inline into both client bundle
+templates, four times total. Pulled it into two small functions the route
+module itself exports, `seedRoute()` and `applyRouteNav()`, so the
+templates just call them. One place owns the mutation now, not four
+copies of the same three lines that could quietly drift apart later.
+
 ## Where It Landed
 
 ```js
 import { route } from '$route';
 $effect(() => {
-  console.log(route.pathname, route.params);
+  console.log($route.pathname, $route.params);
 });
 ```
 
-Reactive on every soft nav, no listener to wire up, no cleanup to forget.
-Full suite: 883 passing, 10 skipped, up from before this pass started.
+The dollar sign in front of `route` matters now: it's a store, not a
+rune, so a component reads it through Svelte's ordinary auto-subscription
+syntax. Reactive on every soft nav, no listener to wire up, no cleanup to
+forget, and this time actually watched it work, more than once, in a real
+tab, before calling it done. Full suite: 885 passing, 10 skipped.
 
 ---
 

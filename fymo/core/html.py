@@ -74,7 +74,7 @@ def build_html(
         f'<script type="application/json" id="svelte-doc">{_safe_json(doc)}</script>\n'
         if doc is not None else ""
     )
-    # Always emitted, unlike doc_island -- the client's route.svelte.js reads
+    # Always emitted, unlike doc_island -- the client's route.js reads
     # this to seed its reactive `params` before hydrate(), and treating a
     # route with no dynamic segments as "tag absent" would force the client
     # to special-case a missing island vs a genuinely empty dict.

@@ -1,9 +1,9 @@
 /**
  * Resolves the `$route` specifier to fymo's own shipped
- * runtime/route.svelte.js -- a fixed file, not a per-project generated one,
+ * runtime/route.js -- a fixed file, not a per-project generated one,
  * since its content never varies by app.
  *
- * @param {{ runtimePath: string }} options - absolute path to route.svelte.js
+ * @param {{ runtimePath: string }} options - absolute path to route.js
  */
 export function fymoRoutePlugin({ runtimePath }) {
     return {

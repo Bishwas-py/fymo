@@ -9,7 +9,7 @@ import { fymoBroadcastPlugin } from './plugins/broadcast.mjs';
 import { fymoRoutePlugin } from './plugins/router.mjs';
 
 const config = JSON.parse(process.argv[2]);
-const routeRuntimePath = path.join(path.dirname(new URL(import.meta.url).pathname), 'runtime', 'route.svelte.js');
+const routeRuntimePath = path.join(path.dirname(new URL(import.meta.url).pathname), 'runtime', 'route.js');
 
 // Resolve esbuild-svelte and svelte-preprocess from the project's own
 // node_modules so the Svelte version used to COMPILE components matches the

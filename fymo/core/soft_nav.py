@@ -32,7 +32,7 @@ The decoded result has the shape:
 
 `params` is a top-level field independent of `leaf.props` -- a controller
 is never required to echo its own params back for the client to see them
-(see fymo/build/js/runtime/route.svelte.js for what reads this client-side).
+(see fymo/build/js/runtime/route.js for what reads this client-side).
 
 The `doc`/`title` merge and layout-prop loading go through the exact same
 `ssr_controller.load_layout_props_and_docs`/`merge_docs` helpers the

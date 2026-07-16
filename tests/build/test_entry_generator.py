@@ -71,19 +71,18 @@ def test_entry_error_branch_shares_the_runtime_error_handling(tmp_path: Path):
 
 
 def test_entry_wires_reactive_route_state_no_layout(tmp_path: Path):
-    """Issue #42: the plain (no layout_chain) entry imports the shared
-    reactive `route` object, seeds it from window.location + the
-    svelte-route-params island before hydrate(), and updates it on every
-    soft nav from the server's resolved params."""
+    """Issue #42: the plain (no layout_chain) entry imports fymo's shared
+    reactive route store and delegates seeding/updating to it, rather than
+    mutating route state inline -- one place owns that logic, every
+    generated entry just calls it."""
     route = Route(name="home", entry_path=tmp_path / "templates/home/index.svelte")
     out_dir = tmp_path / ".fymo" / "entries"
     write_client_entries([route], out_dir, project_root=tmp_path)
     text = (out_dir / "home.client.js").read_text()
+    assert "seedRoute, applyRouteNav" in text
     assert "from '$route'" in text
-    assert "svelte-route-params" in text
-    assert "route.pathname = window.location.pathname" in text
-    assert "route.search = window.location.search" in text
-    assert "route.params = data.params" in text
+    assert "seedRoute();" in text
+    assert "applyRouteNav(path, data.params);" in text
 
 
 def test_no_layout_chain_generates_same_template_as_before(tmp_path: Path):
@@ -185,11 +184,10 @@ def test_entry_wires_reactive_route_state_with_shell(tmp_path: Path):
     out_dir = tmp_path / "out"
     written = write_client_entries([route], out_dir, tmp_path)
     text = written["posts"].read_text()
+    assert "seedRoute, applyRouteNav" in text
     assert "from '$route'" in text
-    assert "svelte-route-params" in text
-    assert "route.pathname = window.location.pathname" in text
-    assert "route.search = window.location.search" in text
-    assert "route.params = data.params" in text
+    assert "seedRoute();" in text
+    assert "applyRouteNav(path, data.params);" in text
 
 
 def test_root_only_layout_chain_still_renders_leaf_in_else_branch(tmp_path: Path):

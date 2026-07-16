@@ -56,7 +56,7 @@ def test_props_are_flat_when_route_has_no_layout_chain(tmp_path, monkeypatch):
 def test_full_page_render_embeds_matched_params(tmp_path, monkeypatch):
     """Issue #42: a full-page (non soft-nav) load of a dynamic route must
     embed the resolved :id-style params in the HTML the same way the
-    soft-nav envelope does, so route.svelte.js can seed the client's
+    soft-nav envelope does, so route.js can seed the client's
     reactive route state before hydrate() with no extra round-trip."""
     renderer = _renderer(tmp_path)
     renderer.router.routes = {

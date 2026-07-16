@@ -22,7 +22,7 @@ import { fymoRoutePlugin } from './plugins/router.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(process.argv[2]);
-const routeRuntimePath = path.join(__dirname, 'runtime', 'route.svelte.js');
+const routeRuntimePath = path.join(__dirname, 'runtime', 'route.js');
 
 // Resolve esbuild-svelte and svelte-preprocess from the project's own node_modules
 // so that the Svelte version used for compilation matches the one used at SSR runtime.

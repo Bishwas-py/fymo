@@ -45,9 +45,16 @@ import path from 'node:path';
  * @param {string} url page URL to fetch and hydrate
  * @param {string} distDir local filesystem path to the app's dist/ directory
  * @param {number} [timeoutMs]
+ * @param {{afterBoot?: (window: object, ctx: {localPath: string}) => Promise<void>}} [opts]
+ *   afterBoot, when given, runs after a clean boot and before jsdom teardown
+ *   -- window/document/globalThis are still the real, hydrated page, so a
+ *   caller can drive further interaction (e.g. call an exported function
+ *   from the same already-imported bundle, then assert on real DOM state)
+ *   without reimplementing this file's boot/global-patching dance. Anything
+ *   it throws is folded into `errors` rather than crashing the check.
  * @returns {Promise<{ok: boolean, errors: string[], warnings: string[]}>}
  */
-export async function checkHydration(url, distDir, timeoutMs = 5000) {
+export async function checkHydration(url, distDir, timeoutMs = 5000, { afterBoot } = {}) {
   const errors = [];
   const warnings = [];
 
@@ -183,6 +190,14 @@ export async function checkHydration(url, distDir, timeoutMs = 5000) {
 
   const booted = !!window.__fymoBooted;
   if (!booted) errors.push(`client bundle never set window.__fymoBooted within ${timeoutMs}ms`);
+
+  if (booted && afterBoot) {
+    try {
+      await afterBoot(window, { localPath });
+    } catch (e) {
+      errors.push(`afterBoot hook threw: ${e && (e.stack || e.message || e)}`);
+    }
+  }
 
   console.error = originalConsoleError;
   console.warn = originalConsoleWarn;
