@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import contextvars
 import functools
-from typing import Callable, List, Optional, TypeVar
+from types import MappingProxyType
+from typing import Callable, List, Mapping, Optional, TypeVar
 
 from fymo.auth.email import EmailSender, LoggingEmailSender
 from fymo.auth.session import build_set_cookie, build_clear_cookie, verify_session_token
@@ -149,6 +150,77 @@ def _fymo_session_resolver(event: dict) -> Optional[User]:
     return user
 
 
+# --------------- identity extras (app-defined data next to the identity) ---
+#
+# fymo answers "who is this"; apps also need "what may this user do", and
+# that data (org, roles, scopes, tenant) has to live somewhere reachable
+# wherever current_user() is. Hooks registered here run once per request
+# scope, right after a resolver returns a user, and their merged result is
+# stored on the mutable per-request event dict that _current_event holds.
+# fymo stores the value and never inspects it.
+#
+# A hook (rather than an imperative setter) is the population point because
+# the built-in fymo-session resolver wins the chain before any registered
+# resolver runs: apps on fymo's own sessions would otherwise have no code
+# that executes at resolution time. The hook fires for every resolver in the
+# chain equally, built-in or provider.
+#
+# Coverage matches current_user() exactly: remote functions, SSR
+# controllers/layouts and the soft-nav data endpoint (both open the same
+# request scope when auth is enabled, see fymo.core.ssr_controller), and
+# broadcast guards. Note SSR opens one scope per controller invocation, so
+# "once per request" there means once per getContext/getDoc call.
+
+IdentityExtrasHook = Callable[[User], Mapping[str, object]]
+
+_identity_extras_hooks: List[IdentityExtrasHook] = []
+
+_EXTRAS_KEY = "identity_extras"
+_EMPTY_EXTRAS: Mapping[str, object] = MappingProxyType({})
+
+
+def register_identity_extras_hook(hook: IdentityExtrasHook) -> None:
+    """Add a hook called once per request scope with the resolved User.
+
+    Hooks run in registration order the first time current_user() resolves
+    someone; their returned mappings are merged (later wins on key
+    collision) and frozen for the rest of the scope. Never called for
+    anonymous requests."""
+    _identity_extras_hooks.append(hook)
+
+
+def reset_identity_extras_hooks() -> None:
+    """Drop all registered hooks (re-init / tests)."""
+    _identity_extras_hooks.clear()
+
+
+def identity_extras() -> Mapping[str, object]:
+    """Return the app-defined data attached to the resolved identity.
+
+    Empty until current_user() first resolves a user in this scope (or when
+    no hooks are registered); never an error inside a scope. Raises the same
+    RuntimeError as request_event() outside one."""
+    from fymo.remote.context import _current_event
+    event = _current_event.get()
+    if event is None:
+        raise RuntimeError(
+            "identity_extras() called outside of a remote-function request scope"
+        )
+    extras = event.get(_EXTRAS_KEY)
+    if extras is None:
+        return _EMPTY_EXTRAS
+    return extras
+
+
+def _populate_identity_extras(event: dict, user: User) -> None:
+    if _EXTRAS_KEY in event or not _identity_extras_hooks:
+        return
+    merged: dict = {}
+    for hook in _identity_extras_hooks:
+        merged.update(hook(user))
+    event[_EXTRAS_KEY] = MappingProxyType(merged)
+
+
 def current_user() -> Optional[User]:
     """Return the authenticated user, or None when no provider recognizes the
     request. Walks the fymo-session cookie first, then provider resolvers."""
@@ -161,6 +233,7 @@ def current_user() -> Optional[User]:
     for resolve in (_fymo_session_resolver, *_session_resolvers):
         user = resolve(event)
         if user is not None:
+            _populate_identity_extras(event, user)
             return user
     return None
 
