@@ -71,9 +71,35 @@ module under a blocked pytest import, not by trusting my reading of it.
 blog_app got the consumer-side proof: its first tests, and the only
 fixture the app itself owns is its database. Alice comments, bob comments
 through acting_as, and the assertion is that authorship follows the
-session, never the client. Full suite green, 929 tests up from 907, and the
-ten skips among them are the same Postgres-gated provider tests that skip
-everywhere without TEST_DATABASE_URL.
+session, never the client. Full suite green, and the only skips are the
+same Postgres-gated provider tests that skip everywhere without
+TEST_DATABASE_URL. (Final counts are in the postscript below; the tally I
+first wrote here went stale within a day.)
+
+## Postscript: The uid That Rode Along
+
+Caught before merge, and I'm glad it was: acting_as swapped the user and
+nothing else. current_user() flipped to bob, but the uid in the request
+scope, set once by signed_in, rode along unchanged, so both identities
+were the same anonymous caller the whole time. blog_app's own reactions
+table is what made the miss concrete instead of theoretical. Reactions
+are keyed purely by uid, so signed_in(alice) plus acting_as(bob) plus
+toggle_reaction had bob toggling alice's clap OFF. The cruel part is the
+shape of the failure: an isolation test written in good faith over that
+API would go green for exactly the wrong reason, and a green isolation
+test that lies is worse than no test at all.
+
+The fix was settling a rule rather than patching the symptom: identity
+is user plus uid, and the uid follows the user, derived as
+u_test{user.id} for both signed_in and acting_as, with an explicit uid=
+escape hatch when a test cares about the exact value. acting_as
+snapshots the event's uid and restores it in a finally, so nesting and
+exception exits unwind level by level, and signed_in stopped handing
+every block the same shared constant while I was at it. The regression
+tests live where the miss lived: blog_app now asserts alice's and bob's
+comment rows carry different uids, and a reactions test insists bob's
+clap takes the count to two instead of erasing alice's. Full suite now
+stands at 938 tests, 928 passing, same ten Postgres-gated skips.
 
 ---
 
