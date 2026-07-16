@@ -18,9 +18,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { fymoRemotePlugin } from './plugins/remote.mjs';
 import { fymoBroadcastPlugin } from './plugins/broadcast.mjs';
+import { fymoRoutePlugin } from './plugins/router.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(process.argv[2]);
+const routeRuntimePath = path.join(__dirname, 'runtime', 'route.js');
 
 // Resolve esbuild-svelte and svelte-preprocess from the project's own node_modules
 // so that the Svelte version used for compilation matches the one used at SSR runtime.
@@ -44,10 +46,13 @@ async function buildServer() {
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
         external: ['$remote/*', '$broadcast/*'],
-        plugins: [sveltePlugin({
-            preprocess: sveltePreprocess(),
-            compilerOptions: { generate: 'server', dev: false, css: 'external' },
-        })],
+        plugins: [
+            fymoRoutePlugin({ runtimePath: routeRuntimePath }),
+            sveltePlugin({
+                preprocess: sveltePreprocess(),
+                compilerOptions: { generate: 'server', dev: false, css: 'external' },
+            }),
+        ],
         logLevel: 'silent',
     });
 }
@@ -72,6 +77,7 @@ async function buildClient() {
         plugins: [
             fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
             fymoBroadcastPlugin({ broadcastDir: path.join(config.distDir, 'client', '_broadcast') }),
+            fymoRoutePlugin({ runtimePath: routeRuntimePath }),
             sveltePlugin({
                 preprocess: sveltePreprocess(),
                 compilerOptions: { generate: 'client', dev: false, css: 'external', discloseVersion: false },

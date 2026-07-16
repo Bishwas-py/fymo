@@ -53,6 +53,40 @@ def test_props_are_flat_when_route_has_no_layout_chain(tmp_path, monkeypatch):
     assert captured["props"] == {"message": "hi"}  # flat, not nested under leafProps
 
 
+def test_full_page_render_embeds_matched_params(tmp_path, monkeypatch):
+    """Issue #42: a full-page (non soft-nav) load of a dynamic route must
+    embed the resolved :id-style params in the HTML the same way the
+    soft-nav envelope does, so route.js can seed the client's
+    reactive route state before hydrate() with no extra round-trip."""
+    renderer = _renderer(tmp_path)
+    renderer.router.routes = {
+        "/posts/:id": {"controller": "posts", "action": "show", "template": "posts/show.svelte"},
+    }
+
+    class FakeManifestCache:
+        def get(self):
+            return Manifest(routes={"posts": RouteAssets(ssr="ssr/posts.mjs", client="client/posts.A.js", css=None, preload=[])})
+    renderer.manifest_cache = FakeManifestCache()
+
+    class FakeSidecar:
+        def render(self, route_name, props, doc=None):
+            return {"body": "<div></div>", "head": ""}
+    renderer.sidecar = FakeSidecar()
+
+    import sys, types
+    mod = types.ModuleType("app.controllers.posts")
+    mod.getContext = lambda id: {"post_id": id}
+    mod.getDoc = lambda: {"title": "Post"}
+    sys.modules["app.controllers.posts"] = mod
+    try:
+        html, status = renderer.render_template("/posts/welcome-to-fymo")
+    finally:
+        del sys.modules["app.controllers.posts"]
+
+    assert status == "200 OK"
+    assert '<script type="application/json" id="svelte-route-params">{"id": "welcome-to-fymo"}</script>' in html
+
+
 def test_props_are_nested_when_route_has_layout_chain(tmp_path, monkeypatch):
     renderer = _renderer(tmp_path)
 

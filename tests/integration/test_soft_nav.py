@@ -62,6 +62,51 @@ def test_soft_nav_data_returns_leaf_envelope(blog_app: Path, monkeypatch):
 
 
 @pytest.mark.usefixtures("node_available")
+def test_soft_nav_envelope_exposes_matched_params(blog_app: Path, monkeypatch):
+    """Issue #42: resolved :id-style params must be their own top-level
+    envelope field, not something only reachable if a controller happens to
+    echo them into props."""
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=blog_app).build(dev=False)
+
+    monkeypatch.chdir(blog_app)
+    from tests.integration._seed_helpers import seed_test_post
+    seed_test_post()
+    from fymo import create_app
+    app = create_app(blog_app)
+    try:
+        (status, _), envelope = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
+        assert status.startswith("200"), status
+        result = devalue.parse(envelope["result"])
+        assert result["params"] == {"id": "welcome-to-fymo"}
+    finally:
+        if app.sidecar:
+            app.sidecar.stop()
+
+
+@pytest.mark.usefixtures("node_available")
+def test_soft_nav_envelope_params_empty_for_static_route(blog_app: Path, monkeypatch):
+    """A route with no dynamic segments (the root route) still gets a
+    `params` field, just an empty dict rather than a missing key."""
+    from fymo.build.pipeline import BuildPipeline
+    BuildPipeline(project_root=blog_app).build(dev=False)
+
+    monkeypatch.chdir(blog_app)
+    from tests.integration._seed_helpers import seed_test_post
+    seed_test_post()
+    from fymo import create_app
+    app = create_app(blog_app)
+    try:
+        (status, _), envelope = _wsgi_get(app, "/_fymo/data/")
+        assert status.startswith("200"), status
+        result = devalue.parse(envelope["result"])
+        assert result["params"] == {}
+    finally:
+        if app.sidecar:
+            app.sidecar.stop()
+
+
+@pytest.mark.usefixtures("node_available")
 def test_soft_nav_unknown_route_returns_no_route(blog_app: Path, monkeypatch):
     from fymo.build.pipeline import BuildPipeline
     BuildPipeline(project_root=blog_app).build(dev=False)

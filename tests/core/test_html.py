@@ -132,6 +132,26 @@ def test_global_css_links_before_route_css():
     assert global_idx < route_idx
 
 
+def test_route_params_island_emitted():
+    """Issue #42: the initial page load must expose resolved :id-style
+    params the same way the soft-nav envelope does, so fymo/build/js/runtime
+    /route.js can seed the reactive route object before hydrate()."""
+    assets = RouteAssets(ssr="x", client="x.js", css=None, preload=[])
+    html = build_html(
+        body="", head_extra="", props={}, assets=assets, title="t",
+        params={"id": "welcome-to-fymo"},
+    )
+    assert '<script type="application/json" id="svelte-route-params">{"id": "welcome-to-fymo"}</script>' in html
+
+
+def test_route_params_island_present_and_empty_when_no_dynamic_segments():
+    """Always emitted (unlike the doc island, which is None-able) so the
+    client never has to special-case a missing tag vs an empty dict."""
+    assets = RouteAssets(ssr="x", client="x.js", css=None, preload=[])
+    html = build_html(body="", head_extra="", props={}, assets=assets, title="t")
+    assert '<script type="application/json" id="svelte-route-params">{}</script>' in html
+
+
 def test_no_global_css_omits_link():
     from fymo.build.manifest import RouteAssets
     from fymo.core.html import build_html

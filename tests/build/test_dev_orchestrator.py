@@ -86,6 +86,37 @@ def test_write_manifest_populates_layout_fields_from_synthetic_metafile(example_
     assert "_root" in manifest.layouts
 
 
+def test_real_dev_session_resolves_route_runtime(blog_app: Path, node_available):
+    """Issue #42's `$route` virtual import is wired into build.mjs's two
+    esbuild passes AND separately into dev.mjs's -- two independent
+    implementations, not a shared one (same drift shape journal_012 already
+    flagged for the pre-esbuild pipeline). Wiring only one silently breaks
+    every `fymo dev` build for any route, since the generated client entries
+    always import '$route' regardless of dev/build mode. This is the guard
+    for dev.mjs's copy specifically."""
+    orch = DevOrchestrator(blog_app)
+    try:
+        orch.start()
+        manifest_path = blog_app / "dist" / "manifest.json"
+        deadline = time.time() + 30
+        while time.time() < deadline and not manifest_path.exists():
+            time.sleep(0.1)
+        assert manifest_path.exists(), "dev build did not produce a manifest in 30s"
+
+        client_dir = blog_app / "dist" / "client"
+        deadline = time.time() + 10
+        chunk_files = list(client_dir.glob("chunk-*.js"))
+        while time.time() < deadline and not any("pathname" in f.read_text() for f in chunk_files):
+            time.sleep(0.2)
+            chunk_files = list(client_dir.glob("chunk-*.js"))
+        assert any("pathname" in f.read_text() for f in chunk_files), (
+            "no built chunk contains the route runtime's `pathname` state -- "
+            "$route failed to resolve in dev mode"
+        )
+    finally:
+        orch.stop()
+
+
 def test_real_dev_session_writes_correct_layout_manifest(blog_app: Path, node_available):
     """End-to-end: the actual bug. Runs a real `fymo dev` session (via
     DevOrchestrator directly, not the CLI) against blog_app -- which has a
