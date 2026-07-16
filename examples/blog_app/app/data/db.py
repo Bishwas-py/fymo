@@ -1,5 +1,6 @@
 """SQLite singleton with schema migration on first connect."""
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -33,15 +34,20 @@ class DB:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: sqlite3.Connection | None = None
+        # One connection per thread: sqlite3 connections aren't safe to share
+        # across threads under a threaded server (granian, or fymo's own dev
+        # server), so each thread gets its own on first use.
+        self._local = threading.local()
 
     def connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.executescript(_SCHEMA)
-            self._conn.commit()
-        return self._conn
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self.path))
+            conn.row_factory = sqlite3.Row
+            conn.executescript(_SCHEMA)
+            conn.commit()
+            self._local.conn = conn
+        return conn
 
     def fetchone(self, sql: str, params: list[Any] = ()) -> dict | None:
         row = self.connect().execute(sql, params).fetchone()
