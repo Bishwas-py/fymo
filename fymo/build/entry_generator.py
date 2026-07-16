@@ -99,6 +99,7 @@ async function softNav(path, push = true) {{
     let env;
     try {{ env = await res.json(); }}
     catch (e) {{ window.location.href = path; return; }}
+    if (env.type === 'redirect') {{ window.location.href = env.location; return; }}
     if (env.type === 'error') {{ window.location.href = path; return; }}
     inflight = null;
 
@@ -355,6 +356,7 @@ async function softNav(path, push = true) {{
     let env;
     try {{ env = await res.json(); }}
     catch (e) {{ window.location.href = path; return; }}
+    if (env.type === 'redirect') {{ window.location.href = env.location; return; }}
     if (env.type === 'error') {{ window.location.href = path; return; }}
     inflight = null;
 

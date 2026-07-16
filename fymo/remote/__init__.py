@@ -1,10 +1,10 @@
 """Fymo remote functions: server-only Python callable from Svelte components."""
-from fymo.remote.errors import RemoteError, NotFound, Unauthorized, Forbidden, Conflict
+from fymo.remote.errors import RemoteError, NotFound, Unauthorized, Forbidden, Conflict, Redirect
 from fymo.remote.identity import current_uid
 from fymo.remote.context import request_event
 from fymo.remote.decorators import remote
 
 __all__ = [
-    "RemoteError", "NotFound", "Unauthorized", "Forbidden", "Conflict",
+    "RemoteError", "NotFound", "Unauthorized", "Forbidden", "Conflict", "Redirect",
     "current_uid", "request_event", "remote",
 ]

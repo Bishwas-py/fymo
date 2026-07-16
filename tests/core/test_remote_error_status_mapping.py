@@ -25,7 +25,7 @@ def test_not_found_renders_404_not_500(tmp_path, monkeypatch):
         raise NotFound("post 'missing-slug' not found")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    html, status = r.render_template("/posts/missing-slug")
+    html, status, _headers = r.render_template("/posts/missing-slug")
     assert status == "404 NOT FOUND"
     assert "Not Found" in html
 
@@ -37,7 +37,7 @@ def test_unauthorized_renders_401(tmp_path, monkeypatch):
         raise Unauthorized("sign in required")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    _, status = r.render_template("/whatever")
+    _, status, _headers = r.render_template("/whatever")
     assert status == "401 UNAUTHORIZED"
 
 
@@ -48,7 +48,7 @@ def test_forbidden_renders_403(tmp_path, monkeypatch):
         raise Forbidden("not your post")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    _, status = r.render_template("/whatever")
+    _, status, _headers = r.render_template("/whatever")
     assert status == "403 FORBIDDEN"
 
 
@@ -59,7 +59,7 @@ def test_conflict_renders_409(tmp_path, monkeypatch):
         raise Conflict("already exists")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    _, status = r.render_template("/whatever")
+    _, status, _headers = r.render_template("/whatever")
     assert status == "409 CONFLICT"
 
 
@@ -73,7 +73,7 @@ def test_not_found_message_still_escaped_in_dev(tmp_path, monkeypatch):
         raise NotFound("post '<script>alert(1)</script>' not found")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    html, status = r.render_template("/whatever")
+    html, status, _headers = r.render_template("/whatever")
     assert status == "404 NOT FOUND"
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
@@ -86,6 +86,6 @@ def test_not_found_omits_message_in_prod(tmp_path, monkeypatch):
         raise NotFound("post 'secret-internal-id-42' not found")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    html, status = r.render_template("/whatever")
+    html, status, _headers = r.render_template("/whatever")
     assert status == "404 NOT FOUND"
     assert "secret-internal-id-42" not in html

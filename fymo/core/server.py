@@ -450,7 +450,9 @@ class FymoApp:
             # Return router without routes file - will use convention-based routing
             return Router()
     
-    def render_svelte_template(self, route_path: str, environ: dict | None = None) -> tuple[str, str]:
+    def render_svelte_template(
+        self, route_path: str, environ: dict | None = None
+    ) -> tuple[str, str, list[tuple[str, str]]]:
         """
         Render a Svelte component with SSR
 
@@ -461,7 +463,8 @@ class FymoApp:
                 session cookie during SSR when auth is enabled.
 
         Returns:
-            Tuple of (html, status_code)
+            Tuple of (html, status_code, extra_headers) -- extra_headers
+            carries e.g. Location when a controller raised Redirect.
         """
         return self.template_renderer.render_template(route_path, environ)
     
@@ -642,14 +645,14 @@ class FymoApp:
                 return route.handler(environ, start_response)
 
         # Handle template requests
-        html, status = self.render_svelte_template(path, environ)
+        html, status, extra_headers = self.render_svelte_template(path, environ)
         html_bytes = html.encode("utf-8")
-        start_response(
-            status, [
-                ("Content-Type", "text/html"),
-                ("Content-Length", str(len(html_bytes)))
-            ]
-        )
+        response_headers = [
+            ("Content-Type", "text/html"),
+            ("Content-Length", str(len(html_bytes))),
+        ]
+        response_headers.extend(extra_headers)
+        start_response(status, response_headers)
         return iter([html_bytes])
 
 

@@ -70,6 +70,19 @@ def test_entry_error_branch_shares_the_runtime_error_handling(tmp_path: Path):
     assert "e.traceback = env.traceback;" in text
 
 
+def test_softnav_handles_redirect_envelope_no_layout(tmp_path: Path):
+    """Issue #58: a controller's getContext() raising Redirect during a
+    soft-nav transition must send the browser to the new location, the same
+    way the __rpc redirect branch already does for a remote-function call --
+    not fall through to whatever the `type === 'error'` branch does."""
+    route = Route(name="home", entry_path=tmp_path / "templates/home/index.svelte")
+    out_dir = tmp_path / ".fymo" / "entries"
+    write_client_entries([route], out_dir, project_root=tmp_path)
+    text = (out_dir / "home.client.js").read_text()
+    assert "env.type === 'redirect'" in text
+    assert text.count("env.type === 'redirect'") >= 2  # __rpc AND softNav
+
+
 def test_entry_wires_reactive_route_state_no_layout(tmp_path: Path):
     """Issue #42: the plain (no layout_chain) entry imports fymo's shared
     reactive route store and delegates seeding/updating to it, rather than
@@ -144,6 +157,7 @@ def test_layout_chain_generates_shell_and_bootstrap(tmp_path: Path):
     assert shell.count("{@render leafSlot()}") == 2
 
     bootstrap = written["posts"].read_text()
+    assert bootstrap.count("env.type === 'redirect'") >= 2  # __rpc AND softNav
     assert "import Shell from './posts.shell.svelte'" in bootstrap
     assert "hydrate(Shell" in bootstrap
     assert "shellInstance.swapLeaf" in bootstrap
