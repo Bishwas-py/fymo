@@ -105,16 +105,27 @@ def test_every_procrastinate_sequence_in_the_catalog_is_enumerated(database_url,
     assert sequences == enumerated["sequence"]
 
 
-def test_enumerated_indexes_and_triggers_exist_in_the_catalog(database_url, enumerated):
-    # Subset check, not equality: the catalog also holds constraint-backed
-    # indexes (pkeys, unique constraints) that only exist through their
-    # table, excluding the table already protects those.
+def test_every_explicit_procrastinate_index_in_the_catalog_is_enumerated(database_url, enumerated):
+    # Equality after excluding constraint-backed indexes (pkeys, unique
+    # constraints): those only exist through their table, no schema tool
+    # manages them separately, and excluding the table already protects
+    # them. Everything else on a procrastinate table must be enumerated,
+    # so an under-reported explicit CREATE INDEX fails here.
     indexes = _catalog(
         database_url,
-        "SELECT indexname FROM pg_indexes WHERE schemaname = 'public'",
+        "SELECT c.relname FROM pg_index i"
+        " JOIN pg_class c ON c.oid = i.indexrelid"
+        " JOIN pg_class t ON t.oid = i.indrelid"
+        " JOIN pg_namespace n ON n.oid = t.relnamespace"
+        " WHERE n.nspname = 'public' AND t.relname LIKE 'procrastinate%'"
+        " AND NOT EXISTS ("
+        "   SELECT 1 FROM pg_constraint con WHERE con.conindid = i.indexrelid"
+        " )",
     )
-    assert enumerated["index"] <= indexes
+    assert indexes == enumerated["index"]
 
+
+def test_every_procrastinate_trigger_in_the_catalog_is_enumerated(database_url, enumerated):
     triggers = _catalog(
         database_url,
         "SELECT DISTINCT t.tgname FROM pg_trigger t WHERE NOT t.tgisinternal",
@@ -122,3 +133,11 @@ def test_enumerated_indexes_and_triggers_exist_in_the_catalog(database_url, enum
     assert enumerated["trigger"] == {
         t for t in triggers if t.startswith("procrastinate")
     }
+
+
+def test_enumerated_extensions_exist_in_the_catalog(database_url, enumerated):
+    # Subset, not equality: the guarded CREATE EXTENSION plpgsql targets
+    # an extension every Postgres already ships, and the catalog may hold
+    # unrelated extensions the database had before the schema apply.
+    extensions = _catalog(database_url, "SELECT extname FROM pg_extension")
+    assert enumerated.get("extension", set()) <= extensions
