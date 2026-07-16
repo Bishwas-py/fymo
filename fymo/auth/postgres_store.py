@@ -112,13 +112,21 @@ class PostgresUserStore:
                         open=True,
                         kwargs={"row_factory": self._dict_row},
                     )
-                    with pool.connection() as conn:
-                        conn.execute(
-                            "SELECT pg_advisory_xact_lock(%s)",
-                            (_BOOTSTRAP_LOCK_KEY,),
-                        )
-                        conn.execute(_SCHEMA_PATH.read_text())
-                        self._migrate(conn)
+                    # If bootstrap fails (transient outage on first call),
+                    # close the pool instead of leaking it: its background
+                    # workers would keep reconnecting until process exit,
+                    # and the next call would build another pool on top.
+                    try:
+                        with pool.connection() as conn:
+                            conn.execute(
+                                "SELECT pg_advisory_xact_lock(%s)",
+                                (_BOOTSTRAP_LOCK_KEY,),
+                            )
+                            conn.execute(_SCHEMA_PATH.read_text())
+                            self._migrate(conn)
+                    except BaseException:
+                        pool.close()
+                        raise
                     self._pool = pool
         return self._pool
 

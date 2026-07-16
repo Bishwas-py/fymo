@@ -103,3 +103,35 @@ def test_non_ascii_email_case_collision_diverges_from_sqlite(monkeypatch, tmp_pa
             store.create("é@example.com", "h")
     finally:
         store.close()
+
+
+def test_bootstrap_failure_closes_the_pool(monkeypatch, tmp_path: Path):
+    """If schema bootstrap raises on the first call (transient outage), the
+    freshly built pool must be closed, not leaked with its background
+    workers reconnecting forever, and _pool must stay None so the next
+    call retries from scratch."""
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/unused")
+    store = PostgresUserStore(tmp_path)
+
+    created = []
+
+    class FakePool:
+        def __init__(self, *args, **kwargs):
+            self.closed = False
+            created.append(self)
+
+        def connection(self):
+            raise RuntimeError("bootstrap boom")
+
+        def close(self):
+            self.closed = True
+
+    class FakePoolModule:
+        ConnectionPool = FakePool
+
+    monkeypatch.setattr(store, "_psycopg_pool", FakePoolModule)
+    with pytest.raises(RuntimeError, match="bootstrap boom"):
+        store.get_by_id(1)
+    assert store._pool is None
+    assert len(created) == 1
+    assert created[0].closed is True
