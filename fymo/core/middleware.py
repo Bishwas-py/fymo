@@ -37,12 +37,21 @@ Both are skipped in dev (`dev=True`).
 """
 from __future__ import annotations
 
-import threading
-import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from fymo.core.config import parse_bool
+
+# Bucket mechanics live in fymo.core.ratelimit, shared with the remote
+# router's per-function limiter. Re-exported here (`_TokenBucket`,
+# `_SWEEP_INTERVAL_SECONDS`) because this module was their original home.
+from fymo.core.ratelimit import (  # noqa: F401
+    _SWEEP_INTERVAL_SECONDS,
+    BucketRegistry,
+    _TokenBucket,
+    resolve_client_ip,
+    retry_after_seconds,
+)
 
 
 # ---------------- Rate limiter ----------------
@@ -59,77 +68,21 @@ class RateLimitConfig:
     trust_proxy: bool = False
 
 
-class _TokenBucket:
-    __slots__ = ("tokens", "last_refill", "capacity", "rate")
-
-    def __init__(self, capacity: int, rate: float):
-        self.tokens: float = float(capacity)
-        self.last_refill = time.monotonic()
-        self.capacity = capacity
-        self.rate = rate  # tokens per second
-
-    def take(self) -> bool:
-        now = time.monotonic()
-        self.tokens = min(self.capacity, self.tokens + (now - self.last_refill) * self.rate)
-        self.last_refill = now
-        if self.tokens >= 1.0:
-            self.tokens -= 1.0
-            return True
-        return False
-
-
-#: How often (in seconds) `RateLimiter.check` opportunistically sweeps idle
-#: buckets. A dedicated background thread isn't worth it for this -- request
-#: traffic itself drives the sweep, and a 60s cadence bounds the sweep's own
-#: overhead to well under the cost of the token-bucket check it rides along
-#: with.
-_SWEEP_INTERVAL_SECONDS = 60.0
-
-
-class RateLimiter:
+class RateLimiter(BucketRegistry):
     """Per-(IP, rule) token bucket rate limiter, in-process.
 
-    `_buckets` is otherwise unbounded: every distinct (client_ip, rule)
-    pair seen gets its own entry that nothing ever removes, so a
-    long-running process fielding traffic from many distinct IPs (the
-    normal case for anything public-facing) leaks memory for as long as it
-    runs. `check` opportunistically sweeps idle buckets to bound this.
+    The bucket registry, locking, and idle-bucket sweep come from
+    `BucketRegistry` (fymo.core.ratelimit); this class adds the WSGI-facing
+    policy: which bucket a request maps to (client IP + longest matching
+    path-prefix rule) and how big that bucket is.
     """
 
     def __init__(self, config: RateLimitConfig):
+        super().__init__()
         self.config = config
-        self._buckets: Dict[Tuple[str, str], _TokenBucket] = {}
-        self._lock = threading.Lock()
-        self._last_sweep = time.monotonic()
-
-    def _sweep_idle_buckets(self, now: float) -> None:
-        """Drop buckets that have fully refilled since their last request.
-
-        A fully-refilled bucket carries no state a brand-new one wouldn't
-        also have (both start at `capacity` tokens), so evicting it doesn't
-        change any client-visible behavior -- the next request for that key
-        just lazily recreates an identical bucket. Buckets with partial
-        state (a client currently being throttled, or one that hasn't been
-        idle long enough to fully refill) are left alone, since dropping
-        those WOULD reset their limit early. Must be called with `_lock`
-        held.
-        """
-        stale = [
-            key
-            for key, bucket in self._buckets.items()
-            if bucket.tokens + (now - bucket.last_refill) * bucket.rate >= bucket.capacity
-        ]
-        for key in stale:
-            del self._buckets[key]
 
     def client_ip(self, environ: dict) -> str:
-        if self.config.trust_proxy:
-            xff = environ.get("HTTP_X_FORWARDED_FOR", "")
-            if xff:
-                first = xff.split(",", 1)[0].strip()
-                if first:
-                    return first
-        return environ.get("REMOTE_ADDR", "unknown")
+        return resolve_client_ip(environ, self.config.trust_proxy)
 
     def _rule_for_path(self, path: str) -> Tuple[int, str]:
         """Return (rpm, rule_key). Longest matching prefix wins."""
@@ -154,26 +107,12 @@ class RateLimiter:
         path = environ.get("PATH_INFO", "/")
         ip = self.client_ip(environ)
         rpm, rule_key = self._rule_for_path(path)
-        scope_key = (ip, rule_key)
 
-        with self._lock:
-            now = time.monotonic()
-            if now - self._last_sweep >= _SWEEP_INTERVAL_SECONDS:
-                self._sweep_idle_buckets(now)
-                self._last_sweep = now
-
-            bucket = self._buckets.get(scope_key)
-            if bucket is None or bucket.capacity != rpm:
-                bucket = _TokenBucket(capacity=rpm, rate=rpm / 60.0)
-                self._buckets[scope_key] = bucket
-            allowed = bucket.take()
-            remaining = max(0, int(bucket.tokens))
+        allowed, remaining = self.check_key((ip, rule_key), rpm, rpm / 60.0)
 
         info = {"limit": rpm, "remaining": remaining, "retry_after": 0}
         if not allowed:
-            # Seconds until 1 token regenerates; ceil to at least 1.
-            seconds_per_token = 60.0 / rpm if rpm > 0 else 60.0
-            info["retry_after"] = max(1, int(seconds_per_token + 0.999))
+            info["retry_after"] = retry_after_seconds(rpm)
         return allowed, info
 
 

@@ -52,3 +52,15 @@ class Redirect(RemoteError):
     def __init__(self, location: str, status: int = 303):
         super().__init__(f"redirect to {location}", status=status, code="redirect")
         self.location = location
+
+
+class RateLimited(RemoteError):
+    """Too many requests for a @rate_limit-decorated function (or raised
+    manually by app code). `retry_after` is seconds until the caller may
+    try again; the router surfaces it in the error envelope."""
+    status = 429
+    code = "rate_limited"
+
+    def __init__(self, message: str = "rate limit exceeded", *, retry_after: int = 1):
+        super().__init__(message)
+        self.retry_after = retry_after
