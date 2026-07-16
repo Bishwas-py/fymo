@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import * as esbuild from 'esbuild';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,13 +10,17 @@ import { fymoRoutePlugin } from './plugins/router.mjs';
 const config = JSON.parse(process.argv[2]);
 const routeRuntimePath = path.join(path.dirname(new URL(import.meta.url).pathname), 'runtime', 'route.js');
 
-// Resolve esbuild-svelte and svelte-preprocess from the project's own
-// node_modules so the Svelte version used to COMPILE components matches the
-// one esbuild bundles for the SSR runtime. Bare imports here would resolve
-// from fymo's own node_modules instead, and any version skew makes the
-// compiler emit lifecycle calls the runtime no longer exports — the bundle
-// then calls `(void 0)()` and every render throws. Mirrors build.mjs.
+// Resolve esbuild, esbuild-svelte, and svelte-preprocess from the project's
+// own node_modules so the Svelte version used to COMPILE components matches
+// the one esbuild bundles for the SSR runtime, and so esbuild itself is even
+// resolvable at all once fymo is a real pip install with no node_modules of
+// its own. Bare imports here would resolve from fymo's own package tree
+// instead (or, for esbuild-svelte/svelte-preprocess, from whatever version
+// happens to sit there, causing a Svelte version skew where the compiler
+// emits lifecycle calls the runtime no longer exports, the bundle then
+// calls `(void 0)()` and every render throws). Mirrors build.mjs.
 const projectRequire = createRequire(path.join(config.projectRoot, 'package.json'));
+const esbuild = await import(pathToFileURL(projectRequire.resolve('esbuild')).href);
 const sveltePlugin = (await import(pathToFileURL(projectRequire.resolve('esbuild-svelte')).href)).default;
 const sveltePreprocess = (await import(pathToFileURL(projectRequire.resolve('svelte-preprocess')).href)).default;
 
@@ -39,6 +42,15 @@ async function makeServerCtx() {
         sourcemap: 'linked',
         metafile: true,
         external: ['$remote/*', '$broadcast/*'],
+        // fymoRoutePlugin resolves `$route` to fymo's own shipped
+        // runtime/route.js, which lives inside fymo's install location, not
+        // the project. Its own `import ... from 'svelte/store'` would
+        // otherwise be resolved against route.js's directory ancestry (same
+        // problem the createRequire calls above solve for esbuild itself),
+        // which is empty for a real pip install. nodePaths is esbuild's
+        // NODE_PATH-style fallback search list, tried once normal ancestor
+        // resolution comes up empty. Mirrors build.mjs.
+        nodePaths: [path.join(config.projectRoot, 'node_modules')],
         plugins: [
             fymoRoutePlugin({ runtimePath: routeRuntimePath }),
             sveltePlugin({ preprocess: sveltePreprocess(), compilerOptions: { generate: 'server', dev: false } }),
@@ -63,6 +75,10 @@ async function makeClientCtx() {
         minify: false,
         sourcemap: 'linked',
         metafile: true,
+        // See makeServerCtx()'s nodePaths comment -- the client bundle also
+        // imports `$route` -> route.js, with the same svelte/store fallback
+        // requirement.
+        nodePaths: [path.join(config.projectRoot, 'node_modules')],
         plugins: [
             fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
             fymoBroadcastPlugin({ broadcastDir: path.join(config.distDir, 'client', '_broadcast') }),
