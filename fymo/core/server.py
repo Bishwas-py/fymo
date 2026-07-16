@@ -475,14 +475,16 @@ class FymoApp:
         return self.template_renderer.render_template(route_path, environ)
     
     
-    def serve_asset(self, path: str) -> tuple[str, str, str]:
+    def serve_asset(
+        self, path: str, environ: Optional[dict] = None
+    ) -> tuple[bytes, str, str, Dict[str, str]]:
         """
         Serve static assets
-        
+
         Returns:
-            Tuple of (content, status, content_type)
+            Tuple of (body, status, content_type, extra_headers)
         """
-        return self.asset_manager.serve_asset(path)
+        return self.asset_manager.serve_asset(path, environ)
     
     
     def _healthz(self, start_response):
@@ -631,17 +633,15 @@ class FymoApp:
 
         # Handle asset requests
         if path.startswith('/assets/'):
-            content, status, content_type = self.serve_asset(path)
-            content_bytes = content.encode("utf-8") if isinstance(content, str) else content
-            start_response(
-                status, [
-                    ("Content-Type", content_type),
-                    ("Content-Length", str(len(content_bytes))),
-                    ("Access-Control-Allow-Origin", "*"),
-                    ("Cache-Control", "public, max-age=3600")
-                ]
-            )
-            return iter([content_bytes])
+            body, status, content_type, extra = self.serve_asset(path, environ)
+            response_headers = [
+                ("Content-Type", content_type),
+                ("Content-Length", str(len(body))),
+                ("Access-Control-Allow-Origin", "*"),
+            ]
+            response_headers.extend(extra.items())
+            start_response(status, response_headers)
+            return iter([body])
 
         # App-defined raw HTTP routes (e.g. media streaming with Range
         # support) — first match wins, in registration order.

@@ -29,19 +29,23 @@ class AssetManager:
         """Get extracted CSS"""
         return self.extracted_css.get(name)
     
-    def serve_asset(self, path: str) -> Tuple[str, str, str]:
+    def serve_asset(
+        self, path: str, environ: Optional[dict] = None
+    ) -> Tuple[bytes, str, str, Dict[str, str]]:
         """
         Serve static assets
 
         Args:
             path: Asset path (should start with /assets/)
+            environ: WSGI environ of the request, when available. Used for
+                conditional requests (If-None-Match) against static files.
 
         Returns:
-            Tuple of (content, status, content_type)
+            Tuple of (body, status, content_type, extra_headers)
         """
         try:
             if not path.startswith('/assets/'):
-                return "Invalid asset path", "400 BAD REQUEST", "text/plain"
+                return b"Invalid asset path", "400 BAD REQUEST", "text/plain", {}
 
             asset_path = path[8:]  # Remove '/assets/' prefix
 
@@ -50,16 +54,20 @@ class AssetManager:
                 css_file = asset_path[4:]
                 css_content = self.get_extracted_css(css_file)
                 if css_content:
-                    return css_content, "200 OK", "text/css"
+                    return (
+                        css_content.encode("utf-8"), "200 OK", "text/css",
+                        {"Cache-Control": "public, max-age=3600"},
+                    )
 
             # Serve static files
             else:
-                return self._serve_static_file(asset_path)
+                return self.serve_static_file(asset_path, environ)
 
-            return "Asset not found", "404 NOT FOUND", "text/plain"
+            return b"Asset not found", "404 NOT FOUND", "text/plain", {}
 
         except Exception as e:
-            return f"Asset serving error: {str(e)}", "500 INTERNAL SERVER ERROR", "text/plain"
+            body = f"Asset serving error: {str(e)}".encode("utf-8")
+            return body, "500 INTERNAL SERVER ERROR", "text/plain", {}
 
     @staticmethod
     def _safe_resolve(root: Path, rel_path: str) -> Optional[Path]:
@@ -89,11 +97,33 @@ class AssetManager:
             return None
         return target
 
-    def _serve_static_file(self, asset_path: str) -> Tuple[str, str, str]:
-        """Serve static files from app/static directory"""
+    @staticmethod
+    def _etag_matches(if_none_match: str, etag: str) -> bool:
+        """True when the request's If-None-Match header matches `etag`.
+
+        Weak comparison (the W/ prefix is ignored), which is what RFC 9110
+        prescribes for If-None-Match; `*` matches any current representation.
+        """
+        for candidate in if_none_match.split(","):
+            candidate = candidate.strip()
+            if candidate.startswith("W/"):
+                candidate = candidate[2:]
+            if candidate == "*" or candidate == etag:
+                return True
+        return False
+
+    def serve_static_file(
+        self, asset_path: str, environ: Optional[dict] = None
+    ) -> Tuple[bytes, str, str, Dict[str, str]]:
+        """Serve a file from app/static verbatim, as bytes.
+
+        Static files are unhashed, so responses carry an ETag (from stat
+        mtime+size) and If-None-Match is honored with a 304 -- the 1-hour
+        Cache-Control alone would re-download the full body on every expiry.
+        """
         static_path = self._safe_resolve(self.project_root / 'app' / 'static', asset_path)
         if static_path is None:
-            return "Forbidden", "403 FORBIDDEN", "text/plain"
+            return b"Forbidden", "403 FORBIDDEN", "text/plain", {}
 
         if static_path.exists() and static_path.is_file():
             content_type, _ = mimetypes.guess_type(str(static_path))
@@ -101,13 +131,17 @@ class AssetManager:
                 content_type = 'application/octet-stream'
 
             try:
-                with open(static_path, 'rb') as f:
-                    content = f.read()
-                return content.decode('utf-8'), "200 OK", content_type
-            except (IOError, UnicodeDecodeError):
-                return "Error reading file", "500 INTERNAL SERVER ERROR", "text/plain"
+                stat = static_path.stat()
+                etag = '"%x-%x"' % (stat.st_mtime_ns, stat.st_size)
+                headers = {"ETag": etag, "Cache-Control": "public, max-age=3600"}
+                if_none_match = (environ or {}).get("HTTP_IF_NONE_MATCH", "")
+                if if_none_match and self._etag_matches(if_none_match, etag):
+                    return b"", "304 NOT MODIFIED", content_type, headers
+                return static_path.read_bytes(), "200 OK", content_type, headers
+            except IOError:
+                return b"Error reading file", "500 INTERNAL SERVER ERROR", "text/plain", {}
 
-        return "File not found", "404 NOT FOUND", "text/plain"
+        return b"File not found", "404 NOT FOUND", "text/plain", {}
 
     def serve_dist_asset(self, path: str) -> Tuple[bytes, str, str, Dict[str, str]]:
         """Serve a file from <project>/dist/. Returns (body, status, content_type, extra_headers).
