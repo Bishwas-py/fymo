@@ -141,7 +141,7 @@ def test_pipeline_raises_on_unmatched_layout_output(blog_app: Path):
     fake_result = {"client": {"outputs": fake_outputs}}
 
     with pytest.raises(BuildError, match="esbuild produced no client output for layout '_root'"):
-        pipeline._build_manifest(routes, fake_result, {}, all_layouts, False)
+        pipeline._build_manifest(routes, fake_result, {}, all_layouts)
 
 
 def test_pipeline_no_layout_routes_unaffected(example_app: Path, node_available):
@@ -157,24 +157,132 @@ def test_pipeline_no_layout_routes_unaffected(example_app: Path, node_available)
     assert manifest.layouts == {}
 
 
-def test_pipeline_global_css_produces_manifest_entry(example_app: Path, node_available):
+def test_pipeline_global_css_fails_with_migration_error(example_app: Path):
+    """Issue #77: the _global.css magic filename is deleted, not deprecated.
+    A project still shipping one fails the build with the exact fix."""
     (example_app / "app" / "templates" / "_global.css").write_text("body { margin: 0; }")
-    from fymo.build.pipeline import BuildPipeline
+    with pytest.raises(BuildError) as exc:
+        BuildPipeline(example_app).build(dev=False)
+    assert str(exc.value) == (
+        "Error: _global.css is no longer auto-injected. Move it to app/assets/app.css\n"
+        "and add `import '../assets/app.css'` to app/templates/_layout.svelte."
+    )
+
+
+def test_pipeline_css_file_in_templates_fails_hygiene(example_app: Path):
+    """Issue #77: stylesheets have one home. Any loose .css under
+    app/templates/ is a hygiene build error naming the move."""
+    (example_app / "app" / "templates" / "todos" / "extra.css").write_text("p { color: red; }")
+    with pytest.raises(BuildError, match=r"stylesheets live in app/assets/, found app/templates/todos/extra\.css"):
+        BuildPipeline(example_app).build(dev=False)
+
+
+def _write_root_layout_importing_app_css(project: Path, css: str) -> None:
+    assets_dir = project / "app" / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / "app.css").write_text(css)
+    (project / "app" / "templates" / "_layout.svelte").write_text(
+        "<script>\n  import '../assets/app.css';\n\n  let { children } = $props();\n</script>\n"
+        "{@render children()}\n"
+    )
+
+
+def test_pipeline_layout_imported_css_lands_in_layout_manifest(example_app: Path, node_available):
+    """Issue #77: a root layout importing app/assets/app.css gets that CSS
+    bundled into its entry's sibling CSS output, tracked as LayoutAssets.css.
+    The SSR pass must not choke on the .css import (empty-loaded)."""
+    _write_root_layout_importing_app_css(example_app, "body { margin: 0; background: #abcdef; }")
     result = BuildPipeline(example_app).build(dev=False)
     from fymo.build.manifest import Manifest
     manifest = Manifest.read(result.manifest_path)
-    assert manifest.global_css is not None
-    css_path = example_app / "dist" / manifest.global_css
+    assert manifest.layouts["_root"].css is not None
+    css_path = example_app / "dist" / manifest.layouts["_root"].css
     assert css_path.is_file()
-    assert "margin" in css_path.read_text()
+    assert "#abcdef" in css_path.read_text()
 
 
-def test_pipeline_no_global_css_leaves_manifest_field_none(example_app: Path, node_available):
-    from fymo.build.pipeline import BuildPipeline
+def test_pipeline_font_url_hashed_into_dist_and_rewritten(example_app: Path, node_available):
+    """Issue #77 acceptance: a real @font-face with a real woff2 in
+    app/assets/fonts/ builds; the font is content-hashed into dist/client/
+    and the css url() is rewritten to a /dist/client/ path that serves."""
+    woff2 = b"wOF2\x00\x01\x00\x00" + bytes(range(256))
+    fonts_dir = example_app / "app" / "assets" / "fonts"
+    fonts_dir.mkdir(parents=True, exist_ok=True)
+    (fonts_dir / "inter.woff2").write_bytes(woff2)
+    _write_root_layout_importing_app_css(
+        example_app,
+        "@font-face { font-family: 'Inter'; src: url('./fonts/inter.woff2') format('woff2'); }\n"
+        "body { font-family: 'Inter', sans-serif; }\n",
+    )
     result = BuildPipeline(example_app).build(dev=False)
     from fymo.build.manifest import Manifest
     manifest = Manifest.read(result.manifest_path)
-    assert manifest.global_css is None
+    css_text = (example_app / "dist" / manifest.layouts["_root"].css).read_text()
+
+    import re
+    m = re.search(r"url\(\"?(/dist/client/inter\.[A-Z0-9]+\.woff2)\"?\)", css_text)
+    assert m, f"font url not rewritten to /dist/client/: {css_text}"
+    hashed_rel = m.group(1)[len("/dist/"):]
+    hashed_file = example_app / "dist" / hashed_rel
+    assert hashed_file.is_file()
+    assert hashed_file.read_bytes() == woff2
+
+    # The rewritten URL actually serves, byte-identical.
+    from fymo.core.assets import AssetManager
+    body, status, content_type, _ = AssetManager(example_app).serve_dist_asset(hashed_rel)
+    assert status == "200 OK"
+    assert content_type == "font/woff2"
+    assert body == woff2
+
+
+def test_pipeline_root_absolute_url_left_untouched(example_app: Path, node_available):
+    """Root-absolute urls are verbatim static references (app/static/ at
+    /static/), not build inputs: the bundle must leave them alone."""
+    _write_root_layout_importing_app_css(
+        example_app, "body { background-image: url('/static/bg.png'); }"
+    )
+    result = BuildPipeline(example_app).build(dev=False)
+    from fymo.build.manifest import Manifest
+    manifest = Manifest.read(result.manifest_path)
+    css_text = (example_app / "dist" / manifest.layouts["_root"].css).read_text()
+    assert "/static/bg.png" in css_text
+
+
+def test_pipeline_bare_package_css_import_resolves_from_node_modules(example_app: Path, node_available):
+    """`@import '@fontsource/inter';`-style bare specifiers resolve through
+    the project's node_modules (nodePaths). The example fixture's
+    node_modules is a read-only symlink, so rebuild it as a real directory
+    of per-package symlinks plus one scratch fontsource-style package
+    (package.json main pointing at a css file, the @fontsource convention)."""
+    nm = example_app / "node_modules"
+    real_nm = nm.resolve()
+    nm.unlink()
+    nm.mkdir()
+    for pkg in real_nm.iterdir():
+        if pkg.name.startswith("@"):
+            scope = nm / pkg.name
+            scope.mkdir()
+            for sub in pkg.iterdir():
+                (scope / sub.name).symlink_to(sub)
+        else:
+            (nm / pkg.name).symlink_to(pkg)
+    scratch = nm / "@fontsource" / "scratch"
+    scratch.mkdir(parents=True)
+    (scratch / "package.json").write_text('{"name": "@fontsource/scratch", "main": "index.css"}\n')
+    woff2 = b"wOF2\x00\x01\x00\x00" + bytes(range(256))
+    (scratch / "files").mkdir()
+    (scratch / "files" / "scratch.woff2").write_bytes(woff2)
+    (scratch / "index.css").write_text(
+        "@font-face { font-family: 'Scratch'; src: url('./files/scratch.woff2') format('woff2'); }\n"
+    )
+
+    _write_root_layout_importing_app_css(example_app, "@import '@fontsource/scratch';\n")
+    result = BuildPipeline(example_app).build(dev=False)
+    from fymo.build.manifest import Manifest
+    manifest = Manifest.read(result.manifest_path)
+    css_text = (example_app / "dist" / manifest.layouts["_root"].css).read_text()
+    assert "Scratch" in css_text
+    assert "/dist/client/scratch." in css_text
 
 
 def test_lib_and_components_aliases_resolve_to_real_files(blog_app: Path, node_available):

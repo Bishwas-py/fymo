@@ -40,6 +40,40 @@ def check_directory_hygiene(project_root: Path) -> List[str]:
     return violations
 
 
+def check_global_css_migration(project_root: Path) -> "str | None":
+    """The app/templates/_global.css magic filename (auto-detected, bundled
+    as its own entry, linked on every page) was deleted by issue #77 in
+    favor of layouts importing their CSS explicitly. Deleted, not
+    deprecated: a project still shipping the file would otherwise build
+    fine and silently lose its global styles, so it fails the build with
+    the exact fix instead."""
+    if (project_root / "app" / "templates" / "_global.css").is_file():
+        return (
+            "Error: _global.css is no longer auto-injected. Move it to app/assets/app.css\n"
+            "and add `import '../assets/app.css'` to app/templates/_layout.svelte."
+        )
+    return None
+
+
+def check_template_css_hygiene(project_root: Path) -> List[str]:
+    """Return one violation per loose .css file under app/templates/ (issue
+    #77): stylesheets are build inputs and live in app/assets/, imported
+    from a layout or component; app/templates/ holds .svelte files only.
+    `<style>` blocks inside .svelte files are Svelte's component styling
+    and none of this check's business. _global.css is skipped here because
+    check_global_css_migration above owns it with a more specific message."""
+    violations: List[str] = []
+    templates_dir = project_root / "app" / "templates"
+    if templates_dir.is_dir():
+        for f in sorted(templates_dir.rglob("*.css")):
+            if f == templates_dir / "_global.css":
+                continue
+            violations.append(
+                f"stylesheets live in app/assets/, found {f.relative_to(project_root)}"
+            )
+    return violations
+
+
 def check_storage_required_for_media(project_root: Path) -> List[str]:
     """`media:` routes always resolve the files they serve through a
     StorageProvider (fymo.storage.registry), and storage has no default

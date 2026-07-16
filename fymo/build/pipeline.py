@@ -61,24 +61,23 @@ class BuildPipeline:
         if not result.get("ok"):
             raise BuildError(f"build failed: {result.get('error')}\n{result.get('stack', '')}")
 
-        manifest = self._build_manifest(routes, result, remote_assets, all_layouts, build_config.has_global_css)
+        manifest = self._build_manifest(routes, result, remote_assets, all_layouts)
         manifest.write(self.dist_dir / "manifest.json")
         return BuildResult(ok=True, manifest_path=self.dist_dir / "manifest.json")
 
     def _build_manifest(
         self, routes, esbuild_result, remote_assets: dict | None = None,
-        all_layouts=None, has_global_css: bool = False,
+        all_layouts=None,
     ) -> Manifest:
         all_layouts = all_layouts or []
         client_meta = esbuild_result.get("client", {}).get("outputs", {})
 
-        route_assets, layouts_assets, global_css_out = match_esbuild_outputs(
+        route_assets, layouts_assets = match_esbuild_outputs(
             client_outputs=client_meta,
             routes=routes,
             all_layouts=all_layouts,
             project_root=self.project_root,
             dist_dir=self.dist_dir,
-            has_global_css=has_global_css,
         )
 
         # fymo build is strict: any route or layout esbuild didn't produce
@@ -96,5 +95,4 @@ class BuildPipeline:
             build_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             remote_modules=remote_assets or {},
             layouts=layouts_assets,
-            global_css=global_css_out,
         )

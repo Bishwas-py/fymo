@@ -36,9 +36,8 @@ def create_project(name: str, template: str = 'default'):
         'app/lib',
         'app/components',
         'app/support',
-        'app/static/css',
-        'app/static/js',
-        'app/static/images',
+        'app/assets/fonts',
+        'app/static',
         'dist',
         'tests',
     ]
@@ -193,8 +192,26 @@ app = create_app(PROJECT_ROOT)
 """
     (project_path / 'app' / 'static' / 'favicon.svg').write_text(favicon_svg)
 
-    # app/templates/_layout.svelte: root layout wrapping every route.
+    # app/assets/app.css: site-wide styles, a build input bundled through
+    # the root layout's import below (hashed into dist/, never served raw).
+    # Fonts referenced from here live in app/assets/fonts/.
+    app_css = """:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+"""
+    (project_path / 'app' / 'assets' / 'app.css').write_text(app_css)
+
+    # app/templates/_layout.svelte: root layout wrapping every route. Its
+    # CSS import is what puts app.css on every page; section layouts import
+    # only what they add on top.
     root_layout = """<script>
+  import '../assets/app.css';
+
   let { children } = $props();
 </script>
 
@@ -311,7 +328,8 @@ fymo build
   - `controllers/` - Python controllers
   - `templates/` - Svelte templates
   - `models/` - Data models
-  - `static/` - Static assets
+  - `assets/` - Build inputs (CSS, fonts, images) hashed into `/dist/`
+  - `static/` - Verbatim files served at `/static/`
 - `dist/` - Build output
 - `tests/` - Tests
 """

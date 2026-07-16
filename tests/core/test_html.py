@@ -119,17 +119,21 @@ def test_disabled_resource_names_html_escaped():
     assert '&lt;script&gt;' in html
 
 
-def test_global_css_links_before_route_css():
+def test_layout_css_links_in_chain_order_before_route_css():
+    """Issue #77: a page links the union of its layout chain's CSS in order
+    (root first, then resource), before the route's own CSS."""
     from fymo.build.manifest import RouteAssets
     from fymo.core.html import build_html
     assets = RouteAssets(ssr="x", client="client/x.js", css="client/x.css", preload=[])
     html = build_html(
         body="", head_extra="", props={}, assets=assets, title="t",
-        asset_prefix="/dist", global_css="client/global.G1.css",
+        asset_prefix="/dist",
+        layout_css=["client/_layout-_root.R1.css", "client/_layout-admin.A1.css"],
     )
-    global_idx = html.index('<link rel="stylesheet" href="/dist/client/global.G1.css">')
+    root_idx = html.index('<link rel="stylesheet" href="/dist/client/_layout-_root.R1.css">')
+    resource_idx = html.index('<link rel="stylesheet" href="/dist/client/_layout-admin.A1.css">')
     route_idx = html.index('<link rel="stylesheet" href="/dist/client/x.css">')
-    assert global_idx < route_idx
+    assert root_idx < resource_idx < route_idx
 
 
 def test_route_params_island_emitted():
@@ -152,12 +156,12 @@ def test_route_params_island_present_and_empty_when_no_dynamic_segments():
     assert '<script type="application/json" id="svelte-route-params">{}</script>' in html
 
 
-def test_no_global_css_omits_link():
+def test_no_layout_css_omits_links():
     from fymo.build.manifest import RouteAssets
     from fymo.core.html import build_html
     assets = RouteAssets(ssr="x", client="client/x.js", css=None, preload=[])
     html = build_html(
         body="", head_extra="", props={}, assets=assets, title="t", asset_prefix="/dist",
     )
-    assert "global" not in html
+    assert "stylesheet" not in html
 

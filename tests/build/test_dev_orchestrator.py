@@ -66,7 +66,6 @@ def test_write_manifest_populates_layout_fields_from_synthetic_metafile(example_
     (example_app / "app" / "templates" / "_layout.svelte").write_text(
         "<script>\n  let { children } = $props();\n</script>\n{@render children()}\n"
     )
-    orch._has_global_css = False
     orch._latest_metafile = {
         "outputs": {
             "dist/client/home.HASH1.js": {"entryPoint": "home.client.js"},
