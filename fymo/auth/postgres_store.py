@@ -23,12 +23,23 @@ database. The full list (see `schema_postgres.sql`):
     fymo_user_oauth_identities          table
     fymo_user_oauth_identities_pkey     index (implicit, primary key)
 
-Semantics mirror SqliteUserStore exactly: case-insensitive email uniqueness
-(EmailAlreadyExists on collision), session_epoch bumping, idempotent
-identity linking, and consume-once verify/reset tokens. Thread safety comes
-from a small psycopg_pool ConnectionPool instead of SqliteUserStore's
-single-connection lock; each method borrows a pooled connection for exactly
-one transaction.
+Semantics match SqliteUserStore for every Protocol method: case-insensitive
+email uniqueness (EmailAlreadyExists on collision), session_epoch bumping,
+idempotent identity linking, and consume-once verify/reset tokens. Two
+known divergences, both in Postgres's favor:
+
+  * Case folding is locale-aware here, ASCII-only in SQLite (NOCASE).
+    "É@x.com" and "é@x.com" are two distinct users in a SQLite auth.db but
+    collide here, so a SQLite database already holding both spellings
+    cannot be imported into this store. Pinned by a test in
+    tests/auth/test_postgres_store.py.
+  * fymo_user_oauth_identities.user_id is an enforced foreign key here;
+    SQLite declares it but never enables PRAGMA foreign_keys. Unreachable
+    through normal Protocol flows, which always link existing users.
+
+Thread safety comes from a small psycopg_pool ConnectionPool instead of
+SqliteUserStore's single-connection lock; each method borrows a pooled
+connection for exactly one transaction.
 """
 from __future__ import annotations
 

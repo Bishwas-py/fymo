@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from fymo.auth.postgres_store import PostgresUserStore
+from fymo.auth.store import EmailAlreadyExists, SqliteUserStore
 
 
 def test_missing_database_url_raises_at_construction(monkeypatch, tmp_path: Path):
@@ -72,5 +73,33 @@ def test_migrates_table_created_before_later_columns(monkeypatch, tmp_path: Path
         assert user.session_epoch == 1
         store.bump_session_epoch(user.id)
         assert store.get_by_id(user.id).session_epoch == 2
+    finally:
+        store.close()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TEST_DATABASE_URL"),
+    reason="needs TEST_DATABASE_URL pointing at a real Postgres instance",
+)
+def test_non_ascii_email_case_collision_diverges_from_sqlite(monkeypatch, tmp_path: Path):
+    """Known, documented divergence (see the module docstring): lower()
+    folds per the database locale while SQLite's NOCASE folds ASCII only,
+    so these two spellings coexist as distinct users in a SQLite auth.db
+    but collide here. Consequence: a SQLite database already holding both
+    cannot be imported into this store."""
+    sqlite_store = SqliteUserStore(tmp_path)
+    sqlite_store.create("É@example.com", "h")
+    sqlite_store.create("é@example.com", "h")
+
+    url = os.environ["TEST_DATABASE_URL"]
+    monkeypatch.setenv("DATABASE_URL", url)
+    import psycopg
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute("DROP TABLE IF EXISTS fymo_user_oauth_identities, fymo_users")
+    store = PostgresUserStore(tmp_path)
+    try:
+        store.create("É@example.com", "h")
+        with pytest.raises(EmailAlreadyExists):
+            store.create("é@example.com", "h")
     finally:
         store.close()

@@ -16,8 +16,11 @@ CREATE TABLE IF NOT EXISTS fymo_users (
     password_reset_token  TEXT    -- hash of the outstanding password-reset token, NULL once consumed
 );
 
--- Case-insensitive uniqueness: the Postgres spelling of SQLite's
--- UNIQUE COLLATE NOCASE (get_by_email compares lower(email) too).
+-- Case-insensitive uniqueness (get_by_email compares lower(email) too).
+-- Stricter than SQLite's UNIQUE COLLATE NOCASE: lower() folds per the
+-- database locale while NOCASE folds ASCII only, so non-ASCII spellings
+-- that coexist in a SQLite auth.db collide here (see the module docstring
+-- of postgres_store.py).
 CREATE UNIQUE INDEX IF NOT EXISTS fymo_users_email_lower_idx
     ON fymo_users (lower(email));
 
