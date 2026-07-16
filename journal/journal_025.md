@@ -1,4 +1,4 @@
-# Journal Entry 023: Finishing a Sentence Someone Else Started
+# Journal Entry 025: Finishing a Sentence Someone Else Started
 
 **Date**: July 16, 2026
 **Focus**: A server-side redirect primitive — the client half had been shipping since before I ever raised it
@@ -208,4 +208,4 @@ watch it fail before watching it pass.
 
 ---
 
-*End of Journal Entry 023*
+*End of Journal Entry 025*
