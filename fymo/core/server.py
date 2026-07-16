@@ -338,7 +338,13 @@ class FymoApp:
 
         # Build the configured providers and install their session resolvers.
         # Defaults to [password]; extra providers (OAuth, token) come from
-        # auth.providers in fymo.yml.
+        # auth.providers in fymo.yml. Deliberately unguarded: a provider that
+        # needs an optional extra (e.g. ClerkProvider needing pyjwt[crypto],
+        # issue #59) raises RuntimeError from its own __init__/from_config
+        # when that extra isn't installed, and that propagates straight out
+        # of FymoApp.__init__ here. Refusing to start beats booting with
+        # auth half-wired and only discovering the gap at someone's first
+        # login attempt.
         from fymo.auth.providers.registry import (
             build_providers, install_providers, system_remote_modules,
         )

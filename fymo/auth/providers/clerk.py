@@ -8,11 +8,33 @@ seam. First sight of a subject provisions a local user.
 Production verification is RS256-over-JWKS, which needs a crypto library, so
 the verifier is injectable: the default lazily uses PyJWT (optional dep) when
 present, and tests inject a fake. Core stays dependency-free.
+
+Packaging (issue #59): pyjwt[crypto] ships as the `fymo[clerk]` extra, never
+a hard dependency of fymo itself. A caller supplying their own verify=
+(every test in this package does) never needs it at all. When the default
+verifier is going to be used, its presence is checked eagerly in __init__,
+at provider construction, which fymo.yml's `type: clerk` reaches from
+FymoApp.__init__, so a missing extra is a loud boot-time failure instead
+of surfacing only the first time someone logs in.
+
+Migration note: before this extra existed, `type: clerk` worked from a bare
+`pip install fymo` as long as pyjwt[crypto] happened to already be present.
+There is no separate deprecation-warning phase for that "present but never
+declared via the extra" state. At runtime there is no reliable way to tell
+"installed because fymo[clerk] was requested" apart from "installed some
+other way" (pip/uv don't record per-dependency install provenance anywhere
+`importlib.metadata` exposes), so a warning aimed only at the second case
+would either misfire on properly-installed extras or never fire at all.
+Both states behave identically here: the deps are present, verification
+works, nothing is disabled. The actual fix is the loud failure above for the
+one state that matters, truly missing, which is strictly better than
+today's silent-until-first-login gap regardless of how someone got pyjwt.
 """
 from __future__ import annotations
 
 import base64
 import os
+from importlib.util import find_spec
 from typing import Callable, Optional
 
 from fymo.auth.context import get_user_store
@@ -25,6 +47,17 @@ Verifier = Callable[[str], Optional[dict]]
 
 _ISSUER_ENV = "CLERK_ISSUER"
 _PUBLISHABLE_KEY_ENV = "PUBLIC_CLERK_PUBLISHABLE_KEY"
+_INSTALL_HINT = "pip install 'fymo[clerk]'"
+
+
+def _pyjwt_available() -> bool:
+    """Whether the default JWKS verifier can actually run: pyjwt itself, plus
+    a real crypto backend for RS256 (pyjwt's `cryptography` extra: `import
+    jwt` alone succeeds without it, RS256 only fails once you try to use it).
+    find_spec (not a real import) so checking never has the side effect of
+    loading either package, and tests can monkeypatch this one function
+    instead of faking module presence in sys.modules."""
+    return find_spec("jwt") is not None and find_spec("cryptography") is not None
 
 
 def _issuer_from_publishable_key(key: str) -> Optional[str]:
@@ -72,7 +105,14 @@ class ClerkProvider(BaseProvider):
         self.jwks_url = jwks_url
         self.audience = audience
         self.cookie_name = cookie_name
-        self._verify = verify or _jwks_verifier(jwks_url, issuer, audience)
+        if verify is None:
+            if not _pyjwt_available():
+                raise RuntimeError(
+                    "Clerk auth (type: clerk) needs the 'pyjwt[crypto]' package "
+                    f"for RS256/JWKS verification. Install it with: {_INSTALL_HINT}"
+                )
+            verify = _jwks_verifier(jwks_url, issuer, audience)
+        self._verify = verify
 
     @classmethod
     def from_config(cls, opts: dict) -> "ClerkProvider":
@@ -126,17 +166,20 @@ class ClerkProvider(BaseProvider):
 
 
 def _jwks_verifier(jwks_url: str, issuer: str, audience: Optional[str]) -> Verifier:
-    """Default RS256/JWKS verifier. Requires the optional `pyjwt[crypto]` extra;
-    raises a clear error at first use if it isn't installed."""
+    """Default RS256/JWKS verifier. Requires the optional `pyjwt[crypto]` extra
+    (fymo[clerk]); ClerkProvider.__init__ already refused to build this closure
+    at all if `_pyjwt_available()` was False, so the ImportError branch below
+    is defense in depth for a partial/corrupted install rather than the
+    primary guard: it should not be reachable in the normal missing-extra
+    case, that fails earlier and louder, at boot."""
 
     def verify(token: str) -> Optional[dict]:
         try:
             import jwt
             from jwt import PyJWKClient
-        except ImportError as e:  # pragma: no cover - exercised only without the extra
+        except ImportError as e:  # pragma: no cover - _pyjwt_available already guards this
             raise RuntimeError(
-                "Clerk token verification needs the 'pyjwt[crypto]' package; "
-                "install it or pass a custom verify= to ClerkProvider"
+                f"Clerk token verification needs the 'pyjwt[crypto]' package. Install it with: {_INSTALL_HINT}"
             ) from e
         try:
             signing_key = PyJWKClient(jwks_url).get_signing_key_from_jwt(token)
