@@ -55,7 +55,7 @@ __all__ = [
 #
 # Mirrors fymo.jobs' and fymo.broadcast's provider singletons: FymoApp calls
 # init_storage_provider() at startup (whenever storage: is configured, not
-# only when media: is also configured, see fymo/core/server.py), and
+# only when storage.expose is also declared, see fymo/core/server.py), and
 # fymo jobs-worker does the same for its own separate process. App code then
 # calls get_storage_provider() from anywhere without wiring anything itself.
 

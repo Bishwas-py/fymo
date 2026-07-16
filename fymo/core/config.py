@@ -172,13 +172,25 @@ def _interpolate_env_vars(text: str) -> str:
     return _scan_placeholders(text, quote=True)
 
 
+# Top-level `media:` was folded into `storage.expose` (issue #76): the two
+# keys had an invisible coupling (every media dir resolved through storage's
+# root) and a representable-but-broken state (media without storage). Hard
+# break, no shim; this message is the migration doc. Raised here at boot and
+# surfaced by `fymo build` via check_media_key_removed (fymo/build/hygiene.py).
+MEDIA_KEY_REMOVED_ERROR = (
+    "top-level `media:` was removed, exposure now lives under `storage.expose`. "
+    "Move each media entry under storage: unchanged "
+    "(prefix/dir/extensions keep their meaning)."
+)
+
+
 class ConfigManager:
     """Manages configuration loading and access for Fymo applications"""
-    
+
     def __init__(self, project_root: Path, initial_config: Optional[Dict[str, Any]] = None):
         """
         Initialize configuration manager
-        
+
         Args:
             project_root: Root directory of the project
             initial_config: Initial configuration dictionary
@@ -186,6 +198,8 @@ class ConfigManager:
         self.project_root = project_root
         self.config = initial_config or {}
         self._load_config()
+        if "media" in self.config:
+            raise ConfigurationError(MEDIA_KEY_REMOVED_ERROR)
     
     def _load_config(self) -> None:
         """Load configuration from fymo.yml or config files"""
@@ -255,12 +269,16 @@ class ConfigManager:
         fymo.core.logging.resolve_logging_config for shapes and defaults."""
         return self.get('logging', {}) or {}
 
-    def get_media_config(self) -> List[Dict[str, Any]]:
-        """`media:` section. A list of {prefix, dir, extensions} entries
-        for declarative byte-range media serving (see fymo.core.media),
-        entirely optional. Absent means no media routes are registered, so
-        existing apps are unaffected."""
-        return self.get('media', []) or []
+    def get_storage_expose_config(self) -> List[Dict[str, Any]]:
+        """`storage.expose` entries. A list of {prefix, dir, extensions}
+        dicts for declarative byte-range file serving out of the configured
+        storage (see fymo.core.expose), entirely optional. Absent, or a
+        bare-string `storage:` value, means no exposed routes are
+        registered."""
+        storage = self.get('storage', None)
+        if not isinstance(storage, dict):
+            return []
+        return storage.get('expose', []) or []
 
     def get_storage_config(self) -> Optional[Dict[str, Any]]:
         """`storage:` section. Selects the StorageProvider (bare string,

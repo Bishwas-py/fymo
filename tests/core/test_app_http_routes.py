@@ -153,10 +153,10 @@ def test_fymo_app_boots_fine_with_no_app_routes_py(example_app: Path, monkeypatc
 
 
 @pytest.mark.usefixtures("node_available")
-def test_fymo_app_dispatches_declarative_media_route(example_app: Path, monkeypatch):
-    """`media:` in fymo.yml must produce a working route through the same
-    `_app_routes` seam app/routes.py uses, with no app/routes.py involved at
-    all, config-only wiring end to end."""
+def test_fymo_app_dispatches_declarative_expose_route(example_app: Path, monkeypatch):
+    """`storage.expose` in fymo.yml must produce a working route through the
+    same `_app_routes` seam app/routes.py uses, with no app/routes.py involved
+    at all, config-only wiring end to end."""
     monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
     from fymo.build.pipeline import BuildPipeline
     BuildPipeline(project_root=example_app).build(dev=False)
@@ -167,10 +167,12 @@ def test_fymo_app_dispatches_declarative_media_route(example_app: Path, monkeypa
 
     from fymo import create_app
     app = create_app(example_app, config={
-        "media": [
-            {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
-        ],
-        "storage": {"provider": "local"},
+        "storage": {
+            "provider": "local",
+            "expose": [
+                {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+            ],
+        },
     })
     try:
         captured = {}
@@ -188,11 +190,11 @@ def test_fymo_app_dispatches_declarative_media_route(example_app: Path, monkeypa
 
 
 @pytest.mark.usefixtures("node_available")
-def test_fymo_app_rejects_media_traversal_through_full_dispatch(example_app: Path, monkeypatch):
-    """Same traversal attack as tests/core/test_media.py's route-handler-level
+def test_fymo_app_rejects_expose_traversal_through_full_dispatch(example_app: Path, monkeypatch):
+    """Same traversal attack as tests/core/test_expose.py's route-handler-level
     test, but driven through `app(environ, start_response)` (FymoApp.__call__)
     end to end, so it also exercises the body-cap/rate-limit/security-header
-    chain and the prefix-matching loop in `_dispatch`, not just the media
+    chain and the prefix-matching loop in `_dispatch`, not just the exposed
     route's own handler in isolation."""
     monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
     from fymo.build.pipeline import BuildPipeline
@@ -204,10 +206,12 @@ def test_fymo_app_rejects_media_traversal_through_full_dispatch(example_app: Pat
 
     from fymo import create_app
     app = create_app(example_app, config={
-        "media": [
-            {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
-        ],
-        "storage": {"provider": "local"},
+        "storage": {
+            "provider": "local",
+            "expose": [
+                {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+            ],
+        },
     })
     try:
         captured = {}
@@ -226,18 +230,35 @@ def test_fymo_app_rejects_media_traversal_through_full_dispatch(example_app: Pat
 
 
 @pytest.mark.usefixtures("node_available")
-def test_fymo_app_raises_when_media_configured_without_storage(example_app: Path, monkeypatch):
+def test_fymo_app_raises_when_expose_configured_without_provider(example_app: Path, monkeypatch):
     """`fymo build`'s hygiene check (tests/build/test_storage_hygiene.py) catches
     this for the normal `fymo build` -> `fymo run` path, but `fymo dev` and a
-    stale `dist/` built before `media:` was added can both reach FymoApp.__init__
-    without ever running that check. Runtime has to refuse to silently assume
-    local storage too, not just build time."""
+    stale `dist/` can both reach FymoApp.__init__ without ever running that
+    check. Runtime has to refuse to silently assume local storage too, not
+    just build time."""
     monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
     from fymo.build.pipeline import BuildPipeline
     BuildPipeline(project_root=example_app).build(dev=False)
 
     from fymo import create_app
-    with pytest.raises(Exception, match="storage"):
+    with pytest.raises(Exception, match=r"storage\.provider"):
+        create_app(example_app, config={
+            "storage": {
+                "expose": [
+                    {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+                ],
+            },
+        })
+
+
+@pytest.mark.usefixtures("node_available")
+def test_fymo_app_refuses_top_level_media_key(example_app: Path, monkeypatch):
+    """The removed `media:` key must fail at boot with the migration text,
+    never be silently ignored."""
+    monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
+    from fymo import create_app
+    from fymo.core.exceptions import ConfigurationError
+    with pytest.raises(ConfigurationError, match=r"storage\.expose"):
         create_app(example_app, config={
             "media": [
                 {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
@@ -246,10 +267,10 @@ def test_fymo_app_raises_when_media_configured_without_storage(example_app: Path
 
 
 @pytest.mark.usefixtures("node_available")
-def test_fymo_app_registers_storage_provider_without_media_configured(example_app: Path, monkeypatch):
+def test_fymo_app_registers_storage_provider_without_expose_configured(example_app: Path, monkeypatch):
     """Issue #31: app code (a job) needs the configured StorageProvider even
-    when the app never declares `media:` routes. storage: alone must be
-    enough to make fymo.storage.get_storage_provider() usable."""
+    when the app never declares `storage.expose` entries. A provider alone
+    must be enough to make fymo.storage.get_storage_provider() usable."""
     monkeypatch.setenv("FYMO_SECRET", "test-secret-please-do-not-use-in-prod-32b!")
     from fymo.build.pipeline import BuildPipeline
     BuildPipeline(project_root=example_app).build(dev=False)
@@ -269,8 +290,8 @@ def test_fymo_app_registers_storage_provider_without_media_configured(example_ap
 
 
 @pytest.mark.usefixtures("node_available")
-def test_fymo_app_media_routes_reuse_the_process_wide_storage_provider(example_app: Path, monkeypatch):
-    """The instance FymoApp hands to build_media_routes must be the exact
+def test_fymo_app_expose_routes_reuse_the_process_wide_storage_provider(example_app: Path, monkeypatch):
+    """The instance FymoApp hands to build_expose_routes must be the exact
     same object fymo.storage.get_storage_provider() returns elsewhere in the
     process, not a second provider built separately, since a real provider
     (an S3 client, once #17 lands) shouldn't be constructed twice per app."""
@@ -287,10 +308,12 @@ def test_fymo_app_media_routes_reuse_the_process_wide_storage_provider(example_a
 
     reset_storage_provider()
     app = create_app(example_app, config={
-        "media": [
-            {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
-        ],
-        "storage": {"provider": "local"},
+        "storage": {
+            "provider": "local",
+            "expose": [
+                {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+            ],
+        },
     })
     try:
         assert get_storage_provider() is app.storage_provider

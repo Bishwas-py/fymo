@@ -1,18 +1,26 @@
-"""Declarative media serving (fymo.yml `media:` section) -> HttpRoute list.
+"""Declarative storage exposure (fymo.yml `storage.expose` entries) -> HttpRoute list.
 
 Before this existed, apps that needed to stream a video with seek/scrub
 support (or serve any other binary file family) had to hand-write a raw WSGI
 handler under `app/routes.py` using the `fymo.core.http` extension point:
 Range-header parsing, path-traversal validation, content-type mapping, and
 404/400 handling, all repeated per app. This module lets that be declared
-instead:
+instead, nested under the storage the files are served out of:
 
-    media:
-      - prefix: /media/videos/
-        dir: data/videos
-        extensions: [webm]
+    storage:
+      provider: local
+      root: data
+      expose:
+        - prefix: /media/videos/
+          dir: videos
+          extensions: [webm]
 
-`build_media_routes` turns each entry into an `HttpRoute` with a WSGI
+(Exposure used to be a top-level `media:` section; issue #76 folded it under
+`storage:` because every entry's `dir` was already resolved through storage
+and nothing in the config's shape said so. The old key is a hard boot/build
+error now, see fymo.core.config.MEDIA_KEY_REMOVED_ERROR.)
+
+`build_expose_routes` turns each entry into an `HttpRoute` with a WSGI
 handler fymo owns, so apps get single-range byte-range support and
 traversal-safe filename handling for free. The routes it returns are meant
 to sit alongside `discover_app_http_routes`'s routes in `FymoApp._app_routes`
@@ -31,10 +39,20 @@ from fymo.core.http import HttpRoute
 from fymo.storage.base import RangeNotSatisfiable, StorageProvider
 
 # Reserved by FymoApp._dispatch itself (fymo/core/server.py), checked before
-# the app-routes loop runs. A `media:` prefix landing under either of these
+# the app-routes loop runs. An expose prefix landing under either of these
 # would silently never be reached, so it's worth a loud warning at startup
 # rather than a confusing 404/wrong-content-type discovered in production.
 _RESERVED_PREFIXES = ("/dist/", "/assets/")
+
+# Shared by FymoApp startup (fymo/core/server.py) and `fymo build`'s
+# check_storage_required_for_expose (fymo/build/hygiene.py) so the two
+# entry points can never drift on the message.
+EXPOSE_WITHOUT_PROVIDER_ERROR = (
+    "storage.expose is configured but storage itself is not: exposed entries "
+    "serve files through the configured StorageProvider and there is no "
+    "default, so storage must be configured. Set storage.provider "
+    "(e.g. `storage: {provider: local, root: data}`)."
+)
 
 
 def _respond_error(start_response, status: str, message: bytes):
@@ -58,8 +76,8 @@ def _respond_range_not_satisfiable(start_response, file_size: int):
     return [body]
 
 
-def _make_media_handler(prefix: str, dir_key: str, extensions: set, storage: StorageProvider) -> Callable:
-    """Build the WSGI handler for one `media:` entry. `extensions` is a set
+def _make_expose_handler(prefix: str, dir_key: str, extensions: set, storage: StorageProvider) -> Callable:
+    """Build the WSGI handler for one `storage.expose` entry. `extensions` is a set
     of lowercase, dot-less extensions (e.g. {"webm"}); anything else is a
     400, same as an unsafe filename, so a probing request can't distinguish
     "wrong extension" from "path traversal attempt".
@@ -162,11 +180,11 @@ def _make_media_handler(prefix: str, dir_key: str, extensions: set, storage: Sto
     return handler
 
 
-def build_media_routes(
-    project_root: Path, media_config: List[Dict[str, Any]], storage: StorageProvider
+def build_expose_routes(
+    project_root: Path, expose_config: List[Dict[str, Any]], storage: StorageProvider
 ) -> List[HttpRoute]:
-    """Turn the `media:` fymo.yml section into `HttpRoute`s. Returns `[]`
-    when `media_config` is empty, so apps without a `media:` section (the
+    """Turn fymo.yml's `storage.expose` entries into `HttpRoute`s. Returns
+    `[]` when `expose_config` is empty, so apps without expose entries (the
     vast majority, pre-existing and new alike) register zero extra routes.
     `storage` is the already-constructed provider every route's handler
     resolves files through (see fymo.storage.registry.build_storage_provider,
@@ -178,26 +196,40 @@ def build_media_routes(
     (printed, matching ConfigManager's own warning style in
     fymo/core/config.py) rather than raising, since it's a config smell
     worth flagging loudly, not a guaranteed misconfiguration fymo should
-    refuse to boot over."""
+    refuse to boot over. An entry whose `dir` doesn't exist under the
+    storage root yet also only warns, naming the resolved path: the
+    directory may legitimately be created later (a job writing its first
+    file into it), but until then every request under the prefix 404s, and
+    that used to be silent."""
     routes: List[HttpRoute] = []
-    for entry in media_config:
+    for entry in expose_config:
         if "prefix" not in entry or "dir" not in entry:
             raise ValueError(
-                f"media: entry is missing required key(s) 'prefix' and/or 'dir': {entry!r}"
+                f"storage.expose entry is missing required key(s) 'prefix' and/or 'dir': {entry!r}"
             )
         prefix = entry["prefix"]
         for reserved in _RESERVED_PREFIXES:
             if prefix.startswith(reserved) or reserved.startswith(prefix):
                 print(
-                    f"Warning: media: prefix {prefix!r} overlaps with fymo's "
+                    f"Warning: storage.expose prefix {prefix!r} overlaps with fymo's "
                     f"reserved {reserved!r} route, which is matched first and "
-                    f"will always win. This media route may never be reached."
+                    f"will always win. This exposed route may never be reached."
                 )
         dir_key = str(entry["dir"]).strip("/")
+        # Only providers with a filesystem root (local) can be checked for a
+        # missing dir; a remote provider (S3/R2, once #17 lands) has no
+        # directory to stat.
+        root_dir = getattr(storage, "root_dir", None)
+        if root_dir is not None and not (Path(root_dir) / dir_key).is_dir():
+            print(
+                f"Warning: storage.expose dir {entry['dir']!r} does not exist "
+                f"under the storage root (resolved: {Path(root_dir) / dir_key}). "
+                f"Requests under {prefix!r} will 404 until it is created."
+            )
         extensions = {str(e).lower().lstrip(".") for e in entry.get("extensions", [])}
         routes.append(HttpRoute(
             method="GET",
             path=prefix,
-            handler=_make_media_handler(prefix, dir_key, extensions, storage),
+            handler=_make_expose_handler(prefix, dir_key, extensions, storage),
         ))
     return routes

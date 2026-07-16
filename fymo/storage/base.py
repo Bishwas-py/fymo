@@ -1,7 +1,7 @@
 """The StorageProvider seam.
 
-Every place fymo needs to put or get a blob of bytes (declarative `media:`
-serving today, app-written uploads/generated files tomorrow) goes through
+Every place fymo needs to put or get a blob of bytes (declarative
+`storage.expose` serving today, app-written uploads/generated files tomorrow) goes through
 one of these instead of hardcoding a filesystem path. A provider owns where
 `key` (a namespaced relative path, e.g. "videos/foo.webm") actually lives:
 local disk, S3, or anything else a `class:` config entry points at.

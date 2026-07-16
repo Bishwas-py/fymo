@@ -147,9 +147,9 @@ class FymoApp:
         # drift on the truth table. An invalid remote: config (bad mode:
         # value, or mode: combined with a deprecated key) raises
         # RemoteModeConfigError here and is left to propagate, same posture
-        # as the StorageConfigError raised below for a bad media:/storage:
-        # combination: loud startup failure beats a server silently running
-        # with an ambiguous dispatch gate.
+        # as the StorageConfigError raised below for a bad storage.expose/
+        # provider combination: loud startup failure beats a server silently
+        # running with an ambiguous dispatch gate.
         from fymo.remote.mode import resolve_remote_mode
         remote_cfg = self.config_manager.get_remote_config()
         _remote_router._explicit_optin = resolve_remote_mode(remote_cfg).strict
@@ -157,46 +157,43 @@ class FymoApp:
         self.asset_manager = AssetManager(self.project_root)
         # App-level raw HTTP routes (e.g. hand-written media streaming),
         # an optional extension point, independent of auth. See fymo/core/http.py.
-        # Declarative media routes (fymo.yml `media:` section) are built the
-        # same way and appended to the same list, so both are checked by the
-        # single loop in `_dispatch` below. An app can mix hand-written
-        # raw-WSGI routes with config-driven ones. See fymo/core/media.py.
+        # Declarative exposure routes (fymo.yml `storage.expose` entries) are
+        # built the same way and appended to the same list, so both are checked
+        # by the single loop in `_dispatch` below. An app can mix hand-written
+        # raw-WSGI routes with config-driven ones. See fymo/core/expose.py.
         from fymo.core.http import discover_app_http_routes
-        from fymo.core.media import build_media_routes
+        from fymo.core.expose import EXPOSE_WITHOUT_PROVIDER_ERROR, build_expose_routes
 
         # Storage: built once, whenever storage: is configured, independent
-        # of whether media: is also configured. App code (a remote function,
-        # a job) reaches this same instance process-wide via
+        # of whether expose entries are also declared. App code (a remote
+        # function, a job) reaches this same instance process-wide via
         # fymo.storage.get_storage_provider() (issue #31); gating
-        # construction on media_config would leave that accessor unusable
-        # for an app that only writes files itself and never declares
-        # media: routes.
+        # construction on expose entries would leave that accessor unusable
+        # for an app that only writes files itself and never exposes any
+        # of them over HTTP.
         from fymo.storage import init_storage_provider
         storage_config = self.config_manager.get_storage_config()
+        expose_config = self.config_manager.get_storage_expose_config()
         self.storage_provider = None
         if storage_config is not None:
+            # `fymo build`'s check_storage_required_for_expose
+            # (fymo/build/hygiene.py) catches this for the normal build -> run
+            # path, but `fymo dev` and a stale dist/ can both reach here without
+            # ever running that check, so it's enforced again at the one place
+            # every startup path shares. Checked before init_storage_provider so
+            # the error names storage.expose specifically, not the registry's
+            # generic missing-selector message.
+            if expose_config and isinstance(storage_config, dict) and not any(
+                key in storage_config for key in ("provider", "type", "class")
+            ):
+                from fymo.storage.registry import StorageConfigError
+                raise StorageConfigError(EXPOSE_WITHOUT_PROVIDER_ERROR)
             self.storage_provider = init_storage_provider(self.project_root, storage_config)
 
-        media_config = self.config_manager.get_media_config()
-        media_routes = []
-        if media_config:
-            # `fymo build`'s check_storage_required_for_media (fymo/build/hygiene.py)
-            # catches this for the normal build -> run path, but `fymo dev` and a
-            # stale dist/ built before media: was added can both reach here without
-            # ever running that check, so it's enforced again at the one place every
-            # startup path shares. The message is phrased for a running app (fix
-            # fymo.yml and restart) rather than build_storage_provider's own
-            # build-context wording.
-            if self.storage_provider is None:
-                from fymo.storage.registry import StorageConfigError
-                raise StorageConfigError(
-                    "media: is configured in fymo.yml but storage: is missing. "
-                    "media: routes resolve files through the configured "
-                    "StorageProvider and there is no default, add a storage: "
-                    "section (e.g. `storage: {provider: local}`) to fymo.yml."
-                )
-            media_routes = build_media_routes(self.project_root, media_config, self.storage_provider)
-        self._app_routes = discover_app_http_routes(self.project_root) + media_routes
+        expose_routes = []
+        if expose_config:
+            expose_routes = build_expose_routes(self.project_root, expose_config, self.storage_provider)
+        self._app_routes = discover_app_http_routes(self.project_root) + expose_routes
         self.router = self._initialize_router()
         self.template_renderer = TemplateRenderer(
             self.project_root,

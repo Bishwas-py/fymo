@@ -27,8 +27,9 @@ from fymo.build.hygiene import (
     check_auth_enforcement_hygiene,
     check_directory_hygiene,
     check_lib_directory_warnings,
+    check_media_key_removed,
     check_remote_exposure_hygiene,
-    check_storage_required_for_media,
+    check_storage_required_for_expose,
     format_auth_enforcement_error,
     format_hygiene_error,
     format_remote_exposure_error,
@@ -139,7 +140,11 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     if remote_exposure_violations:
         raise BuildError(format_remote_exposure_error(remote_exposure_violations))
 
-    storage_violations = check_storage_required_for_media(project_root)
+    media_violations = check_media_key_removed(project_root)
+    if media_violations:
+        raise BuildError("\n".join(media_violations))
+
+    storage_violations = check_storage_required_for_expose(project_root)
     if storage_violations:
         raise BuildError("\n".join(storage_violations))
 
