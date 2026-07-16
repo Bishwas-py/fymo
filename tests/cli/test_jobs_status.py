@@ -190,3 +190,75 @@ def test_without_dev_flag_ignores_dotenv(tmp_path: Path, monkeypatch):
         run_jobs_status(tmp_path)
 
     assert "FYMO_TEST_STATUS_NOFLAG" not in os.environ
+
+
+class StubBrokenBackendProvider(BaseJobProvider):
+    """Simulates procrastinate's ConnectorException shape: a provider whose
+    backend raises a plain Exception subclass (missing tables, unreachable
+    database), which is the likely first run of a read-only status command
+    against a database the worker has never touched."""
+
+    id = "stub-broken-backend"
+
+    def job_counts(self):
+        raise ConnectionError("relation \"procrastinate_jobs\" does not exist")
+
+
+class OldContractProvider:
+    """Duck-typed provider written against the pre-status JobProvider
+    protocol (register_tasks/submit/run_worker), no BaseJobProvider
+    subclassing (the registry never required it), so it has neither
+    job_counts nor list_recent_jobs nor close."""
+
+    id = "old-contract"
+
+    def register_tasks(self, tasks):
+        return None
+
+    def submit(self, task_name, *args, **kwargs):
+        return None
+
+    def run_worker(self):
+        return None
+
+
+def test_backend_exception_reports_cleanly_not_a_traceback(tmp_path: Path, capsys):
+    (tmp_path / "fymo.yml").write_text(
+        "jobs:\n"
+        "  provider:\n"
+        "    class: tests.cli.test_jobs_status.StubBrokenBackendProvider\n"
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_jobs_status(tmp_path)
+
+    assert exc_info.value.code == 1
+    assert "procrastinate_jobs" in capsys.readouterr().out
+
+
+def test_old_contract_provider_without_status_methods_reports_cleanly(tmp_path: Path, capsys):
+    (tmp_path / "fymo.yml").write_text(
+        "jobs:\n"
+        "  provider:\n"
+        "    class: tests.cli.test_jobs_status.OldContractProvider\n"
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_jobs_status(tmp_path)
+
+    assert exc_info.value.code == 1
+    assert "does not track job state" in capsys.readouterr().out
+
+
+def test_cli_wrapper_rejects_nonpositive_limit(tmp_path: Path, monkeypatch):
+    """Through the real click command: a nonpositive -n must be rejected by
+    click itself, before it can reach the provider's SQL LIMIT."""
+    from click.testing import CliRunner
+    from fymo.cli.main import cli
+
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    for bad in ("0", "-1"):
+        result = runner.invoke(cli, ["jobs-status", "-n", bad])
+        assert result.exit_code == 2, result.output
+        assert "not in the range" in result.output or "Invalid value" in result.output

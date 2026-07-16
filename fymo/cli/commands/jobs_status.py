@@ -48,13 +48,24 @@ def run_jobs_status(
     provider_config = config_manager.get_jobs_config().get("provider")
     provider = init_job_provider(project_root, provider_config)
 
+    # Both status methods are read through getattr for the same reason
+    # close() is below: the registry never required BaseJobProvider
+    # subclassing, so a duck-typed provider written against the pre-status
+    # contract simply lacks them, and that means "tracks nothing", not an
+    # AttributeError traceback.
+    counts_fn = getattr(provider, "job_counts", None)
+    recent_fn = getattr(provider, "list_recent_jobs", None)
     try:
-        counts = provider.job_counts()
-        recent = provider.list_recent_jobs(limit) if counts is not None else None
-    except RuntimeError as e:
-        # Misconfiguration (missing DATABASE_URL, missing extra) reports as
-        # a clear message, not a raw traceback, the same contract as the
-        # jobs-worker command.
+        counts = counts_fn() if counts_fn is not None else None
+        recent = recent_fn(limit) if (recent_fn is not None and counts is not None) else None
+    except Exception as e:
+        # Misconfiguration (missing DATABASE_URL, missing extra) raises
+        # RuntimeError, but backend failures surface as other Exception
+        # subclasses too: procrastinate wraps every psycopg error, missing
+        # tables and unreachable servers included, in its own plain
+        # ConnectorException, and a status query against a database the
+        # worker has never touched is this command's most likely first
+        # run. All of it reports as a clear message, not a raw traceback.
         Color.print_error(str(e))
         raise SystemExit(1)
     finally:

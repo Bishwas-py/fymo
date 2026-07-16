@@ -73,7 +73,7 @@ def jobs_worker_cmd(dev):
 
 
 @cli.command(name="jobs-status")
-@click.option("--limit", "-n", default=10, type=int,
+@click.option("--limit", "-n", default=10, type=click.IntRange(min=1),
               help="How many recent jobs to show")
 @click.option("--dev", is_flag=True, default=False,
               help="Run in dev mode (sets FYMO_DEV=1, enables .env loading)")
