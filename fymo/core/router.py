@@ -221,27 +221,34 @@ class Router:
         
         Convention:
         - / -> home.index
-        - /controller -> controller.index  
+        - /controller -> controller.index
         - /controller/action -> controller.action
+
+        Matches carry `'convention': True` so callers can tell a guessed
+        route from a declared one: a convention match with no built assets
+        behind it is a routing miss (404), whereas a declared route in the
+        same state is a stale build (500).
         """
         # Normalize path
         if path == '/':
             return {
                 'controller': 'home',
                 'action': 'index',
-                'template': 'home/index.svelte'
+                'template': 'home/index.svelte',
+                'convention': True
             }
-        
+
         # Remove leading slash and split
         parts = path.strip('/').split('/')
-        
+
         if len(parts) == 1:
             # /controller -> controller.index
             controller = parts[0]
             return {
                 'controller': controller,
                 'action': 'index',
-                'template': f'{controller}/index.svelte'
+                'template': f'{controller}/index.svelte',
+                'convention': True
             }
         elif len(parts) == 2:
             # /controller/action -> controller.action
@@ -249,7 +256,8 @@ class Router:
             return {
                 'controller': controller,
                 'action': action,
-                'template': f'{controller}/{action}.svelte'
+                'template': f'{controller}/{action}.svelte',
+                'convention': True
             }
-        
+
         return None

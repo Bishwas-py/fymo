@@ -183,6 +183,29 @@ app = create_app(PROJECT_ROOT)
     # imports as app.support.* from day one.
     (project_path / 'app' / 'support' / '__init__.py').write_text('"""Shared server-side utilities"""')
 
+    # app/static/favicon.svg: placeholder mark served at /favicon.svg via
+    # the root-static allowlist, referenced from the root layout below.
+    favicon_svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#ff3e00"/>
+  <circle cx="16" cy="16" r="8" fill="#fff"/>
+  <circle cx="16" cy="16" r="3.5" fill="#ff3e00"/>
+</svg>
+"""
+    (project_path / 'app' / 'static' / 'favicon.svg').write_text(favicon_svg)
+
+    # app/templates/_layout.svelte: root layout wrapping every route.
+    root_layout = """<script>
+  let { children } = $props();
+</script>
+
+<svelte:head>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</svelte:head>
+
+{@render children()}
+"""
+    (project_path / 'app' / 'templates' / '_layout.svelte').write_text(root_layout)
+
     # app/controllers/home.py
     home_controller = """\"\"\"Home controller\"\"\"
 
