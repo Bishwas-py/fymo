@@ -168,8 +168,7 @@ def _fymo_session_resolver(event: dict) -> Optional[User]:
 # Coverage matches current_user() exactly: remote functions, SSR
 # controllers/layouts and the soft-nav data endpoint (both open the same
 # request scope when auth is enabled, see fymo.core.ssr_controller), and
-# broadcast guards. Note SSR opens one scope per controller invocation, so
-# "once per request" there means once per getContext/getDoc call.
+# broadcast guards.
 
 IdentityExtrasHook = Callable[[User], Mapping[str, object]]
 
@@ -179,13 +178,45 @@ _EXTRAS_KEY = "identity_extras"
 _EMPTY_EXTRAS: Mapping[str, object] = MappingProxyType({})
 
 
+def _hook_registration_key(hook: IdentityExtrasHook):
+    """Identity of a hook's definition site, stable across importlib.reload.
+
+    The dev process re-executes app module bodies several times per reload
+    (hygiene check, guarded-sites scan, discovery), and each reload creates
+    a new function object, so object identity cannot dedup a top-level
+    registration. The (module, qualname, file, line) of the definition
+    survives reloads; two distinct lambdas in one scope still differ by
+    line. Callables without __code__ fall back to object identity."""
+    code = getattr(hook, "__code__", None)
+    if code is None:
+        return hook
+    return (
+        getattr(hook, "__module__", None),
+        getattr(hook, "__qualname__", None),
+        code.co_filename,
+        code.co_firstlineno,
+    )
+
+
 def register_identity_extras_hook(hook: IdentityExtrasHook) -> None:
     """Add a hook called once per request scope with the resolved User.
 
     Hooks run in registration order the first time current_user() resolves
     someone; their returned mappings are merged (later wins on key
     collision) and frozen for the rest of the scope. Never called for
-    anonymous requests."""
+    anonymous requests. During SSR a request scope is opened per controller
+    invocation, so a hook runs once per getContext/getDoc call there, not
+    once per HTTP request.
+
+    Registering a hook whose definition site is already registered replaces
+    the stale entry in place (keeping order) instead of appending, so the
+    natural registration point, the top level of an app module, stays
+    idempotent under the dev server's module reloads."""
+    key = _hook_registration_key(hook)
+    for i, existing in enumerate(_identity_extras_hooks):
+        if _hook_registration_key(existing) == key:
+            _identity_extras_hooks[i] = hook
+            return
     _identity_extras_hooks.append(hook)
 
 
