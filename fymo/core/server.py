@@ -18,6 +18,22 @@ def _env_truthy(name: str) -> bool:
     return env_truthy(name)
 
 
+# Root-static allowlist: well-known filenames browsers and crawlers request
+# at / by convention, with no way to point them elsewhere. Fixed list plus
+# the .well-known/ prefix (ACME challenges, security.txt, site associations),
+# Phoenix-style: nothing under app/static is exposed at / by accident.
+ROOT_STATIC_FILES = frozenset({
+    "favicon.ico",
+    "favicon.svg",
+    "robots.txt",
+    "apple-touch-icon.png",
+    "apple-touch-icon-precomposed.png",
+    "site.webmanifest",
+    "browserconfig.xml",
+})
+ROOT_STATIC_PREFIX = ".well-known/"
+
+
 def _load_identity_secret(project_root: Path, dev: bool) -> bytes:
     """Resolve the HMAC secret used to sign fymo_uid cookies.
 
@@ -475,16 +491,46 @@ class FymoApp:
         return self.template_renderer.render_template(route_path, environ)
     
     
-    def serve_asset(self, path: str) -> tuple[str, str, str]:
+    def serve_asset(
+        self, path: str, environ: Optional[dict] = None
+    ) -> tuple[bytes, str, str, Dict[str, str]]:
         """
         Serve static assets
-        
+
         Returns:
-            Tuple of (content, status, content_type)
+            Tuple of (body, status, content_type, extra_headers)
         """
-        return self.asset_manager.serve_asset(path)
+        return self.asset_manager.serve_asset(path, environ)
     
     
+    def _respond_route_miss(self, path, environ, start_response):
+        """No raw route and no SSR route matched this path.
+
+        Root-static allowlist first: exact well-known filenames and the
+        .well-known/ prefix resolve into app/static via the same
+        traversal-guarded, binary-correct serving as /assets/. Anything
+        else (or an absent file) gets the built-in 404 page, never a 500.
+        """
+        rel = path.lstrip("/")
+        if rel in ROOT_STATIC_FILES or rel.startswith(ROOT_STATIC_PREFIX):
+            body, status, content_type, extra = self.asset_manager.serve_static_file(rel, environ)
+            if status.startswith(("200", "304")):
+                response_headers = [
+                    ("Content-Type", content_type),
+                    ("Content-Length", str(len(body))),
+                ]
+                response_headers.extend(extra.items())
+                start_response(status, response_headers)
+                return [body]
+
+        html = self.template_renderer.render_404(path)
+        body = html.encode("utf-8")
+        start_response("404 NOT FOUND", [
+            ("Content-Type", "text/html"),
+            ("Content-Length", str(len(body))),
+        ])
+        return [body]
+
     def _healthz(self, start_response):
         """Liveness probe: 200 if the Node sidecar responds to ping, else 503.
 
@@ -631,17 +677,15 @@ class FymoApp:
 
         # Handle asset requests
         if path.startswith('/assets/'):
-            content, status, content_type = self.serve_asset(path)
-            content_bytes = content.encode("utf-8") if isinstance(content, str) else content
-            start_response(
-                status, [
-                    ("Content-Type", content_type),
-                    ("Content-Length", str(len(content_bytes))),
-                    ("Access-Control-Allow-Origin", "*"),
-                    ("Cache-Control", "public, max-age=3600")
-                ]
-            )
-            return iter([content_bytes])
+            body, status, content_type, extra = self.serve_asset(path, environ)
+            response_headers = [
+                ("Content-Type", content_type),
+                ("Content-Length", str(len(body))),
+                ("Access-Control-Allow-Origin", "*"),
+            ]
+            response_headers.extend(extra.items())
+            start_response(status, response_headers)
+            return iter([body])
 
         # App-defined raw HTTP routes (e.g. media streaming with Range
         # support) — first match wins, in registration order.
@@ -649,6 +693,13 @@ class FymoApp:
         for route in self._app_routes:
             if method == route.method and path.startswith(route.path):
                 return route.handler(environ, start_response)
+
+        # Nothing routable: try the root-static allowlist, then the built-in
+        # 404. Checked after app routes and SSR route matching so a dynamic
+        # /robots.txt or an SSR route colliding with an allowlisted filename
+        # always wins over a file in app/static.
+        if self.template_renderer.is_route_miss(path):
+            return self._respond_route_miss(path, environ, start_response)
 
         # Handle template requests
         html, status, extra_headers = self.render_svelte_template(path, environ)

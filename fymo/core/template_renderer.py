@@ -143,15 +143,41 @@ class TemplateRenderer:
         status_line = f"{e.status} {e.code.upper()}"
         return "", status_line, [("Location", e.location)]
     
+    def is_route_miss(self, route_path: str) -> bool:
+        """True when no SSR route can serve this path.
+
+        A miss is either no router match at all, or a match produced only by
+        the convention-based fallback with nothing built for it in the
+        manifest -- convention routing guesses a controller from any one- or
+        two-segment path, so its guess only counts when the build actually
+        produced that route. An explicitly declared route is never a miss:
+        its absence from the manifest is a stale build, and _render_via_sidecar
+        keeps reporting that as the 500 it is. Manifest read failures are also
+        not a miss; they surface through the render path as Build Error.
+        """
+        route_info = self.router.match(route_path)
+        if not route_info:
+            return True
+        if not route_info.get("convention"):
+            return False
+        if self.manifest_cache is None:
+            return False
+        route_name = route_info["controller"].split(".")[0]
+        try:
+            manifest = self.manifest_cache.get()
+        except Exception:
+            return False
+        return route_name not in manifest.routes
+
     def _render_via_sidecar(self, route_path: str, environ: dict | None = None) -> Tuple[str, str]:
         """New pipeline: render via Node sidecar with prebuilt SSR module."""
         from fymo.core.sidecar import SidecarError
         from fymo.core.manifest_cache import ManifestUnavailable
         from fymo.core.html import build_html
 
+        if self.is_route_miss(route_path):
+            return self.render_404(route_path), "404 NOT FOUND"
         route_info = self.router.match(route_path)
-        if not route_info:
-            return self._render_404(), "404 NOT FOUND"
 
         controller_key = route_info["controller"]
         route_name = controller_key.split(".")[0]
@@ -367,15 +393,28 @@ class TemplateRenderer:
         
         return sanitized
     
-    def _render_404(self) -> str:
-        """Render 404 page"""
-        return """<!DOCTYPE html>
+    def render_404(self, route_path: str = "") -> str:
+        """Built-in 404 page for a route miss.
+
+        Dev mode gets the routing hint; prod gets a clean minimal page with
+        zero internals. The echoed path is user-controlled and must be
+        escaped. App-customizable error pages are a separate future feature.
+        """
+        if self.dev:
+            detail = (
+                f"<p>No route matched <code>{escape(route_path)}</code>. "
+                "Routes are declared in fymo.yml's <code>routes:</code> "
+                "section or in <code>config/routes.py</code>.</p>"
+            )
+        else:
+            detail = "<p>The requested page could not be found.</p>"
+        return f"""<!DOCTYPE html>
 <html>
 <head>
     <title>404 - Not Found</title>
 </head>
 <body>
     <h1>404 - Page Not Found</h1>
-    <p>The requested page could not be found.</p>
+    {detail}
 </body>
 </html>"""

@@ -111,6 +111,32 @@ def test_new_scaffolds_package_json_dev_script_using_fymo_dev(tmp_path, monkeypa
     assert package_json["scripts"]["dev"] == "fymo dev"
 
 
+def test_new_scaffolds_favicon_svg_in_app_static(tmp_path, monkeypatch):
+    """Issue #75: a fresh project serves its own favicon out of the box via
+    the root-static allowlist. SVG only, one file, no .ico."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    favicon = tmp_path / "myapp" / "app" / "static" / "favicon.svg"
+    assert favicon.is_file()
+    content = favicon.read_text()
+    assert content.startswith("<svg")
+    assert "<text" not in content
+
+
+def test_new_scaffolds_root_layout_with_favicon_link(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    layout = tmp_path / "myapp" / "app" / "templates" / "_layout.svelte"
+    assert layout.is_file()
+    content = layout.read_text()
+    assert "<svelte:head>" in content
+    assert 'rel="icon"' in content
+    assert 'type="image/svg+xml"' in content
+    assert 'href="/favicon.svg"' in content
+    # It's a layout: it must render its children.
+    assert "children" in content
+
+
 def test_new_scaffolds_package_json_with_full_build_deps(tmp_path, monkeypatch):
     """Issue #55: a fresh `fymo new` project could never build. fymo/build/js/build.mjs
     requires esbuild-svelte and svelte-preprocess directly, and app/lib code commonly
