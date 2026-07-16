@@ -15,6 +15,7 @@ from fymo.remote.context import request_scope
 from fymo.remote.discovery import is_exposed_remote_fn
 from fymo.remote.errors import RemoteError
 from fymo.remote.identity import _ensure_uid
+from fymo.remote.rate_limit import enforce_rate_limit
 
 try:
     import pydantic
@@ -63,6 +64,16 @@ def _200(
             headers.append(("Set-Cookie", c))
     start_response("200 OK", headers)
     return [body]
+
+
+def _remote_error_payload(e: RemoteError) -> dict:
+    """Envelope body for a RemoteError. RateLimited additionally carries
+    retry_after, surfaced so clients can back off instead of retrying blind."""
+    payload = {"type": "error", "status": e.status, "error": e.code, "message": str(e)}
+    retry_after = getattr(e, "retry_after", None)
+    if retry_after is not None:
+        payload["retry_after"] = retry_after
+    return payload
 
 
 def _b64url_decode(s: str) -> str:
@@ -210,6 +221,13 @@ def handle_remote(environ: dict, start_response) -> Iterable[bytes]:
     if fn is None:
         return _200(start_response, {"type": "error", "status": 404, "error": "unknown_function"})
 
+    # 5b. Per-function rate limit (@rate_limit marker). Checked before body
+    # parse and arg validation: an over-budget caller shouldn't cost us
+    # anything beyond the token-bucket lookup.
+    limited = enforce_rate_limit(fn, (module_name, fn_name), environ)
+    if limited is not None:
+        return _200(start_response, _remote_error_payload(limited))
+
     # 6. Body parse + payload decode
     try:
         length = int(environ.get("CONTENT_LENGTH") or 0)
@@ -254,11 +272,7 @@ def handle_remote(environ: dict, start_response) -> Iterable[bytes]:
                 result = fn(*validated)
         except RemoteError as e:
             extra_cookies = consume_pending_cookies()
-            return _200(
-                start_response,
-                {"type": "error", "status": e.status, "error": e.code, "message": str(e)},
-                set_cookie, extra_cookies,
-            )
+            return _200(start_response, _remote_error_payload(e), set_cookie, extra_cookies)
         except Exception as e:
             extra_cookies = consume_pending_cookies()
             payload = {"type": "error", "status": 500, "error": "internal"}
