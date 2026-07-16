@@ -221,7 +221,9 @@ def handle_remote(environ: dict, start_response) -> Iterable[bytes]:
     try:
         body = json.loads(raw or b"{}")
         payload_b64 = body.get("payload", "")
-        payload_str = _b64url_decode(payload_b64) if payload_b64 else "[1,[]]"
+        # "[[]]" is devalue.stringify([]): a missing/empty payload means a
+        # zero-arg call, so the fallback must parse to an empty args list.
+        payload_str = _b64url_decode(payload_b64) if payload_b64 else "[[]]"
         args = devalue.parse(payload_str)
         if not isinstance(args, list):
             raise ValueError("payload must devalue-parse to a list of args")
