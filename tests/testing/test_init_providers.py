@@ -78,6 +78,39 @@ def test_restores_prior_providers_exactly(project: Path):
         storage_mod.reset_storage_provider()
 
 
+def test_cleanup_when_body_raises(project: Path):
+    prior_storage = storage_mod._provider
+    prior_jobs = jobs_mod._job_provider
+    prior_bc = broadcast_mod._provider
+    prior_channels = broadcast_mod._channels
+    with pytest.raises(ValueError):
+        with init_providers(project):
+            raise ValueError("boom")
+    assert storage_mod._provider is prior_storage
+    assert jobs_mod._job_provider is prior_jobs
+    assert broadcast_mod._provider is prior_bc
+    assert broadcast_mod._channels is prior_channels
+
+
+def test_partial_init_failure_restores_prior_storage(tmp_path: Path):
+    from fymo.jobs.providers.registry import JobProviderConfigError
+
+    (tmp_path / "fymo.yml").write_text(
+        "name: broken\n"
+        "storage: {provider: local}\n"
+        "jobs: {provider: nosuchprovider}\n"
+    )
+    sentinel = object()
+    storage_mod.set_storage_provider(sentinel)
+    try:
+        with pytest.raises(JobProviderConfigError):
+            with init_providers(tmp_path):
+                pass
+        assert storage_mod._provider is sentinel
+    finally:
+        storage_mod.reset_storage_provider()
+
+
 def test_missing_fymo_yml_raises(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         with init_providers(tmp_path / "nowhere"):

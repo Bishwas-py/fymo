@@ -39,6 +39,20 @@ def test_signed_in_provides_request_scope_uid():
         assert current_uid() == "u_custom"
 
 
+def test_signed_in_default_uid_derives_from_user():
+    user = make_user(id=7)
+    with signed_in(user):
+        assert current_uid() == "u_test7"
+
+
+def test_sequential_signed_in_users_get_distinct_uids():
+    with signed_in(make_user(email="one@example.com")):
+        uid_one = current_uid()
+    with signed_in(make_user(email="two@example.com")):
+        uid_two = current_uid()
+    assert uid_one != uid_two
+
+
 def test_current_user_raises_outside_block():
     with signed_in():
         pass
@@ -54,6 +68,46 @@ def test_acting_as_swaps_and_restores():
         with acting_as(bob):
             assert current_user() is bob
         assert current_user() is alice
+
+
+def test_acting_as_swaps_uid_with_the_user():
+    alice = make_user(id=11)
+    bob = make_user(id=22)
+    with signed_in(alice):
+        assert current_uid() == "u_test11"
+        with acting_as(bob):
+            assert current_uid() == "u_test22"
+        assert current_uid() == "u_test11"
+
+
+def test_acting_as_accepts_uid_override():
+    bob = make_user(email="bob@example.com")
+    with signed_in(uid="u_outer"):
+        with acting_as(bob, uid="u_inner"):
+            assert current_uid() == "u_inner"
+        assert current_uid() == "u_outer"
+
+
+def test_acting_as_nested_uids_restore_level_by_level():
+    a = make_user(id=101)
+    b = make_user(id=102)
+    c = make_user(id=103)
+    with signed_in(a):
+        with acting_as(b):
+            with acting_as(c):
+                assert current_uid() == "u_test103"
+            assert current_uid() == "u_test102"
+        assert current_uid() == "u_test101"
+
+
+def test_acting_as_restores_uid_on_exception():
+    alice = make_user(id=31)
+    bob = make_user(id=32)
+    with signed_in(alice):
+        with pytest.raises(ValueError):
+            with acting_as(bob):
+                raise ValueError("boom")
+        assert current_uid() == "u_test31"
 
 
 def test_acting_as_yields_the_user():
@@ -102,6 +156,20 @@ def test_signed_in_leaves_resolver_registry_as_found():
         assert auth_context._session_resolvers == [sentinel]
     finally:
         reset_session_resolvers()
+
+
+def test_signed_in_cleans_up_when_body_raises():
+    from fymo.remote.context import _current_event
+
+    resolvers_before = list(auth_context._session_resolvers)
+    event_before = _current_event.get()
+    with pytest.raises(ValueError):
+        with signed_in():
+            raise ValueError("boom")
+    assert auth_context._session_resolvers == resolvers_before
+    assert _current_event.get() == event_before
+    with pytest.raises(RuntimeError):
+        current_user()
 
 
 def test_signed_in_blocks_nest():

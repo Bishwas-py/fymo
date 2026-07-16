@@ -44,6 +44,12 @@ fymo.remote.context); the resolver it registers reads the acting user from
 a contextvar, which is what lets `acting_as` swap identities mid-block and
 restore on exit, however deeply nested.
 
+The uid rule: the anonymous-identity uid (current_uid()) always follows
+the acting user, derived as "u_test{user.id}", so different users never
+share uid-keyed data (reactions, anonymous attribution) any more than two
+real browsers would. Both signed_in and acting_as take uid= when a test
+needs an exact value.
+
 Importable without pytest. When pytest is installed, the `signed_in_user`
 fixture at the bottom is also available; re-export it from a conftest.py to
 use it:
@@ -104,6 +110,10 @@ _acting_user: ContextVar[Optional[User]] = ContextVar(
 )
 
 
+def _uid_for(user: User) -> str:
+    return f"u_test{user.id}"
+
+
 def _testing_resolver(event: dict) -> Optional[User]:
     return _acting_user.get()
 
@@ -112,7 +122,7 @@ def _testing_resolver(event: dict) -> Optional[User]:
 def signed_in(
     user: Optional[User] = None,
     *,
-    uid: str = "u_testing",
+    uid: Optional[str] = None,
     environ: Optional[dict] = None,
 ) -> Iterator[User]:
     """Simulate an authenticated caller for the duration of the block.
@@ -123,9 +133,12 @@ def signed_in(
     current_uid(), and request_event() all work. Yields the user; pass one
     from make_user() to customize it, or omit it for a default.
 
-    `uid` and `environ` feed the request scope: `uid` is what current_uid()
-    returns, `environ` is a WSGI-shaped dict for tests that need specific
-    headers or cookies visible to resolvers.
+    The uid rule: identity is user plus uid, and the uid follows the user.
+    It defaults to "u_test{user.id}" so two different users never share a
+    uid (uid-keyed app data, like reaction rows, stays isolated per user
+    the way it would be for real browsers); pass `uid` explicitly when a
+    test cares about the exact value. `environ` is a WSGI-shaped dict for
+    tests that need specific headers or cookies visible to resolvers.
 
     On exit the resolver is removed and the scope closed, leaving the
     resolver registry exactly as it was found.
@@ -135,6 +148,8 @@ def signed_in(
 
     if user is None:
         user = make_user()
+    if uid is None:
+        uid = _uid_for(user)
     auth_context.register_session_resolver(_testing_resolver)
     token = _acting_user.set(user)
     try:
@@ -149,22 +164,35 @@ def signed_in(
 
 
 @contextmanager
-def acting_as(user: User) -> Iterator[User]:
+def acting_as(user: User, *, uid: Optional[str] = None) -> Iterator[User]:
     """Swap the resolved identity to `user` for the duration of the block.
 
+    Swaps the FULL identity: current_user() resolves to `user`, and the
+    request scope's uid (what current_uid() returns) follows the same rule
+    as signed_in, defaulting to "u_test{user.id}" unless `uid` is given.
+    Swapping only the user would let uid-keyed app data leak between the
+    two identities, a false pass for exactly the authorization tests this
+    API exists for.
+
     Must be entered inside a signed_in() block; the previously signed-in
-    user is restored on exit, even when the block raises. Nests freely:
-    each exit restores the identity of the enclosing block.
+    user and uid are restored on exit, even when the block raises. Nests
+    freely: each exit restores the identity of the enclosing block.
     """
+    from fymo.remote.context import _current_event
+
     if _acting_user.get() is None:
         raise RuntimeError(
             "acting_as() requires an enclosing signed_in() block; "
             "wrap the test body in `with signed_in(...):` first"
         )
+    event = _current_event.get()
+    prior_uid = event["uid"]
     token = _acting_user.set(user)
+    event["uid"] = uid if uid is not None else _uid_for(user)
     try:
         yield user
     finally:
+        event["uid"] = prior_uid
         _acting_user.reset(token)
 
 

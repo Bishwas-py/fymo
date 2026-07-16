@@ -38,3 +38,22 @@ def test_second_user_cannot_comment_as_the_first(db):
 
         comments = get_comments(slug)
     assert {c["name"] for c in comments} == {"alice", "bob"}
+
+    rows = db.fetchall("SELECT name, uid FROM comments ORDER BY name")
+    uids = {row["name"]: row["uid"] for row in rows}
+    assert uids["alice"] != uids["bob"]
+
+
+def test_users_have_isolated_reactions(db):
+    from app.remote.posts import toggle_reaction
+
+    slug = _seed_post(db)
+    alice = make_user(email="alice@example.com")
+    bob = make_user(email="bob@example.com")
+
+    with signed_in(alice):
+        counts = toggle_reaction(slug, "clap")
+        assert counts["clap"] == 1
+        with acting_as(bob):
+            counts = toggle_reaction(slug, "clap")
+        assert counts["clap"] == 2
