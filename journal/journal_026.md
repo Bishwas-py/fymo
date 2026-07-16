@@ -1,4 +1,4 @@
-# Journal Entry 023: The Extra That Was Already Half-Built
+# Journal Entry 026: The Extra That Was Already Half-Built
 
 **Date**: July 16, 2026
 **Focus**: Locking auth packaging before more providers land — password stays in base, Clerk/OIDC/OAuth move behind named extras, `type: clerk` fails at boot instead of at first login
@@ -176,4 +176,4 @@ by hand outside pytest entirely.
 
 ---
 
-*End of Journal Entry 023*
+*End of Journal Entry 026*
