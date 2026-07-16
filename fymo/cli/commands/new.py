@@ -83,10 +83,10 @@ gunicorn>=23.0.0
   }},
   "dependencies": {{
     "devalue": "^5.8.1",
-    "svelte": "^5.38.0"
+    "svelte": "^5.56.4"
   }},
   "devDependencies": {{
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.25.9",
     "esbuild-svelte": "^0.9.0",
     "svelte-preprocess": "^6.0.3",
     "typescript": "^5.5.0"

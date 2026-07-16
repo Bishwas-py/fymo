@@ -122,9 +122,9 @@ def test_new_scaffolds_package_json_with_full_build_deps(tmp_path, monkeypatch):
     create_project("myapp")
     package_json = json.loads((tmp_path / "myapp" / "package.json").read_text())
     assert package_json["dependencies"]["devalue"] == "^5.8.1"
-    assert package_json["dependencies"]["svelte"] == "^5.38.0"
+    assert package_json["dependencies"]["svelte"] == "^5.56.4"
     dev_deps = package_json["devDependencies"]
-    assert dev_deps["esbuild"] == "^0.25.0"
+    assert dev_deps["esbuild"] == "^0.25.9"
     assert dev_deps["esbuild-svelte"] == "^0.9.0"
     assert dev_deps["svelte-preprocess"] == "^6.0.3"
     assert dev_deps["typescript"] == "^5.5.0"
