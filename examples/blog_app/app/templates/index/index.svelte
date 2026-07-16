@@ -1,7 +1,33 @@
 <script lang="ts">
-  import type { PostSummary } from '$remote/posts';
+  import type { PostSummary, PostsPage } from '$remote/posts';
 
-  let { hero, posts }: { hero: PostSummary | null; posts: PostSummary[] } = $props();
+  let {
+    hero,
+    posts,
+    next_cursor,
+    list_posts,
+  }: {
+    hero: PostSummary | null;
+    posts: PostSummary[];
+    next_cursor: string | null;
+    list_posts: (cursor?: string | null, limit?: number) => Promise<PostsPage>;
+  } = $props();
+
+  let feed = $state([...posts]);
+  let cursor = $state(next_cursor);
+  let loading = $state(false);
+
+  async function loadMore() {
+    if (loading || !cursor) return;
+    loading = true;
+    try {
+      const page = await list_posts(cursor, 10);
+      feed = [...feed, ...page.items];
+      cursor = page.next_cursor;
+    } finally {
+      loading = false;
+    }
+  }
 
   const fmt = (d: string) =>
     new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -32,7 +58,7 @@
 <section class="feed">
   <p class="kicker section-label">Latest writing</p>
   <ul>
-    {#each posts as p}
+    {#each feed as p}
       <li>
         <a href="/posts/{p.slug}">
           <time>{fmt(p.published_at)}</time>
@@ -45,6 +71,11 @@
       </li>
     {/each}
   </ul>
+  {#if cursor}
+    <button class="load-more" onclick={loadMore} disabled={loading}>
+      {loading ? 'Loading…' : 'More posts'}
+    </button>
+  {/if}
 </section>
 
 <style>
@@ -101,6 +132,18 @@
   .feed .summary { color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
   .feed .arrow { color: var(--muted); transition: transform 0.15s ease, color 0.15s ease; }
   .feed a:hover .arrow { color: var(--accent); transform: translateX(4px); }
+
+  .load-more {
+    display: block; width: 100%; margin-top: 1.4rem;
+    padding: 0.8rem; cursor: pointer;
+    font-family: var(--font-mono); font-size: 0.78rem;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--muted); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 10px;
+    transition: border-color 0.2s ease, color 0.2s ease;
+  }
+  .load-more:hover:enabled { border-color: color-mix(in srgb, var(--accent) 55%, var(--rule)); color: var(--accent); }
+  .load-more:disabled { cursor: default; opacity: 0.6; }
 
   @media (max-width: 34rem) {
     .feed a { grid-template-columns: 1fr auto; }
