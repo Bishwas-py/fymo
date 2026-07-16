@@ -262,3 +262,33 @@ def test_cli_wrapper_rejects_nonpositive_limit(tmp_path: Path, monkeypatch):
         result = runner.invoke(cli, ["jobs-status", "-n", bad])
         assert result.exit_code == 2, result.output
         assert "not in the range" in result.output or "Invalid value" in result.output
+
+
+class StubChainedErrorProvider(BaseJobProvider):
+    """procrastinate's ConnectorException str() is just "Database error.",
+    the useful part (missing table, bad password, unreachable host) lives
+    in the chained psycopg cause; the CLI must surface it."""
+
+    id = "stub-chained-error"
+
+    def job_counts(self):
+        try:
+            raise ValueError('relation "procrastinate_jobs" does not exist')
+        except ValueError as cause:
+            raise ConnectionError("Database error.") from cause
+
+
+def test_backend_exception_message_includes_the_chained_cause(tmp_path: Path, capsys):
+    (tmp_path / "fymo.yml").write_text(
+        "jobs:\n"
+        "  provider:\n"
+        "    class: tests.cli.test_jobs_status.StubChainedErrorProvider\n"
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_jobs_status(tmp_path)
+
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "Database error." in out
+    assert "procrastinate_jobs" in out

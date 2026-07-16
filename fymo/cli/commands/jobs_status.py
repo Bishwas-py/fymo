@@ -66,7 +66,18 @@ def run_jobs_status(
         # ConnectorException, and a status query against a database the
         # worker has never touched is this command's most likely first
         # run. All of it reports as a clear message, not a raw traceback.
-        Color.print_error(str(e))
+        # The cause chain is included because ConnectorException's own
+        # message is just "Database error.", the actionable part (which
+        # table is missing, which host was unreachable) lives in the
+        # chained psycopg exception underneath.
+        parts: list = []
+        current: Optional[BaseException] = e
+        while current is not None and len(parts) < 4:
+            text = str(current).strip()
+            if text and text not in parts:
+                parts.append(text)
+            current = current.__cause__ or current.__context__
+        Color.print_error(" | ".join(parts) or type(e).__name__)
         raise SystemExit(1)
     finally:
         # This process is done with the provider either way: release its
