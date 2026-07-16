@@ -349,6 +349,25 @@ in `fymo.yml` -- the config block above is the entire setup.
 provider is unaffected: only an entry that both sets `required: auto` and
 points at a provider overriding the hook gets the conditional behavior.
 
+### Auth provider extras: password stays in base, Clerk/OIDC/OAuth are opt-in
+
+The password provider (`hashlib.scrypt`, stdlib-only) is the one real login
+built into fymo -- a bare `pip install fymo` with `auth.enabled: true` and
+no `providers:` list logs a user in with zero extra installs. Clerk, OIDC,
+and OAuth providers live behind named extras instead:
+
+```sh
+pip install 'fymo[clerk]'   # ClerkProvider: pyjwt[crypto] for RS256/JWKS
+pip install 'fymo[oidc]'    # OIDCProvider: stdlib-only today, named for consistency
+pip install 'fymo[oauth]'   # GoogleProvider/OAuthProvider: same, stdlib-only today
+```
+
+`type: clerk` without `fymo[clerk]` installed is a hard error at
+`FymoApp` construction (app startup), naming the exact install command --
+never a silent fallback to a disabled or half-working auth setup. Same
+posture as the granian check above: refuse to start rather than fail on
+someone's first login attempt in production.
+
 ## Worker sizing
 
 `--workers` means OS processes under **both** servers, and each worker
