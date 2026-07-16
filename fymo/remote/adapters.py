@@ -161,10 +161,38 @@ def _coerce_dict_key(key: Any, key_hint: Any):
     return _coerce_value(key, key_hint)
 
 
+def _reject_undefined(value: Any) -> None:
+    """devalue's UNDEFINED sentinel means "argument omitted" at a top-level
+    slot (validate_args handles that before coercion) and nothing anywhere
+    else. A JS call like fn([undefined]) parses to the raw sentinel nested
+    in a container; letting it through guarantees a downstream 500 (no user
+    code or DB driver can handle it), so every pass-through path scans for
+    it before returning the value unvalidated."""
+    from fymo.remote.devalue import UNDEFINED
+    if value is UNDEFINED:
+        raise TypeError("undefined is only valid as a whole omitted argument")
+    if isinstance(value, list):
+        for v in value:
+            _reject_undefined(v)
+    elif isinstance(value, dict):
+        for v in value.values():
+            _reject_undefined(v)
+
+
 def _coerce_value(value: Any, hint: Any):
     """Validate `value` against `hint`. Raises TypeError or ValidationError on mismatch."""
-    if hint is Any or hint is type(None):
+    from fymo.remote.devalue import UNDEFINED
+    if value is UNDEFINED:
+        raise TypeError("undefined is only valid as a whole omitted argument")
+    if hint is Any:
+        _reject_undefined(value)
         return value
+    if hint is type(None):
+        # The NoneType branch of a union must actually check for None;
+        # returning the value unchecked made `str | None` accept anything.
+        if value is not None:
+            raise TypeError(f"expected None, got {type(value).__name__}")
+        return None
     origin = get_origin(hint)
 
     if _is_pydantic_model(hint):
@@ -192,6 +220,7 @@ def _coerce_value(value: Any, hint: Any):
             raise TypeError(f"expected list, got {type(value).__name__}")
         args = get_args(hint)
         if not args:
+            _reject_undefined(value)
             return value
         # Fixed-length tuple: tuple[int, str] validates each position against
         # its own type. tuple[int, ...] (and list/set/frozenset) validate
@@ -208,6 +237,7 @@ def _coerce_value(value: Any, hint: Any):
             raise TypeError(f"expected dict, got {type(value).__name__}")
         args = get_args(hint)
         if not args:
+            _reject_undefined(value)
             return value
         key_hint, val_hint = args
         return {
@@ -234,16 +264,34 @@ def _coerce_value(value: Any, hint: Any):
         return _validate_structured(value, hint)
 
     # Unknown/unhandled annotation — no validator available, pass through.
+    _reject_undefined(value)
     return value
 
 
 def validate_args(args: list, sig: inspect.Signature, hints: dict) -> list:
-    """Validate and coerce positional args against the function signature."""
+    """Validate and coerce positional args against the function signature.
+
+    An omitted argument uses the parameter's default. The generated JS
+    client always sends every positional slot, so a skipped trailing
+    argument arrives as devalue UNDEFINED rather than being absent; both
+    forms (UNDEFINED and a short args list) mean "not provided" here, which
+    matches what `undefined` means at the JS call site.
+    """
+    from fymo.remote.devalue import UNDEFINED
+
     params = list(sig.parameters.values())
-    if len(args) != len(params):
+    if len(args) > len(params):
         raise TypeError(f"expected {len(params)} args, got {len(args)}")
     out = []
-    for arg, param in zip(args, params):
+    for i, param in enumerate(params):
+        arg = args[i] if i < len(args) else UNDEFINED
+        if arg is UNDEFINED:
+            if param.default is inspect.Parameter.empty:
+                if i >= len(args):
+                    raise TypeError(f"expected {len(params)} args, got {len(args)}")
+                raise TypeError(f"missing required argument {param.name!r}")
+            out.append(param.default)
+            continue
         hint = hints.get(param.name, Any)
         out.append(_coerce_value(arg, hint))
     return out

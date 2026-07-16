@@ -86,3 +86,90 @@ def test_arg_count_mismatch():
 
     with pytest.raises(TypeError, match="expected 2"):
         validate_args([1], sig, hints)
+
+
+def test_undefined_args_fill_param_defaults():
+    from fymo.remote.devalue import UNDEFINED
+
+    def fn(cursor: str | None = None, limit: int = 20) -> int: return limit
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+
+    # The generated JS client always sends every positional slot, so a call
+    # like list_posts() arrives as [undefined, undefined].
+    assert validate_args([UNDEFINED, UNDEFINED], sig, hints) == [None, 20]
+    assert validate_args(["abc", UNDEFINED], sig, hints) == ["abc", 20]
+
+
+def test_missing_trailing_args_fill_param_defaults():
+    def fn(cursor: str | None = None, limit: int = 20) -> int: return limit
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+
+    assert validate_args([], sig, hints) == [None, 20]
+    assert validate_args(["abc"], sig, hints) == ["abc", 20]
+
+
+def test_undefined_arg_without_default_rejected():
+    from fymo.remote.devalue import UNDEFINED
+
+    def fn(x: int) -> int: return x
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+
+    with pytest.raises(TypeError, match="x"):
+        validate_args([UNDEFINED], sig, hints)
+
+
+def test_none_hint_rejects_non_none_values():
+    """The NoneType branch of a union must actually check for None. It used
+    to return the value unchecked, so `str | None` accepted absolutely
+    anything (an int, a dict) via its None branch."""
+    def fn(cursor: str | None = None) -> str | None: return cursor
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+
+    with pytest.raises(TypeError):
+        validate_args([42], sig, hints)
+    with pytest.raises(TypeError):
+        validate_args([{"a": 1}], sig, hints)
+    assert validate_args([None], sig, hints) == [None]
+    assert validate_args(["abc"], sig, hints) == ["abc"]
+
+
+def test_nested_undefined_is_rejected_not_leaked():
+    """devalue UNDEFINED means "argument omitted" at a top-level slot and
+    nothing anywhere else. A JS call like fn([undefined]) used to deliver
+    the raw sentinel into user code, where the first DB bind 500s."""
+    from fymo.remote.devalue import UNDEFINED
+
+    def fn(xs: list[str | None]) -> int: return len(xs)
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+    with pytest.raises(TypeError):
+        validate_args([[UNDEFINED]], sig, hints)
+
+    def fn2(d: dict[str, str | None]) -> int: return len(d)
+    sig2 = inspect.signature(fn2)
+    hints2 = _hints_for(fn2)
+    with pytest.raises(TypeError):
+        validate_args([{"k": UNDEFINED}], sig2, hints2)
+
+
+def test_nested_undefined_rejected_in_unparameterized_hints():
+    """Bare `list`/`dict` and Any hints pass values through without element
+    validation, which must still not include the UNDEFINED sentinel."""
+    from fymo.remote.devalue import UNDEFINED
+    from typing import Any
+
+    def fn(xs: list) -> int: return len(xs)
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+    with pytest.raises(TypeError):
+        validate_args([[UNDEFINED]], sig, hints)
+
+    def fn2(x: Any) -> int: return 0
+    sig2 = inspect.signature(fn2)
+    hints2 = _hints_for(fn2)
+    with pytest.raises(TypeError):
+        validate_args([[{"deep": [UNDEFINED]}]], sig2, hints2)

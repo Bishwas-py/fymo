@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import TypedDict, Literal
 from pydantic import BaseModel, Field
 
-from fymo.remote import current_uid, NotFound, remote
+from fymo.remote import current_uid, NotFound, remote, decode_cursor, paginate
 from fymo.auth import require_auth, current_user
 from app.data.db import get_db
 
@@ -45,6 +45,11 @@ class ReactionCounts(TypedDict):
     mind: int
 
 
+class PostsPage(TypedDict):
+    items: list[PostSummary]
+    next_cursor: str | None
+
+
 class NewComment(BaseModel):
     body: str = Field(min_length=1, max_length=1000)
 
@@ -54,6 +59,28 @@ def get_posts() -> list[PostSummary]:
     return get_db().fetchall(
         "SELECT slug, title, summary, tags, published_at FROM posts ORDER BY published_at DESC"
     )
+
+
+@remote
+def list_posts(cursor: str | None = None, limit: int = 20) -> PostsPage:
+    # Cursor pagination over (published_at, slug): published_at alone isn't
+    # unique, so slug breaks ties. Fetch one row past `limit`; paginate()
+    # turns that extra row into next_cursor (null on the last page).
+    limit = max(1, min(limit, 50))
+    fields = "slug, title, summary, tags, published_at"
+    if cursor:
+        published_at, slug = decode_cursor(cursor, expect=2)
+        rows = get_db().fetchall(
+            f"SELECT {fields} FROM posts WHERE (published_at, slug) < (?, ?) "
+            "ORDER BY published_at DESC, slug DESC LIMIT ?",
+            [published_at, slug, limit + 1],
+        )
+    else:
+        rows = get_db().fetchall(
+            f"SELECT {fields} FROM posts ORDER BY published_at DESC, slug DESC LIMIT ?",
+            [limit + 1],
+        )
+    return paginate(rows, limit, key=lambda p: (p["published_at"], p["slug"]))
 
 
 @remote

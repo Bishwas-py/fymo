@@ -132,3 +132,105 @@ updated by the soft-nav router, not by the SSR render pass: reads inside
 read in top-level template markup during the very first render may
 briefly differ from what the server rendered, the same as any other value
 that legitimately differs between server and client.
+
+## Paginated remote functions
+
+Nothing stops a remote function from returning every row, and at demo row
+counts that works, which is exactly the problem: `list_x()` returning the
+whole table is the path of least resistance and gives no signal in dev that
+it stops working later. The convention for anything list-shaped that can
+grow is cursor pagination:
+
+```python
+from typing import TypedDict
+from fymo.remote import remote, decode_cursor, paginate
+
+
+class PostsPage(TypedDict):
+    items: list[PostSummary]
+    next_cursor: str | None    # opaque; null means "no more pages"
+
+
+@remote
+def list_posts(cursor: str | None = None, limit: int = 20) -> PostsPage:
+    limit = max(1, min(limit, 50))
+    fields = "slug, title, summary, tags, published_at"
+    if cursor:
+        published_at, slug = decode_cursor(cursor, expect=2)
+        rows = get_db().fetchall(
+            f"SELECT {fields} FROM posts WHERE (published_at, slug) < (?, ?) "
+            "ORDER BY published_at DESC, slug DESC LIMIT ?",
+            [published_at, slug, limit + 1],
+        )
+    else:
+        rows = get_db().fetchall(
+            f"SELECT {fields} FROM posts ORDER BY published_at DESC, slug DESC LIMIT ?",
+            [limit + 1],
+        )
+    return paginate(rows, limit, key=lambda p: (p["published_at"], p["slug"]))
+```
+
+This is copied from `examples/blog_app/app/remote/posts.py`, which
+demonstrates it end to end (the home page SSRs the first page and a "More
+posts" button fetches the rest through the `$remote` client).
+
+The pieces, all from `fymo.remote`:
+
+- **`encode_cursor(*values)` / `decode_cursor(cursor, expect=n)`** — an
+  opaque cursor is just base64url-encoded JSON of the last-seen sort-key
+  value(s). `decode_cursor` raises a `RemoteError` that the router turns
+  into a 400 `bad_cursor` envelope on any garbage input (bad base64,
+  non-JSON, wrong arity, nested values, ints beyond the JS safe-integer
+  range), so a tampered cursor can never become a 500. One thing it
+  cannot detect: a *well-formed* cursor pasted from a different paginated
+  function with the same arity decodes fine and just yields a wrong or
+  empty page — cursors are opaque, not authenticated.
+- **The fetch-one-extra idiom** — query `LIMIT limit + 1`. Getting
+  `limit + 1` rows back proves there's a next page without a second
+  `COUNT(*)` query; `paginate(rows, limit, key=...)` drops the extra row
+  and encodes the last *kept* row's sort key(s) as `next_cursor`, or `None`
+  when the extra row didn't come back.
+- **A unique sort key** — the cursor must identify an exact position, so
+  sort by something unique. A timestamp alone usually isn't; the example
+  uses `(published_at, slug)` with SQLite's row-value comparison. A single
+  auto-increment `id` works too: `WHERE id < ? ORDER BY id DESC`, with
+  `key=lambda r: r["id"]`.
+
+Why cursor instead of `offset`? `OFFSET n` scans and discards `n` rows on
+every page, and a row inserted between two requests shifts every subsequent
+page (items repeat or vanish). A cursor is a WHERE clause on an indexed
+column: constant cost per page, stable under concurrent writes, and it
+devalue-round-trips as a plain string.
+
+Declare the page shape as a plain per-module TypedDict (`PostsPage`), not a
+generic `Page[T]`. Codegen (`fymo/remote/typemap.py`) maps a subscripted
+generic TypedDict to `unknown` — a plain TypedDict comes out as a real
+interface:
+
+```ts
+export interface PostsPage {
+  items: PostSummary[];
+  next_cursor: string | null;
+}
+export function list_posts(cursor?: string | null, limit?: number): Promise<PostsPage>;
+```
+
+On the client, page one is a call with no cursor; every next page feeds the
+previous `next_cursor` back in until it comes back `null`:
+
+```svelte
+<script lang="ts">
+  let feed = $state<PostSummary[]>([]);
+  let cursor: string | null = $state(null);
+
+  async function loadMore() {
+    const page = await list_posts(cursor, 10);
+    feed = [...feed, ...page.items];
+    cursor = page.next_cursor;   // null => hide the button
+  }
+</script>
+```
+
+Omitted arguments use the Python-side defaults: the generated client sends
+`undefined` for a skipped trailing argument and the dispatcher substitutes
+the parameter default, so `list_posts()` means `cursor=None, limit=20`.
