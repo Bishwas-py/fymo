@@ -38,3 +38,14 @@ def test_submit_raises_on_unknown_task():
 
 def test_id_is_threaded():
     assert ThreadedJobProvider().id == "threaded"
+
+
+def test_job_counts_returns_none():
+    """Deliberate: the executor's state lives inside the web process, and
+    `fymo jobs-status` runs as its own OS process, so a fresh provider
+    there would always report zeros, worse than saying "not tracked"."""
+    assert ThreadedJobProvider().job_counts() is None
+
+
+def test_list_recent_jobs_returns_none():
+    assert ThreadedJobProvider().list_recent_jobs() is None

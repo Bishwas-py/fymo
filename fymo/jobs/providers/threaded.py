@@ -6,6 +6,14 @@ provider, and the fallback default for a project that hasn't configured
 durability trade-off `fymo.jobs` always had: a job dies if the process
 restarts mid-run. Use `ProcrastinateJobProvider` for anything that needs
 to survive a restart or scale independently of the web tier.
+
+Deliberately keeps the base's None for job_counts()/list_recent_jobs()
+(i.e. "job state is not tracked"): the executor's state lives inside the
+web process, and `fymo jobs-status` runs as its own OS process, so the
+fresh provider it builds could only ever report zeros. None makes the
+CLI say "not tracked" instead, which is the honest answer. Apps that
+need visibility into threaded jobs should follow the app-level progress
+convention (docs/conventions.md) or switch to a durable provider.
 """
 from __future__ import annotations
 

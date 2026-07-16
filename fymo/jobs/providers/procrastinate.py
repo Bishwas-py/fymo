@@ -11,11 +11,32 @@ from __future__ import annotations
 import inspect
 import logging
 import os
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 
-from fymo.jobs.providers.base import BaseJobProvider
+from fymo.jobs.providers.base import BaseJobProvider, JobRecord
 
 _DEFAULT_ENV_VAR = "DATABASE_URL"
+
+# The statuses procrastinate's list_queues() aggregates report (its
+# 'aborting' enum value is legacy, unused since procrastinate 3.0).
+_STATUSES = ("todo", "doing", "succeeded", "failed", "cancelled", "aborted")
+
+# list_recent_jobs() can't come from procrastinate's public JobManager API:
+# list_jobs() has no LIMIT (it fetches the whole table, which delete_old_jobs
+# may never have pruned) and its Job model carries no enqueue timestamp.
+# Both live in procrastinate's documented schema instead: the jobs row plus
+# its 'deferred' event (procrastinate_events records every transition; the
+# insert trigger writes 'deferred' when a job is first queued).
+_RECENT_JOBS_QUERY = """
+SELECT j.id,
+       j.task_name,
+       j.status,
+       (SELECT MIN(e.at) FROM procrastinate_events e
+         WHERE e.job_id = j.id AND e.type = 'deferred') AS queued_at
+  FROM procrastinate_jobs j
+ ORDER BY j.id DESC
+ LIMIT %(limit)s
+"""
 
 
 class DropProcrastinateJobErrorRecord(logging.Filter):
@@ -139,6 +160,41 @@ class ProcrastinateJobProvider(BaseJobProvider):
             worker_logger.addFilter(DropProcrastinateJobErrorRecord())
 
         app.run_worker(**kwargs)
+
+    def job_counts(self) -> Dict[str, int]:
+        """Sum procrastinate's own per-queue status aggregates (public
+        JobManager.list_queues() API) into one counts-by-status dict."""
+        counts = dict.fromkeys(_STATUSES, 0)
+        for queue_stats in self._get_app().job_manager.list_queues():
+            for status in _STATUSES:
+                counts[status] += queue_stats[status]
+        return counts
+
+    def list_recent_jobs(self, limit: int = 10) -> List[JobRecord]:
+        """Newest jobs first, straight from procrastinate's job table (see
+        _RECENT_JOBS_QUERY for why this bypasses the public API), through
+        the same opened sync connector submit() uses."""
+        rows = self._get_app().connector.execute_query_all(
+            _RECENT_JOBS_QUERY, limit=limit,
+        )
+        return [
+            JobRecord(
+                id=str(row["id"]),
+                task_name=row["task_name"],
+                status=row["status"],
+                queued_at=row["queued_at"],
+            )
+            for row in rows
+        ]
+
+    def close(self) -> None:
+        """Close the cached sync app's connector and drop the cache so the
+        next call reconnects. Matters for short-lived processes (`fymo
+        jobs-status`): psycopg's pool complains loudly when it's left to be
+        torn down by interpreter shutdown instead of closed explicitly."""
+        if self._app is not None:
+            self._app.close()
+            self._app = None
 
     def _get_app(self):
         if self._app is None:

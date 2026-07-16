@@ -24,3 +24,19 @@ def test_base_provider_run_worker_raises_a_clear_error():
     provider = BaseJobProvider()
     with pytest.raises(RuntimeError, match="has no separate worker process"):
         provider.run_worker()
+
+
+def test_base_provider_job_counts_returns_none():
+    """None is the seam's documented "this provider doesn't track job
+    state" signal, and the default, so existing custom providers stay
+    valid without implementing the status surface."""
+    assert BaseJobProvider().job_counts() is None
+
+
+def test_base_provider_list_recent_jobs_returns_none():
+    assert BaseJobProvider().list_recent_jobs() is None
+    assert BaseJobProvider().list_recent_jobs(limit=5) is None
+
+
+def test_base_provider_close_is_inert_by_default():
+    BaseJobProvider().close()  # must not raise

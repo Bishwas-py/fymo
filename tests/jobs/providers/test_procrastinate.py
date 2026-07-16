@@ -117,3 +117,82 @@ def test_run_worker_drains_the_queue_and_returns_when_wait_is_false(database_url
     provider.run_worker(wait=False, listen_notify=False)
 
     assert result == {"sum": 5}
+
+
+def test_job_counts_tracks_a_job_from_todo_to_succeeded(database_url, monkeypatch):
+    """The status seam against real procrastinate state. The database (and
+    its procrastinate_jobs table) persists across tests and runs, so assert
+    on deltas rather than absolute numbers."""
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
+
+    def add_numbers(a, b):
+        pass
+
+    provider = ProcrastinateJobProvider()
+    provider.register_tasks({"add_numbers": add_numbers})
+
+    before = provider.job_counts()
+    provider.submit("add_numbers", 1, b=2)
+    provider.submit("add_numbers", 3, b=4)
+    queued = provider.job_counts()
+    assert queued["todo"] - before["todo"] == 2
+
+    provider.run_worker(wait=False, listen_notify=False)
+    drained = provider.job_counts()
+    assert drained["todo"] == before["todo"]
+    assert drained["succeeded"] - before["succeeded"] == 2
+
+
+def test_list_recent_jobs_returns_newest_first_with_queued_at(database_url, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    from datetime import datetime, timedelta, timezone
+    from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
+
+    def add_numbers(a, b):
+        pass
+
+    provider = ProcrastinateJobProvider()
+    provider.register_tasks({"add_numbers": add_numbers})
+    provider.submit("add_numbers", 1, b=2)
+    provider.submit("add_numbers", 3, b=4)
+
+    recent = provider.list_recent_jobs(limit=2)
+
+    assert len(recent) == 2
+    assert int(recent[0].id) > int(recent[1].id)  # newest first
+    for record in recent:
+        assert record.task_name == "add_numbers"
+        assert record.status == "todo"
+        assert record.queued_at is not None
+        assert datetime.now(timezone.utc) - record.queued_at < timedelta(minutes=5)
+
+
+def test_close_releases_the_connection_and_a_later_call_reconnects(database_url, monkeypatch):
+    """The CLI closes the provider when done (a short-lived process must
+    not leave psycopg's pool to be torn down by interpreter shutdown);
+    closing must not brick the provider for a later call."""
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
+
+    provider = ProcrastinateJobProvider()
+    provider.register_tasks({})
+
+    assert provider.job_counts() is not None
+    provider.close()
+    assert provider.job_counts() is not None  # reconnects transparently
+
+
+def test_list_recent_jobs_respects_the_limit(database_url, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
+
+    def add_numbers(a, b):
+        pass
+
+    provider = ProcrastinateJobProvider()
+    provider.register_tasks({"add_numbers": add_numbers})
+    for i in range(3):
+        provider.submit("add_numbers", i, b=i)
+
+    assert len(provider.list_recent_jobs(limit=1)) == 1
