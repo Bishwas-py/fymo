@@ -238,12 +238,29 @@ def _coerce_value(value: Any, hint: Any):
 
 
 def validate_args(args: list, sig: inspect.Signature, hints: dict) -> list:
-    """Validate and coerce positional args against the function signature."""
+    """Validate and coerce positional args against the function signature.
+
+    An omitted argument uses the parameter's default. The generated JS
+    client always sends every positional slot, so a skipped trailing
+    argument arrives as devalue UNDEFINED rather than being absent; both
+    forms (UNDEFINED and a short args list) mean "not provided" here, which
+    matches what `undefined` means at the JS call site.
+    """
+    from fymo.remote.devalue import UNDEFINED
+
     params = list(sig.parameters.values())
-    if len(args) != len(params):
+    if len(args) > len(params):
         raise TypeError(f"expected {len(params)} args, got {len(args)}")
     out = []
-    for arg, param in zip(args, params):
+    for i, param in enumerate(params):
+        arg = args[i] if i < len(args) else UNDEFINED
+        if arg is UNDEFINED:
+            if param.default is inspect.Parameter.empty:
+                if i >= len(args):
+                    raise TypeError(f"expected {len(params)} args, got {len(args)}")
+                raise TypeError(f"missing required argument {param.name!r}")
+            out.append(param.default)
+            continue
         hint = hints.get(param.name, Any)
         out.append(_coerce_value(arg, hint))
     return out

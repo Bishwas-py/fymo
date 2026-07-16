@@ -86,3 +86,36 @@ def test_arg_count_mismatch():
 
     with pytest.raises(TypeError, match="expected 2"):
         validate_args([1], sig, hints)
+
+
+def test_undefined_args_fill_param_defaults():
+    from fymo.remote.devalue import UNDEFINED
+
+    def fn(cursor: str | None = None, limit: int = 20) -> int: return limit
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+
+    # The generated JS client always sends every positional slot, so a call
+    # like list_posts() arrives as [undefined, undefined].
+    assert validate_args([UNDEFINED, UNDEFINED], sig, hints) == [None, 20]
+    assert validate_args(["abc", UNDEFINED], sig, hints) == ["abc", 20]
+
+
+def test_missing_trailing_args_fill_param_defaults():
+    def fn(cursor: str | None = None, limit: int = 20) -> int: return limit
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+
+    assert validate_args([], sig, hints) == [None, 20]
+    assert validate_args(["abc"], sig, hints) == ["abc", 20]
+
+
+def test_undefined_arg_without_default_rejected():
+    from fymo.remote.devalue import UNDEFINED
+
+    def fn(x: int) -> int: return x
+    sig = inspect.signature(fn)
+    hints = _hints_for(fn)
+
+    with pytest.raises(TypeError, match="x"):
+        validate_args([UNDEFINED], sig, hints)
