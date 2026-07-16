@@ -1,8 +1,8 @@
 # Production deployment
 
-This covers running a Fymo app in production: the process model, the
-reverse-proxy setup in front of it, secret provisioning, worker sizing, the
-health check, and log shipping.
+This covers running a Fymo app in production: the server choice, the
+process model, the reverse-proxy setup in front of it, secret
+provisioning, worker sizing, the health check, and log shipping.
 
 > **The `Dockerfile` at the fymo repo root is a per-project template, not a
 > file you build from this repo.** Copy it (and `.dockerignore`) into your
@@ -13,21 +13,74 @@ health check, and log shipping.
 > framework repo root instead of your project directory will not produce a
 > working image.
 
+## Choosing a server: granian vs gunicorn
+
+`fymo serve --prod` runs the app under one of two supported servers,
+selected with `--server`:
+
+```sh
+fymo serve --prod                      # auto: granian if installed, else gunicorn
+fymo serve --prod --server granian    # explicit granian; errors if not installed
+fymo serve --prod --server gunicorn   # explicit gunicorn
+```
+
+- **`auto`** (the default) prefers granian when it's importable and falls
+  back to gunicorn when it isn't. The choice is never silent — one log
+  line at startup says which server was picked and why.
+- **`--server granian`** without granian installed is a hard error naming
+  the fix (`pip install 'fymo[granian]'`), never a silent fallback.
+- **`--server gunicorn`** is exactly the pre-granian behavior, and
+  gunicorn remains the works-with-no-extras baseline: deployments that
+  don't install the extra and don't pass the flag get gunicorn as before.
+
+granian is an optional extra, not a hard dependency:
+
+```sh
+pip install 'fymo[granian]'
+```
+
+Why prefer granian? gunicorn's `sync` workers handle exactly one request
+at a time per process, which makes the server layer — not fymo — the
+bottleneck. Measured layer by layer (issue #39, same machine, same
+`ab -n 2000 -c 50`, interleaved runs):
+
+| Workload                          | gunicorn (sync) | granian (WSGI)   |
+| --------------------------------- | --------------- | ---------------- |
+| Bare do-nothing WSGI app, 1 worker | 2,961 req/s     | 27,022 req/s     |
+| fymo full SSR                     | ~1,400–2,259 req/s | ~4,300 req/s  |
+
+fymo's own per-request time is 0.3–0.5 ms; on gunicorn sync the server
+layer throws most of that away. An independent re-run on different
+hardware while landing this feature reproduced the shape: per worker,
+granian carried ~2.3x gunicorn's SSR throughput on the same app, with
+zero failed requests on either server. `/healthz`, JSON access logging,
+and clean sidecar shutdown behave identically under both servers.
+
+gunicorn is still the right pick when you want the battle-tested option,
+already have gunicorn-specific tooling/config around your deploy, or
+can't take on a compiled-wheel dependency.
+
 ## Process model
 
-`fymo serve --prod --workers N` runs the app under gunicorn. Gunicorn owns
-the worker processes; each worker is a full Python process that also spawns
-its own Node child process (`node dist/sidecar.mjs`) to perform SSR. That
-sidecar is not shared across workers — it's created fresh after each fork
-(see `fymo/server/gunicorn.py`) — so a running production instance looks
-like:
+`fymo serve --prod --workers N` runs N worker processes under whichever
+server is selected. Under both servers, each worker is a full Python
+process that also spawns its own Node child process
+(`node dist/sidecar.mjs`) to perform SSR. That sidecar is not shared
+across workers, so a running production instance looks like:
 
 ```
-gunicorn arbiter
+server master (gunicorn arbiter / granian main)
 ├── worker 1 (python) ──spawns──> node dist/sidecar.mjs (SSR child)
 ├── worker 2 (python) ──spawns──> node dist/sidecar.mjs (SSR child)
 └── worker N (python) ──spawns──> node dist/sidecar.mjs (SSR child)
 ```
+
+How the workers come to own their sidecars differs — gunicorn forks
+workers from a master that already imported the app, so fymo rebuilds a
+worker-owned app after each fork (see `fymo/server/gunicorn.py`), while
+granian workers each import `server.py` themselves and never share
+anything with the parent (see `fymo/server/granian_server.py`) — but the
+resulting process tree, and everything below, is the same for both.
 
 This is why the runtime container image needs **both** Python and Node —
 see `Dockerfile` at the repo root for a reference multi-stage build. A
@@ -37,8 +90,8 @@ sidecar to render with.
 
 ## Reverse proxy (nginx / Caddy) and TLS
 
-Gunicorn (via the `sync` worker class fymo configures) should sit behind a
-reverse proxy that terminates TLS. Don't terminate TLS in gunicorn itself.
+The production server (granian or gunicorn) should sit behind a reverse
+proxy that terminates TLS. Don't terminate TLS in the app server itself.
 
 - **Caddy** terminates TLS (including automatic cert issuance/renewal) and
   reverse-proxies to the app:
@@ -298,9 +351,8 @@ points at a provider overriding the hook gets the conditional behavior.
 
 ## Worker sizing
 
-Each gunicorn worker costs one Python process **plus** one Node sidecar
-process. Sizing purely on CPU core count (the usual `2 * cores + 1` rule of
-thumb) will overcommit memory here — budget for:
+`--workers` means OS processes under **both** servers, and each worker
+costs one Python process **plus** one Node sidecar process. Budget for:
 
 ```
 total memory ≈ workers × (python_worker_rss + node_sidecar_rss)
@@ -309,8 +361,22 @@ total memory ≈ workers × (python_worker_rss + node_sidecar_rss)
 Measure `python_worker_rss` and `node_sidecar_rss` for your app under
 representative load (component tree size and SSR payload size both affect
 the Node side) before picking a worker count, and leave headroom rather
-than sizing to the limit. Start conservative (e.g. `--workers 2`–`4` on a
-single host) and scale workers with observed memory, not just CPU.
+than sizing to the limit.
+
+How far throughput scales with each added worker differs by server:
+
+- **gunicorn** (`sync` worker class): one request at a time per worker,
+  so concurrency comes *only* from process count. The usual gunicorn rule
+  of thumb is `2 × cores`–`4 × cores` workers — but each one carries a
+  sidecar, so sizing purely on CPU count will overcommit memory here.
+  Start conservative (e.g. `--workers 2`–`4` on a single host) and scale
+  with observed memory, not just CPU.
+- **granian**: each worker dispatches requests from a pool of blocking
+  threads (fymo caps it at `min(2 × cores, 64)` per worker), so a single
+  worker already handles concurrent requests. Fewer processes are needed
+  for the same throughput — start at `--workers 1`–`2` and add workers
+  only when a single worker's CPU (Python side or its Node sidecar)
+  saturates.
 
 `--workers` is set via the CLI/CMD, so it can be tuned per-environment
 without rebuilding the image:
@@ -330,9 +396,9 @@ the body-size cap. It pings the current worker's Node sidecar:
 
 Point your load balancer / orchestrator health check (Docker
 `HEALTHCHECK`, Kubernetes liveness/readiness probe, ALB target group
-health check, etc.) at this path. Because gunicorn workers each own an
-independent sidecar, `/healthz` reflects the health of whichever worker
-served that particular request — a load balancer polling repeatedly across
+health check, etc.) at this path. Because workers each own an independent
+sidecar (under both servers), `/healthz` reflects the health of whichever
+worker served that particular request — a load balancer polling repeatedly across
 workers will catch a single degraded worker within a few checks.
 
 `/healthz` is intentionally excluded from access logging (see
@@ -363,8 +429,8 @@ without a custom grok/regex rule.
 ## Logging
 
 fymo logs to the terminal by default — in production (`FYMO_DEV` unset)
-as one JSON object per line on stderr, which Docker, systemd, gunicorn,
-and any log collector pick up natively. Configure via `fymo.yml`:
+as one JSON object per line on stderr, which Docker, systemd, and any log
+collector pick up natively. Configure via `fymo.yml`:
 
 ```yaml
 logging:
