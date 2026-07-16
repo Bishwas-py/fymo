@@ -1,4 +1,4 @@
-# Journal Entry 021: A Pathname That Refused to Update
+# Journal Entry 022: A Pathname That Refused to Update
 
 **Date**: July 16, 2026
 **Focus**: A reactive route/params primitive for the client, since location.pathname never was one
@@ -208,4 +208,4 @@ tab, before calling it done. Full suite: 885 passing, 10 skipped.
 
 ---
 
-*End of Journal Entry 021*
+*End of Journal Entry 022*
