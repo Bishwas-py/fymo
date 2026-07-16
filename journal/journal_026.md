@@ -39,6 +39,25 @@ a CREATE statement it can't classify, it raises. A partial list is worse
 than no list, because the whole point is feeding an exclude list to a
 tool that deletes what isn't mentioned.
 
+My first version of that rule was a lie, and review caught it cold. I
+anchored the scan to CREATE at the start of a line, which reads as a
+tidy simplification and is actually a silent-skip mechanism: a CREATE
+tucked inside a DO block, or a second CREATE sharing a line, just never
+existed as far as the parser was concerned. Worse, the proof was already
+sitting in procrastinate's real schema, which opens with an indented
+CREATE EXTENSION inside a DO block that my parser walked straight past
+while its tests glowed green, because the drift guard used the same
+anchor and shared the same blind spot. The kill chain writes itself: a
+future procrastinate guards a new table behind the same DO pattern, the
+list misses it, the next diff drops it. So the anchor is gone. The
+parser now strips comments and visits every CREATE token in the text,
+wherever it hides, and each one is classified or the parser raises;
+there is no third outcome, by construction. The guard test got rebuilt
+on a different axis entirely, a flat token walk that shares no code with
+the parser, so the two can't agree on a blind spot again. And the
+catalog cross-check now runs against a real Postgres on every push
+instead of only when someone remembers to point it at one.
+
 Two details earned their place the hard way. Tables with bigserial or
 identity columns create sequences nobody wrote a CREATE SEQUENCE for,
 and a schema tool that enumerates sequences will happily propose
@@ -76,11 +95,12 @@ procrastinate exits 1 naming the extra, never printing half a list.
 
 The acceptance test I trust most applied procrastinate's schema to a
 throwaway Postgres and diffed the actual catalog against the command's
-output: tables, functions, types, sequences equal exactly, triggers and
-explicit indexes accounted for, constraint-backed indexes left to their
-tables. The enumeration and reality agree on every one of the forty-five
-objects. The next diff plan that wants to drop the queue will have to
-get past a generated exclude list instead of my reading comprehension.
+output: tables, functions, types, sequences equal exactly, explicit
+indexes and triggers equal once constraint-backed ones are set aside as
+their tables' problem. The enumeration and reality agree on every one of
+the forty-six objects, the guarded plpgsql extension included. The next
+diff plan that wants to drop the queue will have to get past a generated
+exclude list instead of my reading comprehension.
 
 ---
 
