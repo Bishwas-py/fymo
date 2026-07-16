@@ -28,12 +28,14 @@ def new(name, template):
 @cli.command()
 @click.option('--host', '-h', default='127.0.0.1', help='Host to bind to')
 @click.option('--port', '-p', default=8000, type=int, help='Port to bind to')
-@click.option('--prod', is_flag=True, default=False, help='Serve via gunicorn instead of the dev server')
-@click.option('--workers', '-w', default=4, type=int, help='Gunicorn worker processes (--prod only)')
-def serve(host, port, prod, workers):
+@click.option('--prod', is_flag=True, default=False, help='Serve via a production server instead of the dev server')
+@click.option('--workers', '-w', default=4, type=int, help='Worker processes (--prod only)')
+@click.option('--server', type=click.Choice(['auto', 'granian', 'gunicorn']), default='auto',
+              help='Production server (--prod only); auto prefers granian when installed, else gunicorn')
+def serve(host, port, prod, workers, server):
     """Alias for `fymo dev`, or production via --prod"""
     from fymo.cli.commands.serve import run_server
-    run_server(host, port, prod=prod, workers=workers)
+    run_server(host, port, prod=prod, workers=workers, server=server)
 
 
 @cli.command()
