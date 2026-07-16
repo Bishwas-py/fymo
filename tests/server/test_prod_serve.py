@@ -16,8 +16,11 @@ def test_gunicorn_app_config_from_args(tmp_path):
 
 
 def test_run_server_prod_dispatches_to_run_prod(tmp_path, monkeypatch):
-    """`run_server(..., prod=True)` should hand off to fymo.server.gunicorn.run_prod
-    instead of starting the wsgiref dev server."""
+    """`run_server(..., prod=True, server="gunicorn")` should hand off to
+    fymo.server.gunicorn.run_prod instead of starting the wsgiref dev server.
+    Pinned to the explicit gunicorn choice: the test venv has granian
+    installed, so the default `server="auto"` would resolve to granian
+    (issue #39) and boot a real server here."""
     project_dir = tmp_path / "myproj"
     project_dir.mkdir()
     (project_dir / "server.py").write_text(
@@ -37,7 +40,7 @@ def test_run_server_prod_dispatches_to_run_prod(tmp_path, monkeypatch):
 
     monkeypatch.setattr(serve_mod, "run_prod", fake_run_prod)
 
-    serve_mod.run_server(host="127.0.0.1", port=8123, prod=True, workers=5)
+    serve_mod.run_server(host="127.0.0.1", port=8123, prod=True, workers=5, server="gunicorn")
 
     assert calls["host"] == "127.0.0.1"
     assert calls["port"] == 8123
@@ -68,7 +71,8 @@ def test_run_server_prod_forces_dev_false_despite_stray_env(tmp_path, monkeypatc
     server.py is imported -- not just at some point before run_server
     returns -- so server.py's own `create_app(PROJECT_ROOT)` call (which
     reads FYMO_DEV the same way a real scaffolded server.py does) resolves
-    dev=False too, not just the env var's final state."""
+    dev=False too, not just the env var's final state. Pinned to the
+    explicit gunicorn choice, same reason as the dispatch test above."""
     project_dir = tmp_path / "myproj"
     project_dir.mkdir()
     (project_dir / "dist" / "sidecar.mjs").parent.mkdir(parents=True, exist_ok=True)
@@ -91,7 +95,7 @@ def test_run_server_prod_forces_dev_false_despite_stray_env(tmp_path, monkeypatc
     )
 
     try:
-        serve_mod.run_server(host="127.0.0.1", port=8123, prod=True, workers=2)
+        serve_mod.run_server(host="127.0.0.1", port=8123, prod=True, workers=2, server="gunicorn")
         assert calls["wsgi_app"].dev is False
     finally:
         sys.modules.pop("server", None)
@@ -117,3 +121,40 @@ def test_run_server_without_prod_delegates_to_run_dev(tmp_path, monkeypatch):
     serve_mod.run_server(host="0.0.0.0", port=9001, prod=False)
 
     assert calls == {"host": "0.0.0.0", "port": 9001}
+
+
+def test_prod_default_without_granian_is_todays_gunicorn_path(tmp_path, monkeypatch):
+    """Zero-behavior-change contract for issue #39: a deployment that passes
+    no --server flag and has no granian installed must get exactly today's
+    gunicorn path (server.py imported in the parent, run_prod invoked with
+    the app object), not an error and not a different server."""
+    project_dir = tmp_path / "myproj"
+    project_dir.mkdir()
+    (project_dir / "server.py").write_text(
+        "def app(environ, start_response):\n"
+        "    start_response('200 OK', [])\n"
+        "    return [b'']\n"
+    )
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr(serve_mod, "_granian_available", lambda: False)
+    monkeypatch.delitem(sys.modules, "server", raising=False)
+
+    calls = {}
+
+    def fake_run_prod(wsgi_app, host, port, workers):
+        calls["wsgi_app"] = wsgi_app
+        calls["host"] = host
+        calls["port"] = port
+        calls["workers"] = workers
+
+    monkeypatch.setattr(serve_mod, "run_prod", fake_run_prod)
+
+    try:
+        serve_mod.run_server(host="127.0.0.1", port=8123, prod=True, workers=5)
+    finally:
+        sys.modules.pop("server", None)
+
+    assert calls["host"] == "127.0.0.1"
+    assert calls["port"] == 8123
+    assert calls["workers"] == 5
+    assert callable(calls["wsgi_app"])

@@ -64,8 +64,9 @@ def create_project_files(project_path: Path, project_name: str):
     fymo_yml = render_fymo_yml(project_name)
     (project_path / 'fymo.yml').write_text(fymo_yml)
     
-    # requirements.txt
-    requirements = """fymo>=0.1.0
+    # requirements.txt: the granian extra pulls in the recommended
+    # production server; gunicorn stays as the baseline fallback.
+    requirements = """fymo[granian]>=0.1.0
 gunicorn>=23.0.0
 """
     (project_path / 'requirements.txt').write_text(requirements)

@@ -1,6 +1,6 @@
 [project]
 name = "fymo"
-version = "0.11.0"
+version = "0.13.0"
 description = "Python SSR framework for Svelte 5 — esbuild pipeline, Node sidecar, SvelteKit-style remote functions"
 readme = "README.md"
 license = "MIT"
@@ -29,6 +29,7 @@ classifiers = [
 [project.optional-dependencies]
 pydantic = ["pydantic>=2.5"]
 procrastinate = ["procrastinate>=3.0", "psycopg[binary,pool]>=3.1"]
+granian = ["granian>=2.0,<3"]
 
 [project.scripts]
 fymo = "fymo.cli.main:main"
@@ -65,6 +66,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pydantic>=2.5",
+    "granian>=2.0,<3",
 ]
 
 [tool.pytest.ini_options]
