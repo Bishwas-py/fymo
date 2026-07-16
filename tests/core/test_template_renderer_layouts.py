@@ -45,7 +45,7 @@ def test_props_are_flat_when_route_has_no_layout_chain(tmp_path, monkeypatch):
     mod.getDoc = lambda: {"title": "Home"}
     sys.modules["app.controllers.home"] = mod
     try:
-        html, status = renderer.render_template("/")
+        html, status, _headers = renderer.render_template("/")
     finally:
         del sys.modules["app.controllers.home"]
 
@@ -79,7 +79,7 @@ def test_full_page_render_embeds_matched_params(tmp_path, monkeypatch):
     mod.getDoc = lambda: {"title": "Post"}
     sys.modules["app.controllers.posts"] = mod
     try:
-        html, status = renderer.render_template("/posts/welcome-to-fymo")
+        html, status, _headers = renderer.render_template("/posts/welcome-to-fymo")
     finally:
         del sys.modules["app.controllers.posts"]
 
@@ -114,7 +114,7 @@ def test_props_are_nested_when_route_has_layout_chain(tmp_path, monkeypatch):
     mod.getDoc = lambda: {"title": "Home"}
     sys.modules["app.controllers.home"] = mod
     try:
-        html, status = renderer.render_template("/")
+        html, status, _headers = renderer.render_template("/")
     finally:
         del sys.modules["app.controllers.home"]
 

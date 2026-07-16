@@ -7,6 +7,7 @@ Wire format (always HTTP 200; errors carried in the envelope):
 
     {"type": "result", "result": "<devalue>"}      # success
     {"type": "error", "status": 404, "error": "not_found"}
+    {"type": "redirect", "location": "/login", "status": 303}  # getContext() raised Redirect
 
 The decoded result has the shape:
 
@@ -53,6 +54,7 @@ from fymo.core.html import _safe_json
 from fymo.core.manifest_cache import ManifestUnavailable
 from fymo.core.ssr_controller import load_controller_context, load_layout_props_and_docs, merge_docs
 from fymo.remote import devalue
+from fymo.remote.errors import RemoteError, Redirect
 
 
 _PATH_PREFIX = "/_fymo/data/"
@@ -124,6 +126,17 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
             layout_props_by_level, layout_docs = load_layout_props_and_docs(
                 assets.layout_chain, params, getattr(app, "auth_enabled", False), environ
             )
+    except RemoteError as e:
+        # getContext() raised NotFound/Unauthorized/Redirect/etc directly,
+        # same as template_renderer.py's SSR path handles below (see that
+        # module for why: without this branch every RemoteError here used to
+        # fall through to the generic 500 below, losing its real status/code).
+        # Redirect is the one subclass that isn't an error at all -- it gets
+        # its own wire form, the same {"type": "redirect", ...} envelope the
+        # remote router already produces for a remote-function call raising it.
+        if isinstance(e, Redirect):
+            return _200(start_response, {"type": "redirect", "location": e.location, "status": e.status})
+        return _200(start_response, {"type": "error", "status": e.status, "error": e.code, "message": str(e)})
     except Exception as e:
         payload = {"type": "error", "status": 500, "error": "controller_failed"}
         if getattr(app, "dev", False):

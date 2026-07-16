@@ -12,7 +12,7 @@ from fymo.core.router import Router
 from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
 from fymo.core.ssr_controller import load_controller_context, ssr_request_scope, load_layout_props_and_docs, merge_docs
-from fymo.remote.errors import RemoteError
+from fymo.remote.errors import RemoteError, Redirect
 from fymo.utils.colors import Color
 
 logger = logging.getLogger("fymo")
@@ -83,7 +83,9 @@ class TemplateRenderer:
             return f"<div>{generic_message}: {escape(str(e))}</div>", status
         return f"<div>{generic_message}</div>", status
 
-    def render_template(self, route_path: str, environ: dict | None = None) -> Tuple[str, str]:
+    def render_template(
+        self, route_path: str, environ: dict | None = None
+    ) -> Tuple[str, str, list[tuple[str, str]]]:
         """
         Render a Svelte component with SSR
 
@@ -98,11 +100,18 @@ class TemplateRenderer:
                 e.g. direct render_template() calls in tests.
 
         Returns:
-            Tuple of (html, status_code)
+            Tuple of (html, status_code, extra_headers). extra_headers is
+            normally empty; a raised Redirect populates it with a Location
+            header (see _render_redirect below) so the WSGI layer can attach
+            it to the response without every other caller having to know
+            about headers at all.
         """
         try:
-            return self._render_via_sidecar(route_path, environ)
+            html, status = self._render_via_sidecar(route_path, environ)
+            return html, status, []
         except RemoteError as e:
+            if isinstance(e, Redirect):
+                return self._render_redirect(e)
             # A controller's getContext() raised NotFound/Unauthorized/etc.
             # directly (not via a remote-function RPC call) -- e.g. a page
             # controller doing `get_post(slug)` and getting a 404-shaped
@@ -115,10 +124,24 @@ class TemplateRenderer:
             status_line = f"{e.status} {e.code.upper().replace('_', ' ')}"
             label = e.code.replace('_', ' ').title()
             print(f"{Color.FAIL}{label}: {e}{Color.ENDC}")
-            return self._render_error(e, label, status=status_line)
+            html, status = self._render_error(e, label, status=status_line)
+            return html, status, []
         except Exception as e:
             print(f"{Color.FAIL}Unexpected error: {str(e)}{Color.ENDC}")
-            return self._render_error(e, "Server Error")
+            html, status = self._render_error(e, "Server Error")
+            return html, status, []
+
+    def _render_redirect(self, e: Redirect) -> Tuple[str, str, list[tuple[str, str]]]:
+        """Turn a Redirect raised from getContext() into a real 30x.
+
+        No HTML body: browsers never render a 30x body, they just follow the
+        Location header straight to the new URL. Status line follows the
+        same `code.upper()` convention every other RemoteError subclass uses
+        here (see the NotFound/Unauthorized/etc branch above) rather than a
+        separate HTTP-reason-phrase table.
+        """
+        status_line = f"{e.status} {e.code.upper()}"
+        return "", status_line, [("Location", e.location)]
     
     def _render_via_sidecar(self, route_path: str, environ: dict | None = None) -> Tuple[str, str]:
         """New pipeline: render via Node sidecar with prebuilt SSR module."""

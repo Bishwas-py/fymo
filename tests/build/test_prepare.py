@@ -291,7 +291,9 @@ def test_mode_strict_prints_no_deprecation_warning(example_app: Path, monkeypatc
 @pytest.mark.usefixtures("node_available")
 def test_prepare_build_config_reflects_blog_app_facts(blog_app: Path):
     """blog_app has index/, posts/ (with a resource _layout.svelte and
-    show.svelte), and tags/ (show.svelte, no resource layout), plus a root
+    show.svelte), tags/ (show.svelte, no resource layout), and
+    redirect_demo/ (index.svelte, a standalone demo of fymo.remote.Redirect
+    -- see tests/integration/test_redirect_hydration.py), plus a root
     _layout.svelte -- so this pins the known shape of what prepare must
     produce for both `fymo build` and `fymo dev` to agree on."""
     dist_dir = blog_app / "dist"
@@ -302,7 +304,7 @@ def test_prepare_build_config_reflects_blog_app_facts(blog_app: Path):
     assert isinstance(config, BuildConfig)
 
     route_names = {r.name for r in config.routes}
-    assert route_names == {"index", "posts", "tags"}
+    assert route_names == {"index", "posts", "tags", "redirect_demo"}
 
     layout_ids = {ref.id for ref in config.all_layouts}
     assert "_root" in layout_ids

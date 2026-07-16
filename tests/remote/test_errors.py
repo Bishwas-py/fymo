@@ -1,5 +1,5 @@
 import pytest
-from fymo.remote.errors import RemoteError, NotFound, Unauthorized, Forbidden, Conflict
+from fymo.remote.errors import RemoteError, NotFound, Unauthorized, Forbidden, Conflict, Redirect
 
 
 def test_remote_error_carries_status_and_code():
@@ -23,3 +23,22 @@ def test_subclasses_have_correct_status():
 def test_subclass_message_preserved():
     e = NotFound("post 'foo' not found")
     assert "post 'foo' not found" in str(e)
+
+
+def test_redirect_defaults_to_303():
+    r = Redirect("/login")
+    assert r.location == "/login"
+    assert r.status == 303
+    assert r.code == "redirect"
+
+
+def test_redirect_accepts_custom_status():
+    r = Redirect("/login", status=307)
+    assert r.status == 307
+    assert r.location == "/login"
+
+
+def test_redirect_is_a_remote_error():
+    """Redirect must travel the same seam RemoteError subclasses already do
+    through the router/renderer/soft-nav `except RemoteError` blocks."""
+    assert isinstance(Redirect("/login"), RemoteError)

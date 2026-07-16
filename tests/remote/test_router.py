@@ -53,10 +53,12 @@ def remote_project(tmp_path, monkeypatch):
         "app/__init__.py": "",
         "app/remote/__init__.py": "",
         "app/remote/posts.py": (
-            "from fymo.remote import current_uid, NotFound\n"
+            "from fymo.remote import current_uid, NotFound, Redirect\n"
             "def hello(name: str) -> str: return f'hi {name}'\n"
             "def whoami() -> str: return current_uid()\n"
             "def boom() -> str: raise NotFound('nope')\n"
+            "def go_to_login() -> None: raise Redirect('/login')\n"
+            "def go_with_status() -> None: raise Redirect('/login', status=307)\n"
         ),
     })
     monkeypatch.syspath_prepend(str(proj))
@@ -147,6 +149,26 @@ def test_domain_error_returns_envelope(remote_project):
     assert body["type"] == "error"
     assert body["status"] == 404
     assert body["error"] == "not_found"
+
+
+def test_redirect_returns_redirect_envelope(remote_project):
+    """A remote function raising Redirect must produce {"type": "redirect",
+    "location": ..., "status": ...}, not the generic error envelope -- this
+    is the wire form entry_generator.py's __rpc client already knows how to
+    read (`if (env.type === 'redirect') window.location.href = env.location`)."""
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/go_to_login", [], host="x", origin="http://x")
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body == {"type": "redirect", "location": "/login", "status": 303}
+
+
+def test_redirect_honors_custom_status(remote_project):
+    proj, h = remote_project
+    env = _make_environ(f"/_fymo/remote/{h}/go_with_status", [], host="x", origin="http://x")
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body == {"type": "redirect", "location": "/login", "status": 307}
 
 
 def test_uid_cookie_issued_on_first_call(remote_project):

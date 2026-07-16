@@ -32,3 +32,23 @@ class Forbidden(RemoteError):
 class Conflict(RemoteError):
     status = 409
     code = "conflict"
+
+
+class Redirect(RemoteError):
+    """Raised by a controller's getContext() or a remote function to send the
+    client elsewhere instead of returning a result.
+
+    Not an error, but subclasses RemoteError so it travels the exact seam
+    NotFound/Unauthorized/etc already use: the router, the SSR renderer, and
+    the soft-nav data endpoint each catch RemoteError around
+    controller/remote-function invocation, and special-case this subclass to
+    produce a redirect wire form (a real 30x + Location header for SSR, a
+    {"type": "redirect", ...} envelope for remote calls) instead of the
+    generic error envelope.
+    """
+    status = 303
+    code = "redirect"
+
+    def __init__(self, location: str, status: int = 303):
+        super().__init__(f"redirect to {location}", status=status, code="redirect")
+        self.location = location

@@ -7,6 +7,7 @@ routes:
   resources:
     - posts
     - tags
+    - redirect_demo
 
 auth:
   enabled: true

@@ -47,7 +47,7 @@ def test_render_template_generic_error_escapes_in_dev(tmp_path, monkeypatch):
         raise ValueError("<script>alert(1)</script>")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    html, status = r.render_template("/whatever")
+    html, status, _headers = r.render_template("/whatever")
     assert status == "500 INTERNAL SERVER ERROR"
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
@@ -60,7 +60,7 @@ def test_render_template_generic_error_omits_text_in_prod(tmp_path, monkeypatch)
         raise ValueError("<script>alert(1)</script>")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    html, status = r.render_template("/whatever")
+    html, status, _headers = r.render_template("/whatever")
     assert status == "500 INTERNAL SERVER ERROR"
     assert "<script>" not in html
     assert "alert(1)" not in html
@@ -76,7 +76,7 @@ def test_render_template_message_style_error_escapes_in_dev(tmp_path, monkeypatc
         raise ConfigurationError("<script>alert(1)</script>")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    html, status = r.render_template("/whatever")
+    html, status, _headers = r.render_template("/whatever")
     assert status == "500 INTERNAL SERVER ERROR"
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
@@ -89,7 +89,7 @@ def test_render_template_message_style_error_omits_text_in_prod(tmp_path, monkey
         raise ConfigurationError("<script>alert(1)</script>")
 
     monkeypatch.setattr(r, "_render_via_sidecar", boom)
-    html, status = r.render_template("/whatever")
+    html, status, _headers = r.render_template("/whatever")
     assert status == "500 INTERNAL SERVER ERROR"
     assert "<script>" not in html
     assert "alert(1)" not in html

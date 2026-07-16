@@ -13,7 +13,7 @@ from fymo.remote import devalue
 from fymo.remote.adapters import validate_args
 from fymo.remote.context import request_scope
 from fymo.remote.discovery import is_exposed_remote_fn
-from fymo.remote.errors import RemoteError
+from fymo.remote.errors import RemoteError, Redirect
 from fymo.remote.identity import _ensure_uid
 
 try:
@@ -254,6 +254,12 @@ def handle_remote(environ: dict, start_response) -> Iterable[bytes]:
                 result = fn(*validated)
         except RemoteError as e:
             extra_cookies = consume_pending_cookies()
+            if isinstance(e, Redirect):
+                return _200(
+                    start_response,
+                    {"type": "redirect", "location": e.location, "status": e.status},
+                    set_cookie, extra_cookies,
+                )
             return _200(
                 start_response,
                 {"type": "error", "status": e.status, "error": e.code, "message": str(e)},
