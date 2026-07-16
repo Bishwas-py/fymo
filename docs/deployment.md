@@ -349,6 +349,37 @@ in `fymo.yml` -- the config block above is the entire setup.
 provider is unaffected: only an entry that both sets `required: auto` and
 points at a provider overriding the hook gets the conditional behavior.
 
+## Provider-owned database objects and schema diff tools
+
+Some fymo providers create real, permanent objects in the app's database:
+`jobs: {provider: procrastinate}` puts its queue tables, functions, and
+types (`procrastinate_jobs`, `procrastinate_events`, …) in the same
+schema as your own tables. Your declarative schema file only declares
+what your app owns, so a schema diff tool (pgschema, migra, and friends)
+sees the provider's objects as strays and generates `DROP TABLE` /
+`DROP FUNCTION` / `DROP TYPE` for every one of them — applying that plan
+destroys the live job queue.
+
+Before running any schema diff against a database fymo providers share,
+enumerate what they own:
+
+```sh
+fymo schema provider-tables          # one "kind name" per line
+fymo schema provider-tables --json   # [{kind, name, provider}, ...] for tooling
+```
+
+The command reads `fymo.yml`, resolves the configured `jobs:` /
+`broadcasts:` providers, and prints every table, type, function,
+sequence, index, and trigger they create — derived from the installed
+provider library itself, so the list matches the version you actually
+run. No database connection is made. Feed the names into your tool's
+exclude/ignore list (or generate it in CI) instead of hand-maintaining
+one.
+
+Providers that create nothing print nothing: the default `threaded` job
+provider and the `postgres` broadcast provider (pure LISTEN/NOTIFY) both
+own zero objects, and the command exits 0 with a note on stderr.
+
 ## Worker sizing
 
 `--workers` means OS processes under **both** servers, and each worker

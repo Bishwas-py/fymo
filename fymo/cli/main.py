@@ -63,6 +63,24 @@ def dev_cmd(host, port):
     run_dev(host=host, port=port)
 
 
+@cli.group()
+def schema():
+    """Schema tooling for the database objects fymo providers own."""
+    pass
+
+
+@schema.command(name="provider-tables")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Emit JSON ([{kind, name, provider}, ...]) instead of plain lines")
+def provider_tables_cmd(as_json):
+    """List every table/function/type the configured providers create.
+
+    Feed the output to your schema diff tool's exclude list so it never
+    proposes dropping the job queue's tables."""
+    from fymo.cli.commands.schema import run_provider_tables
+    run_provider_tables(as_json=as_json)
+
+
 @cli.command(name="jobs-worker")
 @click.option("--dev", is_flag=True, default=False,
               help="Run in dev mode (sets FYMO_DEV=1, enables .env loading)")
