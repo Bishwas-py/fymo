@@ -1,4 +1,4 @@
-# Journal Entry 023: The Bug That Only Exists Outside This Repo
+# Journal Entry 024: The Bug That Only Exists Outside This Repo
 
 **Date**: July 16, 2026
 **Focus**: Two filed issues about a fresh `pip install` never being able to build, and a third bug the fix itself surfaced
@@ -145,4 +145,4 @@ sitting somewhere and want nothing to do with this.
 
 ---
 
-*End of Journal Entry 023*
+*End of Journal Entry 024*
