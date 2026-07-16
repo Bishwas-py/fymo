@@ -55,6 +55,7 @@ def build_html(
     doc: Dict[str, Any] = None,
     disabled_soft_nav: list = None,
     global_css: str = None,
+    params: Dict[str, Any] = None,
 ) -> str:
     """Render the minimal HTML envelope. Pieces are concatenated with no boilerplate."""
     global_css_link = (
@@ -72,6 +73,13 @@ def build_html(
     doc_island = (
         f'<script type="application/json" id="svelte-doc">{_safe_json(doc)}</script>\n'
         if doc is not None else ""
+    )
+    # Always emitted, unlike doc_island -- the client's route.svelte.js reads
+    # this to seed its reactive `params` before hydrate(), and treating a
+    # route with no dynamic segments as "tag absent" would force the client
+    # to special-case a missing island vs a genuinely empty dict.
+    route_params_island = (
+        f'<script type="application/json" id="svelte-route-params">{_safe_json(params or {})}</script>\n'
     )
     # Pass the list of resources whose soft-nav is disabled to the client
     # router so it can skip click interception preemptively (no wasted
@@ -106,6 +114,7 @@ def build_html(
         f'<div id="svelte-app">{body}</div>\n'
         f'<script type="application/json" id="svelte-props">{_safe_json(props)}</script>\n'
         f"{doc_island}"
+        f"{route_params_island}"
         f'<script type="module" src="{asset_prefix}/{assets.client}"></script>\n'
         "</body>\n"
         "</html>\n"

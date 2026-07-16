@@ -70,6 +70,22 @@ def test_entry_error_branch_shares_the_runtime_error_handling(tmp_path: Path):
     assert "e.traceback = env.traceback;" in text
 
 
+def test_entry_wires_reactive_route_state_no_layout(tmp_path: Path):
+    """Issue #42: the plain (no layout_chain) entry imports the shared
+    reactive `route` object, seeds it from window.location + the
+    svelte-route-params island before hydrate(), and updates it on every
+    soft nav from the server's resolved params."""
+    route = Route(name="home", entry_path=tmp_path / "templates/home/index.svelte")
+    out_dir = tmp_path / ".fymo" / "entries"
+    write_client_entries([route], out_dir, project_root=tmp_path)
+    text = (out_dir / "home.client.js").read_text()
+    assert "from '$route'" in text
+    assert "svelte-route-params" in text
+    assert "route.pathname = window.location.pathname" in text
+    assert "route.search = window.location.search" in text
+    assert "route.params = data.params" in text
+
+
 def test_no_layout_chain_generates_same_template_as_before(tmp_path: Path):
     from fymo.build.discovery import Route
     from fymo.build.entry_generator import write_client_entries
@@ -144,6 +160,36 @@ def test_layout_chain_generates_shell_and_bootstrap(tmp_path: Path):
     # actually activates in a browser. See CLIENT_ENTRY_TEMPLATE's identical
     # `export default Component;` contract for the non-layout-route case.
     assert "export default InitialLeaf;" in bootstrap
+
+
+def test_entry_wires_reactive_route_state_with_shell(tmp_path: Path):
+    """Same contract as the no-layout entry, but for the shell/bootstrap
+    template used by routes with a layout_chain."""
+    from fymo.build.discovery import Route, LayoutRef
+    from fymo.build.entry_generator import write_client_entries
+
+    root_layout = tmp_path / "templates" / "_layout.svelte"
+    root_layout.parent.mkdir(parents=True)
+    root_layout.write_text("<div></div>")
+    leaf = tmp_path / "templates" / "posts" / "show.svelte"
+    leaf.parent.mkdir(parents=True)
+    leaf.write_text("<div></div>")
+
+    route = Route(
+        name="posts",
+        entry_path=leaf,
+        layout_chain=[
+            LayoutRef(level="root", id="_root", svelte_path=root_layout, controller_module=None),
+        ],
+    )
+    out_dir = tmp_path / "out"
+    written = write_client_entries([route], out_dir, tmp_path)
+    text = written["posts"].read_text()
+    assert "from '$route'" in text
+    assert "svelte-route-params" in text
+    assert "route.pathname = window.location.pathname" in text
+    assert "route.search = window.location.search" in text
+    assert "route.params = data.params" in text
 
 
 def test_root_only_layout_chain_still_renders_leaf_in_else_branch(tmp_path: Path):

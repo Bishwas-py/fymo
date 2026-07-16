@@ -26,8 +26,13 @@ The decoded result has the shape:
         "rootLayoutProps": { ... },                 # or None when no root-level layout
       },
       "title":  "Post: Welcome",
-      "doc":    { ... }                             # merged getDoc() output (root -> resource -> leaf)
+      "doc":    { ... },                            # merged getDoc() output (root -> resource -> leaf)
+      "params": { "id": "welcome-to-fymo" }         # Router.match()'s resolved :id-style captures, {} if none
     }
+
+`params` is a top-level field independent of `leaf.props` -- a controller
+is never required to echo its own params back for the client to see them
+(see fymo/build/js/runtime/route.svelte.js for what reads this client-side).
 
 The `doc`/`title` merge and layout-prop loading go through the exact same
 `ssr_controller.load_layout_props_and_docs`/`merge_docs` helpers the
@@ -167,7 +172,7 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
     title = doc_meta.get("title", app.config_manager.get_app_name())
 
     try:
-        encoded = devalue.stringify({"leaf": leaf, "title": title, "doc": doc_meta})
+        encoded = devalue.stringify({"leaf": leaf, "title": title, "doc": doc_meta, "params": params})
     except Exception as e:
         payload = {"type": "error", "status": 500, "error": "encode_failed"}
         if getattr(app, "dev", False):

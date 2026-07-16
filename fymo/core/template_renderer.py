@@ -188,6 +188,7 @@ class TemplateRenderer:
             doc=doc_meta,
             disabled_soft_nav=self.router.disabled_soft_nav_resources(),
             global_css=manifest.global_css,
+            params=params,
         )
         return html, "200 OK"
 

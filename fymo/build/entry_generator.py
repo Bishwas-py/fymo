@@ -9,6 +9,7 @@ from fymo.remote.codegen import B64URL_JS, REMOTE_ERROR_THROW_JS
 CLIENT_ENTRY_TEMPLATE = """\
 import {{ hydrate, mount, unmount }} from 'svelte';
 import {{ stringify, parse }} from 'devalue';
+import {{ route }} from '$route';
 import Component from '{component_import}';
 
 // Re-export the route's Svelte component so the soft-nav router can
@@ -27,6 +28,15 @@ const initialProps = propsEl ? JSON.parse(propsEl.textContent) : {{}};
 const docEl = document.getElementById('svelte-doc');
 let currentDoc = docEl ? JSON.parse(docEl.textContent) : {{}};
 globalThis.getDoc = () => currentDoc;
+
+// Seed the reactive route state from this request's own URL + the server's
+// resolved :id-style params -- before hydrate(), so the first effect that
+// reads `route.*` after mount already sees the right value instead of the
+// module's zero-value defaults.
+const routeParamsEl = document.getElementById('svelte-route-params');
+route.pathname = window.location.pathname;
+route.search = window.location.search;
+route.params = routeParamsEl ? JSON.parse(routeParamsEl.textContent) : {{}};
 
 {b64url}
 async function __rpc(hash, name, args) {{
@@ -119,6 +129,10 @@ async function softNav(path, push = true) {{
     currentMount = mount(NewComponent, {{ target, props: leaf.props }});
 
     currentDoc = data.doc || {{}};
+    const navUrl = new URL(path, window.location.origin);
+    route.pathname = navUrl.pathname;
+    route.search = navUrl.search;
+    route.params = data.params || {{}};
     if (data.title) document.title = data.title;
     if (push) history.pushState({{ path }}, '', path);
     window.scrollTo(0, 0);
@@ -249,6 +263,7 @@ SHELL_RESOURCE_BLOCK = """{#if CurrentResourceLayout}
 CLIENT_BOOTSTRAP_WITH_SHELL_TEMPLATE = """\
 import {{ hydrate }} from 'svelte';
 import {{ stringify, parse }} from 'devalue';
+import {{ route }} from '$route';
 import Shell from './{shell_filename}';
 import InitialLeaf from '{component_import}';
 {initial_resource_layout_import}
@@ -266,6 +281,15 @@ const initialProps = propsEl ? JSON.parse(propsEl.textContent) : {{ leafProps: {
 const docEl = document.getElementById('svelte-doc');
 let currentDoc = docEl ? JSON.parse(docEl.textContent) : {{}};
 globalThis.getDoc = () => currentDoc;
+
+// Seed the reactive route state from this request's own URL + the server's
+// resolved :id-style params -- before hydrate(), so the first effect that
+// reads `route.*` after mount already sees the right value instead of the
+// module's zero-value defaults.
+const routeParamsEl = document.getElementById('svelte-route-params');
+route.pathname = window.location.pathname;
+route.search = window.location.search;
+route.params = routeParamsEl ? JSON.parse(routeParamsEl.textContent) : {{}};
 
 {b64url}
 async function __rpc(hash, name, args) {{
@@ -399,6 +423,10 @@ async function softNav(path, push = true) {{
     }}
 
     currentDoc = data.doc || {{}};
+    const navUrl = new URL(path, window.location.origin);
+    route.pathname = navUrl.pathname;
+    route.search = navUrl.search;
+    route.params = data.params || {{}};
     if (data.title) document.title = data.title;
     if (push) history.pushState({{ path }}, '', path);
     window.scrollTo(0, 0);
