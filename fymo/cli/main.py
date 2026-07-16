@@ -64,10 +64,12 @@ def dev_cmd(host, port):
 
 
 @cli.command(name="jobs-worker")
-def jobs_worker_cmd():
+@click.option("--dev", is_flag=True, default=False,
+              help="Run in dev mode (sets FYMO_DEV=1, enables .env loading)")
+def jobs_worker_cmd(dev):
     """Run the configured job provider's worker loop (e.g. Procrastinate)."""
     from fymo.cli.commands.jobs_worker import run_jobs_worker
-    run_jobs_worker()
+    run_jobs_worker(dev=dev)
 
 
 def main():

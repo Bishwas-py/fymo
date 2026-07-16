@@ -14,7 +14,7 @@ from fymo.jobs import init_job_provider
 from fymo.utils.colors import Color
 
 
-def run_jobs_worker(project_root: Optional[Path] = None) -> None:
+def run_jobs_worker(project_root: Optional[Path] = None, dev: bool = False) -> None:
     """Build the project's configured JobProvider and run its worker loop.
 
     Blocks forever under normal operation (e.g. Procrastinate's default
@@ -22,8 +22,23 @@ def run_jobs_worker(project_root: Optional[Path] = None) -> None:
     raw traceback — if the configured provider has no separate worker
     process (e.g. the default `threaded`) or is misconfigured (e.g.
     `procrastinate` with no `DATABASE_URL`).
+
+    `dev=True` (the --dev CLI flag) makes this command authoritative about
+    dev mode, the same treatment `fymo dev` got: it sets FYMO_DEV=1 in this
+    process's own environment before anything reads it, so .env loading and
+    every other FYMO_DEV consumer agree, with no manual export required.
+    The worker is a separate OS process from `fymo dev`, so it can never
+    inherit that session's flag, and .env can't bootstrap it (the flag has
+    to be known before .env is loaded). dev=False means no opinion, not
+    "force prod": an exported FYMO_DEV=1 keeps working exactly as before
+    the flag existed.
     """
+    import os
+
     project_root = Path(project_root) if project_root else Path.cwd()
+
+    if dev:
+        os.environ["FYMO_DEV"] = "1"
 
     # Resolved before ConfigManager so both this dev-only .env load and
     # ConfigManager's ${VAR} interpolation of fymo.yml see the same env,
