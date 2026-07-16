@@ -149,6 +149,52 @@ def test_domain_error_returns_envelope(remote_project):
     assert body["error"] == "not_found"
 
 
+def _make_environ_raw_body(path: str, body_obj: dict, *, host: str = "x", origin: str = "http://x"):
+    """Like _make_environ but takes the JSON body verbatim, so tests can
+    exercise requests that omit or empty the 'payload' field entirely."""
+    raw = json.dumps(body_obj).encode()
+    return {
+        "REQUEST_METHOD": "POST",
+        "PATH_INFO": path,
+        "CONTENT_LENGTH": str(len(raw)),
+        "CONTENT_TYPE": "application/json",
+        "HTTP_COOKIE": "",
+        "HTTP_HOST": host,
+        "HTTP_ORIGIN": origin,
+        "wsgi.url_scheme": "http",
+        "REMOTE_ADDR": "127.0.0.1",
+        "wsgi.input": io.BytesIO(raw),
+    }
+
+
+def test_omitted_payload_dispatches_zero_arg_function(remote_project):
+    """Issue #46: a bare {} body (no 'payload' key) must be treated as an
+    empty args list. The fallback used to be the string "[1,[]]", which
+    devalue-parses to the integer 1, not [], so every zero-arg call that
+    relied on the fallback 400ed with bad_payload instead of dispatching."""
+    proj, h = remote_project
+    env = _make_environ_raw_body(f"/_fymo/remote/{h}/whoami", {})
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body["type"] == "result", body
+
+
+def test_empty_string_payload_dispatches_zero_arg_function(remote_project):
+    """Same fallback path as an omitted key: "payload": "" is falsy."""
+    proj, h = remote_project
+    env = _make_environ_raw_body(f"/_fymo/remote/{h}/whoami", {"payload": ""})
+    (status, _), body = _call(env)
+    assert status.startswith("200")
+    assert body["type"] == "result", body
+
+
+def test_fallback_matches_devalue_empty_list_encoding():
+    """Pins the invariant the fallback string depends on: devalue's own
+    encoding of an empty args list round-trips to []."""
+    assert devalue.stringify([]) == "[[]]"
+    assert devalue.parse("[[]]") == []
+
+
 def test_uid_cookie_issued_on_first_call(remote_project):
     proj, h = remote_project
     env = _make_environ(f"/_fymo/remote/{h}/whoami", [], host="x", origin="http://x")
