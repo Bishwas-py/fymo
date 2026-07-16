@@ -1,9 +1,12 @@
 """UserStore Protocol + the default SQLite implementation.
 
-App authors swap the implementation via `fymo.yml`:
+App authors swap the implementation via `fymo.yml`. fymo ships two: this
+module's SqliteUserStore (the default) and
+`fymo.auth.postgres_store.PostgresUserStore`, which keeps identity in the
+same Postgres database the rest of the app uses:
 
     auth:
-      user_store: my_app.auth.PostgresUserStore
+      user_store: fymo.auth.postgres_store.PostgresUserStore
 
 The class is instantiated with a single positional argument: the project
 root path. Anything else (DB URL, schema name, etc.) should come from the

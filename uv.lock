@@ -233,6 +233,9 @@ clerk = [
 granian = [
     { name = "granian" },
 ]
+postgres = [
+    { name = "psycopg", extra = ["binary", "pool"] },
+]
 procrastinate = [
     { name = "procrastinate" },
     { name = "psycopg", extra = ["binary", "pool"] },
@@ -244,6 +247,7 @@ pydantic = [
 [package.dev-dependencies]
 dev = [
     { name = "granian" },
+    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pytest" },
@@ -256,16 +260,18 @@ requires-dist = [
     { name = "granian", marker = "extra == 'granian'", specifier = ">=2.0,<3" },
     { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "procrastinate", marker = "extra == 'procrastinate'", specifier = ">=3.0" },
+    { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'procrastinate'", specifier = ">=3.1" },
     { name = "pydantic", marker = "extra == 'pydantic'", specifier = ">=2.5" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'clerk'", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
-provides-extras = ["pydantic", "procrastinate", "granian", "clerk", "oidc", "oauth"]
+provides-extras = ["pydantic", "procrastinate", "postgres", "granian", "clerk", "oidc", "oauth"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "granian", specifier = ">=2.0,<3" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.1" },
     { name = "pydantic", specifier = ">=2.5" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.0" },
     { name = "pytest", specifier = ">=8.0" },
