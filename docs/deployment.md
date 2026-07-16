@@ -354,7 +354,9 @@ points at a provider overriding the hook gets the conditional behavior.
 Some fymo providers create real, permanent objects in the app's database:
 `jobs: {provider: procrastinate}` puts its queue tables, functions, and
 types (`procrastinate_jobs`, `procrastinate_events`, …) in the same
-schema as your own tables. Your declarative schema file only declares
+schema as your own tables, and `auth.user_store` pointed at
+`PostgresUserStore` adds the `fymo_users` / `fymo_user_oauth_identities`
+identity tables next to them. Your declarative schema file only declares
 what your app owns, so a schema diff tool (pgschema, migra, and friends)
 sees the provider's objects as strays and generates `DROP TABLE` /
 `DROP FUNCTION` / `DROP TYPE` for every one of them — applying that plan
@@ -369,10 +371,10 @@ fymo schema provider-tables --json   # [{kind, name, provider}, ...] for tooling
 ```
 
 The command reads `fymo.yml`, resolves the configured `jobs:` /
-`broadcasts:` providers, and prints every table, type, function,
-sequence, index, trigger, and extension they create — derived from the
-installed provider library itself, so the list matches the version you
-actually run. No database connection is made. Feed the names into your tool's
+`broadcasts:` providers and the `auth.user_store` class, and prints
+every table, type, function, sequence, index, trigger, and extension
+they create — derived from the installed provider library itself, so the
+list matches the version you actually run. No database connection is made. Feed the names into your tool's
 exclude/ignore list (or generate it in CI) instead of hand-maintaining
 one.
 

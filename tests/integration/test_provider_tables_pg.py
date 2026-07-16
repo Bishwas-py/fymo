@@ -141,3 +141,59 @@ def test_enumerated_extensions_exist_in_the_catalog(database_url, enumerated):
     # unrelated extensions the database had before the schema apply.
     extensions = _catalog(database_url, "SELECT extname FROM pg_extension")
     assert enumerated.get("extension", set()) <= extensions
+
+
+def test_every_fymo_user_store_object_in_the_catalog_is_enumerated(
+    database_url, tmp_path: Path, capsys, monkeypatch
+):
+    """Same catalog cross-check for PostgresUserStore: bootstrap its real
+    schema, then require the fymo_ tables, identity sequence, and explicit
+    index to match the command's output exactly (constraint-backed pkey
+    indexes set aside, consistent with the procrastinate checks)."""
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    from fymo.auth.postgres_store import PostgresUserStore
+
+    store = PostgresUserStore(tmp_path)
+    store._get_pool().close()
+
+    from fymo.cli.commands.schema import run_provider_tables
+
+    (tmp_path / "fymo.yml").write_text(
+        "name: catalog-check\n"
+        "auth:\n"
+        "  user_store: fymo.auth.postgres_store.PostgresUserStore\n"
+    )
+    run_provider_tables(tmp_path)
+    by_kind: dict = {}
+    for line in capsys.readouterr().out.strip().splitlines():
+        kind, _, name = line.partition(" ")
+        by_kind.setdefault(kind, set()).add(name)
+
+    tables = _catalog(
+        database_url,
+        "SELECT tablename FROM pg_tables"
+        " WHERE schemaname = 'public' AND tablename LIKE 'fymo%'",
+    )
+    assert tables == by_kind["table"]
+
+    sequences = _catalog(
+        database_url,
+        "SELECT c.relname FROM pg_class c"
+        " JOIN pg_namespace n ON n.oid = c.relnamespace"
+        " WHERE n.nspname = 'public' AND c.relkind = 'S'"
+        " AND c.relname LIKE 'fymo%'",
+    )
+    assert sequences == by_kind["sequence"]
+
+    indexes = _catalog(
+        database_url,
+        "SELECT c.relname FROM pg_index i"
+        " JOIN pg_class c ON c.oid = i.indexrelid"
+        " JOIN pg_class t ON t.oid = i.indrelid"
+        " JOIN pg_namespace n ON n.oid = t.relnamespace"
+        " WHERE n.nspname = 'public' AND t.relname LIKE 'fymo%'"
+        " AND NOT EXISTS ("
+        "   SELECT 1 FROM pg_constraint con WHERE con.conindid = i.indexrelid"
+        " )",
+    )
+    assert indexes == by_kind["index"]
