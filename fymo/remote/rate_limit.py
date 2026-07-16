@@ -60,6 +60,21 @@ def rate_limit(per_minute: int, scope: str = "ip") -> Callable[[F], F]:
               verification (a cookieless caller must not get a fresh
               bucket per request).
 
+    Two cost/threat trade-offs to know when picking a scope:
+
+    - scope="user" resolves the session BEFORE the limit binds, so every
+      request carrying auth credentials pays the resolver walk (for a
+      token provider like Clerk, a JWT verification) even when the answer
+      is 429. That is the same cost any function calling current_user()
+      already pays per request; the middleware's IP-keyed edge limiter is
+      what bounds it. The per-user budget protects the function body and
+      whatever it spends, not the session resolution itself.
+    - scope="uid" (and unauthenticated scope="user") keys on a cookie the
+      server hands out freely, so a determined client can farm several
+      valid cookies and rotate them for extra budget. It defends against
+      accidental retry loops and over-eager polling, not adversaries; for
+      adversarial traffic, "ip" (or the edge limiter) is the backstop.
+
     Stamps `__fymo_rate_limit__` and returns the function unchanged, so it
     composes with @remote and @require_auth in any order.
     """
@@ -113,6 +128,15 @@ def _authenticated_user_id(environ: dict) -> Optional[int]:
         from fymo.auth.context import _fymo_session_resolver, _session_resolvers
     except ImportError:
         return None
+    # Mirror request_scope's event shape (fymo/remote/context.py), same
+    # trust_proxy-aware scheme resolution included: a resolver reading a
+    # key that's absent here would KeyError, get swallowed by the except
+    # below, and silently degrade the scope to uid/ip instead of surfacing
+    # the mismatch. "uid" is the one deliberate omission, it isn't resolved
+    # until the router opens the real scope, and no session resolver reads
+    # it (a session is what identifies the caller here, not the anon uid).
+    from fymo.core.middleware import resolve_scheme
+    from fymo.remote import context as _context
     event = {
         "cookies": _cookies_from_environ(environ),
         "headers": {
@@ -120,6 +144,7 @@ def _authenticated_user_id(environ: dict) -> Optional[int]:
             for k, v in environ.items() if k.startswith("HTTP_")
         },
         "remote_addr": environ.get("REMOTE_ADDR", ""),
+        "scheme": resolve_scheme(environ, _context._trust_proxy),
     }
     for resolve in (_fymo_session_resolver, *_session_resolvers):
         try:

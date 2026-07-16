@@ -109,16 +109,31 @@ def test_marker_survives_rate_limit_above_require_auth():
     assert getattr(expensive, "__fymo_require_auth__", False) is True
 
 
-def test_all_three_markers_survive_full_stack():
-    @remote
-    @require_auth
-    @rate_limit(per_minute=3, scope="user")
-    def expensive() -> str:
-        return "x"
+def test_all_three_markers_survive_every_stacking_order():
+    """All six permutations of @remote/@require_auth/@rate_limit. Only
+    require_auth wraps (and functools.wraps copies the inner __dict__), so
+    every order must preserve all three markers; a regression in any one
+    decorator's stamping strategy shows up as the failing order's name."""
+    import itertools
 
-    assert expensive.__fymo_rate_limit__.per_minute == 3
-    assert getattr(expensive, "__fymo_remote__", False) is True
-    assert getattr(expensive, "__fymo_require_auth__", False) is True
+    decorators = {
+        "remote": remote,
+        "require_auth": require_auth,
+        "rate_limit": rate_limit(per_minute=3, scope="user"),
+    }
+    for order in itertools.permutations(decorators):
+        def expensive() -> str:
+            return "x"
+        fn = expensive
+        # Apply innermost-first, i.e. reversed(order) matches reading the
+        # stack top-down as @order[0] / @order[1] / @order[2].
+        for name in reversed(order):
+            fn = decorators[name](fn)
+
+        assert getattr(fn, "__fymo_rate_limit__", None) is not None, order
+        assert fn.__fymo_rate_limit__.per_minute == 3, order
+        assert getattr(fn, "__fymo_remote__", False) is True, order
+        assert getattr(fn, "__fymo_require_auth__", False) is True, order
 
 
 def test_rate_limit_exported_from_fymo_remote():

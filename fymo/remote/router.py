@@ -222,8 +222,11 @@ def handle_remote(environ: dict, start_response) -> Iterable[bytes]:
         return _200(start_response, {"type": "error", "status": 404, "error": "unknown_function"})
 
     # 5b. Per-function rate limit (@rate_limit marker). Checked before body
-    # parse and arg validation: an over-budget caller shouldn't cost us
-    # anything beyond the token-bucket lookup.
+    # parse and arg validation so an over-budget caller never reaches the
+    # function or its validation. For scope="ip"/"uid" the check costs only
+    # a cookie HMAC and a token-bucket lookup; scope="user" additionally
+    # pays a session-resolution pass (see rate_limit.py's docstring for the
+    # cost trade-off, which the WSGI edge limiter bounds).
     limited = enforce_rate_limit(fn, (module_name, fn_name), environ)
     if limited is not None:
         return _200(start_response, _remote_error_payload(limited))
