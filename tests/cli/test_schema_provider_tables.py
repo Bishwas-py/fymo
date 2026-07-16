@@ -40,7 +40,7 @@ def test_plain_output_is_one_kind_prefixed_object_per_line(procrastinate_project
     assert any(line.startswith("function procrastinate_") for line in out_lines)
     for line in out_lines:
         kind, _, name = line.partition(" ")
-        assert kind in {"table", "type", "function", "sequence", "index", "trigger"}
+        assert kind in {"table", "type", "function", "sequence", "index", "trigger", "extension"}
         assert name and " " not in name
 
 
@@ -81,6 +81,24 @@ def test_missing_procrastinate_package_fails_loudly(procrastinate_project, capsy
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "fymo[procrastinate]" in captured.err
+
+
+def test_schema_parse_error_uses_the_clean_error_path(procrastinate_project, capsys, monkeypatch):
+    """A provider whose DDL the parser can't classify must exit 1 with a
+    clean stderr message and empty stdout, not a raw traceback."""
+    from fymo.core.schema import SchemaParseError
+    from fymo.jobs.providers.procrastinate import ProcrastinateJobProvider
+
+    def _boom(self):
+        raise SchemaParseError("unrecognized CREATE statement: 'CREATE ROLE nope'")
+
+    monkeypatch.setattr(ProcrastinateJobProvider, "owned_schema_objects", _boom)
+    with pytest.raises(SystemExit) as exc_info:
+        run_provider_tables(procrastinate_project)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unrecognized CREATE statement" in captured.err
 
 
 def test_cli_end_to_end_against_a_scaffolded_project(procrastinate_project):

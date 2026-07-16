@@ -29,7 +29,7 @@ from typing import Tuple
 class SchemaObject:
     """One database object a provider owns. `kind` is a lowercase word
     matching what schema diff tools manage as top-level objects: table,
-    type, function, sequence, index, trigger, view."""
+    type, function, sequence, index, trigger, view, extension."""
     kind: str
     name: str
 
@@ -51,7 +51,13 @@ def owned_schema_objects(provider) -> Tuple[SchemaObject, ...]:
 
 
 # One regex per recognized statement head; group 1 is the object name.
+# Matched at every CREATE token position, wherever it sits (indented,
+# mid-line, inside a DO block), so nothing depends on line starts.
 # UNIQUE INDEX collapses to "index", exclusion tooling doesn't care.
+# CREATE EXTENSION is classified like everything else: procrastinate's
+# schema opens with a guarded `CREATE EXTENSION IF NOT EXISTS plpgsql`
+# inside a DO block, and enumerating it is harmless while ignoring it
+# would need a silent-skip path this parser must not have.
 _STATEMENT_RES = (
     ("table", re.compile(
         r"CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][\w$]*)",
@@ -72,7 +78,13 @@ _STATEMENT_RES = (
     ("view", re.compile(
         r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?VIEW\s+([A-Za-z_][\w$]*)",
         re.IGNORECASE)),
+    ("extension", re.compile(
+        r"CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][\w$]*)",
+        re.IGNORECASE)),
 )
+
+_COMMENT_RE = re.compile(r"/\*.*?\*/|--[^\n]*", re.DOTALL)
+_CREATE_TOKEN_RE = re.compile(r"\bCREATE\b", re.IGNORECASE)
 
 # A column whose type implicitly creates a `<table>_<column>_seq` sequence:
 # serial family, or GENERATED ... AS IDENTITY.
@@ -86,10 +98,16 @@ _IDENTITY_COLUMN_RE = re.compile(
 def parse_schema_sql(sql: str) -> Tuple[SchemaObject, ...]:
     """Extract every object a DDL script creates, in statement order.
 
+    Comments are stripped, then EVERY remaining CREATE token in the text
+    is visited: indented, mid-line, or nested inside a DO $$ block, each
+    one is either classified into the output or raises SchemaParseError.
+    Under-reporting is the one failure mode this parser is not allowed to
+    have, so there is deliberately no code path that skips a CREATE.
+
     Tables contribute their implicit serial/identity sequences too, since
     schema tools that enumerate sequences would otherwise still propose
-    dropping `<table>_id_seq`. Raises SchemaParseError on any top-level
-    CREATE statement head it can't classify."""
+    dropping `<table>_id_seq`."""
+    stripped = _COMMENT_RE.sub(" ", sql)
     objects = []
     seen = set()
 
@@ -98,20 +116,19 @@ def parse_schema_sql(sql: str) -> Tuple[SchemaObject, ...]:
             seen.add((kind, name))
             objects.append(SchemaObject(kind=kind, name=name))
 
-    for match in re.finditer(r"^CREATE\b[^\n;]*", sql, flags=re.MULTILINE):
-        statement_head = match.group(0)
+    for match in _CREATE_TOKEN_RE.finditer(stripped):
         for kind, statement_re in _STATEMENT_RES:
-            named = statement_re.match(statement_head)
+            named = statement_re.match(stripped, match.start())
             if named:
                 add(kind, named.group(1))
                 if kind == "table":
-                    name_end = match.start() + named.end(1)
-                    for seq_name in _implicit_sequences(named.group(1), sql, name_end):
+                    for seq_name in _implicit_sequences(named.group(1), stripped, named.end(1)):
                         add("sequence", seq_name)
                 break
         else:
+            snippet = " ".join(stripped[match.start():match.start() + 60].split())
             raise SchemaParseError(
-                f"unrecognized CREATE statement: {statement_head.strip()!r}, "
+                f"unrecognized CREATE statement: {snippet!r}, "
                 "fymo.core.schema.parse_schema_sql needs to learn this DDL form"
             )
     return tuple(objects)

@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 from fymo.core.config import ConfigManager
-from fymo.core.schema import owned_schema_objects
+from fymo.core.schema import SchemaParseError, owned_schema_objects
 
 
 def _configured_providers(config_manager: ConfigManager):
@@ -63,7 +63,7 @@ def run_provider_tables(project_root: Optional[Path] = None, as_json: bool = Fal
                     continue
                 seen.add((obj.kind, obj.name))
                 entries.append((provider.id, obj))
-    except RuntimeError as e:
+    except (RuntimeError, SchemaParseError) as e:
         print(f"error: {e}", file=sys.stderr)
         raise SystemExit(1)
 

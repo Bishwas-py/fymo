@@ -370,9 +370,9 @@ fymo schema provider-tables --json   # [{kind, name, provider}, ...] for tooling
 
 The command reads `fymo.yml`, resolves the configured `jobs:` /
 `broadcasts:` providers, and prints every table, type, function,
-sequence, index, and trigger they create — derived from the installed
-provider library itself, so the list matches the version you actually
-run. No database connection is made. Feed the names into your tool's
+sequence, index, trigger, and extension they create — derived from the
+installed provider library itself, so the list matches the version you
+actually run. No database connection is made. Feed the names into your tool's
 exclude/ignore list (or generate it in CI) instead of hand-maintaining
 one.
 

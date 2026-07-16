@@ -83,17 +83,58 @@ def test_statement_order_is_preserved():
 
 
 def test_comments_are_not_parsed():
-    sql = "-- CREATE TABLE commented_out (id integer);\nCREATE TABLE real_one (\n    id integer\n);"
+    sql = (
+        "-- CREATE TABLE commented_out (id integer);\n"
+        "/* CREATE INDEX block_commented ON x (y);\n"
+        "   spanning lines */\n"
+        "    -- note: CREATE EXTENSION may fail on managed services\n"
+        "CREATE TABLE real_one (\n    id integer\n);"
+    )
     objs = parse_schema_sql(sql)
     assert [o.name for o in objs] == ["real_one"]
+
+
+def test_create_inside_a_do_block_is_not_silently_skipped():
+    """A guarded CREATE TABLE inside DO $$ ... $$ still creates the table.
+    Skipping it because of indentation is the exact under-report this
+    parser exists to make impossible."""
+    sql = (
+        "DO $$\n"
+        "BEGIN\n"
+        "    CREATE TABLE guarded_tbl (\n        id integer\n    );\n"
+        "EXCEPTION WHEN duplicate_table THEN NULL;\n"
+        "END $$;\n"
+    )
+    assert SchemaObject(kind="table", name="guarded_tbl") in parse_schema_sql(sql)
+
+
+def test_two_create_statements_on_one_line_are_both_parsed():
+    sql = "CREATE SEQUENCE first_seq; CREATE SEQUENCE second_seq;"
+    names = [o.name for o in parse_schema_sql(sql)]
+    assert names == ["first_seq", "second_seq"]
+
+
+def test_create_extension_is_classified():
+    sql = "DO $$\nBEGIN\n    CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;\nEND $$;"
+    assert parse_schema_sql(sql) == (
+        SchemaObject(kind="extension", name="plpgsql"),
+    )
 
 
 def test_unrecognized_create_statement_fails_loudly():
     """A DDL form the parser doesn't understand must raise, never be
     silently dropped, an incomplete list defeats the whole point of
     building an exclude list from it."""
-    with pytest.raises(SchemaParseError, match="EXTENSION"):
-        parse_schema_sql("CREATE EXTENSION pgcrypto;")
+    with pytest.raises(SchemaParseError, match="ROLE"):
+        parse_schema_sql("CREATE ROLE queue_owner;")
+
+
+def test_unrecognized_create_raises_even_when_indented_mid_line():
+    with pytest.raises(SchemaParseError, match="PUBLICATION"):
+        parse_schema_sql(
+            "CREATE TABLE fine (\n    id integer\n);\n"
+            "DO $$ BEGIN CREATE PUBLICATION sneaky; END $$;"
+        )
 
 
 def test_owned_schema_objects_helper_defaults_to_empty():
