@@ -109,3 +109,22 @@ def test_new_scaffolds_package_json_dev_script_using_fymo_dev(tmp_path, monkeypa
     create_project("myapp")
     package_json = json.loads((tmp_path / "myapp" / "package.json").read_text())
     assert package_json["scripts"]["dev"] == "fymo dev"
+
+
+def test_new_scaffolds_package_json_with_full_build_deps(tmp_path, monkeypatch):
+    """Issue #55: a fresh `fymo new` project could never build. fymo/build/js/build.mjs
+    requires esbuild-svelte and svelte-preprocess directly, and app/lib code commonly
+    needs devalue and TypeScript, but the scaffolded package.json only ever listed
+    svelte and esbuild. Bring it in line with examples/blog_app/package.json, the
+    known-good reference every other build-time test in this repo relies on."""
+    import json
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    package_json = json.loads((tmp_path / "myapp" / "package.json").read_text())
+    assert package_json["dependencies"]["devalue"] == "^5.8.1"
+    assert package_json["dependencies"]["svelte"] == "^5.38.0"
+    dev_deps = package_json["devDependencies"]
+    assert dev_deps["esbuild"] == "^0.25.0"
+    assert dev_deps["esbuild-svelte"] == "^0.9.0"
+    assert dev_deps["svelte-preprocess"] == "^6.0.3"
+    assert dev_deps["typescript"] == "^5.5.0"
