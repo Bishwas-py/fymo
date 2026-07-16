@@ -54,6 +54,57 @@ warning suggesting `@task` be added. Real implementation that a task calls
 into belongs in `app/support/`, not underscore-prefixed helpers living next
 to the task in the same module.
 
+## Job status visibility and app-level progress tracking
+
+`fymo jobs-status` prints whatever the configured `JobProvider` knows about
+job state: counts by status, then the most recent jobs (id, task, status,
+queued-at). It reads the provider's own bookkeeping — for `procrastinate`
+that's the status procrastinate already tracks in its own Postgres tables,
+so "is this job stuck" no longer means hand-querying `procrastinate_jobs`.
+Pass `--dev` if `DATABASE_URL` lives in `.env` (same flag semantics as
+`fymo jobs-worker --dev`), and `--limit N` to change how many recent jobs
+are listed.
+
+Not every provider tracks state. The status surface is an optional pair of
+read-only methods on the provider seam (`job_counts()` /
+`list_recent_jobs(limit)`, `fymo/jobs/providers/base.py`); returning `None`
+means "this provider doesn't track job state", and the CLI then exits with
+a message saying so instead of printing an empty report. The default
+`threaded` provider returns `None` deliberately: its executor state lives
+inside the web process, and `fymo jobs-status` runs as its own OS process,
+so the only numbers it could ever report would be a fresh provider's zeros.
+
+### What fymo deliberately does not track
+
+fymo does not track job **progress or results** — not for procrastinate,
+not for any provider. A submitted job is fire-and-forget from the caller's
+side: no return value, no progress percentage, no result payload. This is
+the same boundary `fymo.jobs` has had from the start, kept on purpose:
+progress is app domain data (what "40% done" means is different for a
+video encode and a crawl), and any fymo-owned progress store would just be
+a second, worse database next to the one the app already has.
+`fymo jobs-status` surfaces queue *state* (queued/running/failed) because
+the provider already tracks it; it does not invent job *progress*.
+
+### The app-level progress convention
+
+A job that needs observable progress writes it to the app's own storage,
+keyed by an id the submitter chose, and readers poll or subscribe:
+
+1. The submitter (usually a remote function) creates a row in an app table
+   (e.g. `job_runs(id, kind, status, progress, detail, updated_at)`) and
+   passes that row's id to `submit()` as a normal task argument.
+2. The task updates that row as it goes — status transitions, a progress
+   counter, a result reference when done, the error message on failure —
+   inside the task body, exactly like any other database write.
+3. The browser reads it back through a remote function that queries the
+   row, or live via an `app/broadcasts` channel the task publishes to
+   (the jobs worker process already initializes broadcasts for this).
+
+This keeps progress in the place that survives restarts, is queryable with
+plain SQL, and renders with the same `$remote`/`$broadcast` machinery every
+other page uses — no fymo-specific progress API to learn or outgrow.
+
 ## `$route`: reactive current-route state
 
 `location.pathname` read inside `$effect` never re-runs after a soft
