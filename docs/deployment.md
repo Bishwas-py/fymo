@@ -529,7 +529,7 @@ media:
 ```
 
 `prefix` is matched against the request path the same way fymo's own
-`/dist/` and `/assets/` routes are (a path prefix, not a template). `dir`
+`/dist/` and `/static/` routes are (a path prefix, not a template). `dir`
 is resolved relative to the project root. `extensions` is the allow-list
 for the filename after the prefix; anything else, and any filename
 containing `..` or starting with `/`, gets a 400.

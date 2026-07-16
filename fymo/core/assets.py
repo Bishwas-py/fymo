@@ -10,7 +10,7 @@ from typing import Dict, Tuple, Optional
 
 class AssetManager:
     """Manages compiled assets and static files for Fymo applications"""
-    
+
     def __init__(self, project_root: Path):
         """
         Initialize asset manager
@@ -19,55 +19,6 @@ class AssetManager:
             project_root: Root directory of the project
         """
         self.project_root = project_root
-        self.extracted_css: Dict[str, str] = {}
-
-    def store_extracted_css(self, name: str, content: str) -> None:
-        """Store extracted CSS"""
-        self.extracted_css[name] = content
-
-    def get_extracted_css(self, name: str) -> Optional[str]:
-        """Get extracted CSS"""
-        return self.extracted_css.get(name)
-    
-    def serve_asset(
-        self, path: str, environ: Optional[dict] = None
-    ) -> Tuple[bytes, str, str, Dict[str, str]]:
-        """
-        Serve static assets
-
-        Args:
-            path: Asset path (should start with /assets/)
-            environ: WSGI environ of the request, when available. Used for
-                conditional requests (If-None-Match) against static files.
-
-        Returns:
-            Tuple of (body, status, content_type, extra_headers)
-        """
-        try:
-            if not path.startswith('/assets/'):
-                return b"Invalid asset path", "400 BAD REQUEST", "text/plain", {}
-
-            asset_path = path[8:]  # Remove '/assets/' prefix
-
-            # Serve CSS
-            if asset_path.startswith('css/'):
-                css_file = asset_path[4:]
-                css_content = self.get_extracted_css(css_file)
-                if css_content:
-                    return (
-                        css_content.encode("utf-8"), "200 OK", "text/css",
-                        {"Cache-Control": "public, max-age=3600"},
-                    )
-
-            # Serve static files
-            else:
-                return self.serve_static_file(asset_path, environ)
-
-            return b"Asset not found", "404 NOT FOUND", "text/plain", {}
-
-        except Exception as e:
-            body = f"Asset serving error: {str(e)}".encode("utf-8")
-            return body, "500 INTERNAL SERVER ERROR", "text/plain", {}
 
     @staticmethod
     def _safe_resolve(root: Path, rel_path: str) -> Optional[Path]:
@@ -113,15 +64,17 @@ class AssetManager:
         return False
 
     def serve_static_file(
-        self, asset_path: str, environ: Optional[dict] = None
+        self, rel_path: str, environ: Optional[dict] = None
     ) -> Tuple[bytes, str, str, Dict[str, str]]:
         """Serve a file from app/static verbatim, as bytes.
 
-        Static files are unhashed, so responses carry an ETag (from stat
-        mtime+size) and If-None-Match is honored with a 304 -- the 1-hour
-        Cache-Control alone would re-download the full body on every expiry.
+        `rel_path` is the path relative to app/static/ (the part of the URL
+        after the /static/ prefix). Static files are unhashed, so responses
+        carry an ETag (from stat mtime+size) and If-None-Match is honored
+        with a 304 -- the 1-hour Cache-Control alone would re-download the
+        full body on every expiry.
         """
-        static_path = self._safe_resolve(self.project_root / 'app' / 'static', asset_path)
+        static_path = self._safe_resolve(self.project_root / 'app' / 'static', rel_path)
         if static_path is None:
             return b"Forbidden", "403 FORBIDDEN", "text/plain", {}
 
@@ -169,10 +122,3 @@ class AssetManager:
             cache = "public, max-age=31536000, immutable"
 
         return target.read_bytes(), "200 OK", content_type, {"Cache-Control": cache}
-
-    def generate_css_links(self) -> str:
-        """Generate CSS link tags for all extracted CSS"""
-        css_links = ""
-        for css_file in self.extracted_css.keys():
-            css_links += f'    <link rel="stylesheet" href="/assets/css/{css_file}">\n'
-        return css_links

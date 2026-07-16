@@ -34,7 +34,7 @@ from fymo.storage.base import RangeNotSatisfiable, StorageProvider
 # the app-routes loop runs. A `media:` prefix landing under either of these
 # would silently never be reached, so it's worth a loud warning at startup
 # rather than a confusing 404/wrong-content-type discovered in production.
-_RESERVED_PREFIXES = ("/dist/", "/assets/")
+_RESERVED_PREFIXES = ("/dist/", "/static/")
 
 
 def _respond_error(start_response, status: str, message: bytes):
