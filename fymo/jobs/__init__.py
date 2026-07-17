@@ -147,7 +147,7 @@ def init_job_provider(project_root: Path, provider_config: Any) -> Any:
     """Build the configured JobProvider, register every app/jobs/*.py task
     with it, install it as the process-wide singleton, and return it.
 
-    Called once by FymoApp at startup (mirrors auth's `_init_auth`):
+    Called once by FymoApp at startup:
     `provider_config` is `ConfigManager.get_jobs_config().get("provider")`.
     """
     from fymo.jobs.discovery import discover_job_tasks

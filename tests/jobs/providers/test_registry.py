@@ -1,4 +1,4 @@
-"""Tests for build_job_provider — mirrors fymo.auth.providers.registry's tests."""
+"""Tests for build_job_provider and its config escape hatch."""
 import pytest
 
 from fymo.jobs.providers.base import BaseJobProvider

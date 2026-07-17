@@ -25,7 +25,22 @@ class Router:
         # Per-controller soft-nav flag. True (default) = SPA-style nav; False
         # = full page reload on every link to that resource.
         self._soft_nav: Dict[str, bool] = {}
-        
+        # Per-resource require_auth value (True or dotted guard path),
+        # attached to every expanded route of the resource.
+        self._resource_require_auth: Dict[str, Any] = {}
+        # Route name -> path. Names come from the fymo.yml key ('root' for
+        # root:, the resource name, or the explicit key sans leading '/').
+        # The route named 'signin' is the require_auth redirect target.
+        self._route_names: Dict[str, str] = {}
+        self._signin_path: Optional[str] = None
+        # Controller -> effective require_auth, aggregated from every declared
+        # route targeting that controller. Convention-based (undeclared) route
+        # guesses inherit from this so an alias of a protected page cannot
+        # render it anonymously. Keyed by controller, not controller.action,
+        # because the manifest and SSR render key is the controller alone: any
+        # action under a protected controller renders the same protected page.
+        self._controller_require_auth: Dict[str, Any] = {}
+
         if routes_file and routes_file.exists():
             try:
                 self._load_routes_from_file(routes_file)
@@ -51,9 +66,12 @@ class Router:
         
         if hasattr(routes_module, 'routes'):
             self.routes = routes_module.routes
+            for path in self.routes:
+                self._route_names.setdefault(path.lstrip('/') or 'root', path)
         if hasattr(routes_module, 'resources'):
             self.resources = routes_module.resources
             self._expand_resources()
+        self._finalize_require_auth()
     
     def _load_yaml_routes(self, routes_file: Path):
         """Load routes from a YAML file"""
@@ -69,13 +87,34 @@ class Router:
         routes_config = config.get('routes', config)
         
         if 'root' in routes_config:
-            controller, action = routes_config['root'].split('.')
-            self.routes['/'] = {
-                'controller': controller,
-                'action': action,
-                'template': f"{controller}/{action}.svelte"
-            }
-        
+            root_spec = routes_config['root']
+            if isinstance(root_spec, dict):
+                # Dict form exists so root can carry route attributes
+                # (require_auth); the target moves under `to:`.
+                to = root_spec.get('to')
+                if not to:
+                    raise ConfigurationError(
+                        "routes.root dict form requires `to: controller.action`"
+                    )
+                controller, action = to.split('.')
+                info = {
+                    'controller': controller,
+                    'action': action,
+                    'template': f"{controller}/{action}.svelte",
+                }
+                for attr_key, attr_value in root_spec.items():
+                    if attr_key != 'to':
+                        info.setdefault(attr_key, attr_value)
+            else:
+                controller, action = root_spec.split('.')
+                info = {
+                    'controller': controller,
+                    'action': action,
+                    'template': f"{controller}/{action}.svelte",
+                }
+            self.routes['/'] = info
+            self._route_names['root'] = '/'
+
         if 'resources' in routes_config:
             # Resources may be plain strings (`- posts`) or dicts with
             # per-resource config (`- name: admin\n  soft_nav: false`).
@@ -92,6 +131,8 @@ class Router:
                     normalized.append(name)
                     if 'soft_nav' in entry:
                         self._soft_nav[name] = bool(entry['soft_nav'])
+                    if 'require_auth' in entry:
+                        self._resource_require_auth[name] = entry['require_auth']
                 else:
                     raise ConfigurationError(
                         f"resource entry must be a string or dict, got {type(entry).__name__}"
@@ -99,48 +140,136 @@ class Router:
             self.resources = normalized
             self._expand_resources()
         
-        # Handle explicit route definitions
+        # Handle explicit route definitions. Keys are stored as paths
+        # (leading '/' added when missing) so a declared route actually
+        # direct-matches in match() instead of falling through to the
+        # convention guess, which would drop its attributes (require_auth).
         for key, value in routes_config.items():
-            if key not in ['root', 'resources'] and isinstance(value, str):
+            if key in ['root', 'resources']:
+                continue
+            name = key.lstrip('/')
+            path = key if key.startswith('/') else f'/{key}'
+            if isinstance(value, str):
                 controller, action = value.split('.')
-                self.routes[key] = {
+                info = {
                     'controller': controller,
                     'action': action,
                     'template': f"{controller}/{action}.svelte"
                 }
-            elif key not in ['root', 'resources'] and isinstance(value, dict):
-                self.routes[key] = value
-    
+            elif isinstance(value, dict):
+                if 'to' in value:
+                    controller, action = value['to'].split('.')
+                    info = {
+                        'controller': controller,
+                        'action': action,
+                        'template': f"{controller}/{action}.svelte",
+                    }
+                    for attr_key, attr_value in value.items():
+                        if attr_key != 'to':
+                            info.setdefault(attr_key, attr_value)
+                else:
+                    info = value
+            else:
+                continue
+            self.routes[path] = info
+            self._route_names[name] = path
+        self._finalize_require_auth()
+
+    def _finalize_require_auth(self):
+        """Apply the require_auth conventions after all routes are loaded.
+
+        The route named 'signin' is the redirect target and is auto-public:
+        require_auth on it is ignored with a warning. Any route carrying
+        require_auth with no signin route to redirect to is a hard
+        configuration error at boot, not a request-time surprise.
+        """
+        signin = self._route_names.get('signin')
+        self._signin_path = signin
+        if signin is not None:
+            info = self.routes.get(signin)
+            if isinstance(info, dict) and info.get('require_auth'):
+                from fymo.utils.colors import Color
+                Color.print_warning(
+                    "route 'signin' is the require_auth redirect target and is "
+                    "always public; ignoring require_auth on it"
+                )
+                info.pop('require_auth', None)
+        protected = [
+            path for path, info in self.routes.items()
+            if isinstance(info, dict) and info.get('require_auth')
+        ]
+        if protected and signin is None:
+            from fymo.core.page_auth import REQUIRE_AUTH_WITHOUT_SIGNIN_ERROR
+            raise ConfigurationError(REQUIRE_AUTH_WITHOUT_SIGNIN_ERROR)
+        self._build_controller_require_auth()
+
+    def _build_controller_require_auth(self) -> None:
+        """Aggregate declared require_auth per controller for convention
+        inheritance. Runs after signin's own require_auth is stripped, so the
+        auto-public signin route never protects its controller by itself.
+
+        When several declared routes target one controller with conflicting
+        values the most restrictive wins: a dotted guard path beats bare `true`
+        (it implies signed-in AND more); among conflicting guard paths the
+        first declared one wins deterministically.
+        """
+        by_controller: Dict[str, list] = {}
+        for info in self.routes.values():
+            if not isinstance(info, dict):
+                continue
+            value = info.get('require_auth')
+            controller = info.get('controller')
+            if not value or controller is None:
+                continue
+            by_controller.setdefault(controller, []).append(value)
+        resolved: Dict[str, Any] = {}
+        for controller, values in by_controller.items():
+            guards = [v for v in values if isinstance(v, str)]
+            resolved[controller] = guards[0] if guards else True
+        self._controller_require_auth = resolved
+
+    def signin_path(self) -> Optional[str]:
+        """Path of the route named 'signin' (the require_auth redirect
+        target), or None when no such route is declared."""
+        return self._signin_path
+
     def _expand_resources(self):
         """Expand resource routes (RESTful routing)"""
         for resource in self.resources:
+            require_auth = self._resource_require_auth.get(resource)
+            self._route_names[resource] = f'/{resource}'
+
             # Index route
             self.routes[f'/{resource}'] = {
                 'controller': resource,
                 'action': 'index',
                 'template': f'{resource}/index.svelte'
             }
-            
+
             # Show route
             self.routes[f'/{resource}/:id'] = {
                 'controller': resource,
                 'action': 'show',
                 'template': f'{resource}/show.svelte'
             }
-            
+
             # Edit route
             self.routes[f'/{resource}/:id/edit'] = {
                 'controller': resource,
                 'action': 'edit',
                 'template': f'{resource}/edit.svelte'
             }
-            
+
             # New route
             self.routes[f'/{resource}/new'] = {
                 'controller': resource,
                 'action': 'new',
                 'template': f'{resource}/new.svelte'
             }
+
+            if require_auth is not None:
+                for suffix in ('', '/:id', '/:id/edit', '/new'):
+                    self.routes[f'/{resource}{suffix}']['require_auth'] = require_auth
     
     def match(self, path: str) -> Optional[Dict[str, Any]]:
         """
@@ -231,33 +360,30 @@ class Router:
         """
         # Normalize path
         if path == '/':
-            return {
-                'controller': 'home',
-                'action': 'index',
-                'template': 'home/index.svelte',
-                'convention': True
-            }
+            return self._convention_route('home', 'index')
 
         # Remove leading slash and split
         parts = path.strip('/').split('/')
 
         if len(parts) == 1:
             # /controller -> controller.index
-            controller = parts[0]
-            return {
-                'controller': controller,
-                'action': 'index',
-                'template': f'{controller}/index.svelte',
-                'convention': True
-            }
+            return self._convention_route(parts[0], 'index')
         elif len(parts) == 2:
             # /controller/action -> controller.action
-            controller, action = parts
-            return {
-                'controller': controller,
-                'action': action,
-                'template': f'{controller}/{action}.svelte',
-                'convention': True
-            }
+            return self._convention_route(parts[0], parts[1])
 
         return None
+
+    def _convention_route(self, controller: str, action: str) -> Dict[str, Any]:
+        """Build a convention route dict, inheriting require_auth from any
+        declared route that targets the same controller (fail-closed)."""
+        info: Dict[str, Any] = {
+            'controller': controller,
+            'action': action,
+            'template': f'{controller}/{action}.svelte',
+            'convention': True,
+        }
+        inherited = self._controller_require_auth.get(controller)
+        if inherited is not None:
+            info['require_auth'] = inherited
+        return info

@@ -252,19 +252,14 @@ Provisioning rules:
 ## Environment variables in `fymo.yml`
 
 `fymo.yml` can reference environment variables directly, so a
-deployment-specific value (an auth issuer URL, an API base URL) doesn't
+deployment-specific value (a database DSN, an API base URL) doesn't
 force a custom Python class just to read `os.environ`:
 
 ```yaml
-auth:
-  providers:
-    - type: oidc
-      id: auth0
-      authorize_endpoint: ${AUTH0_AUTHORIZE_ENDPOINT}
-      token_endpoint: ${AUTH0_TOKEN_ENDPOINT}
-      userinfo_endpoint: ${AUTH0_USERINFO_ENDPOINT}
-      client_id_env: AUTH0_CLIENT_ID
-      client_secret_env: AUTH0_CLIENT_SECRET
+jobs:
+  provider:
+    type: procrastinate
+    dsn: ${DATABASE_URL}
 ```
 
 - `${VAR}` resolves to the environment variable's value. If it's unset,
@@ -282,7 +277,7 @@ auth:
   file itself (a build pipeline, a secrets manager with looser access)
   still can't restructure the config, only supply a string value.
 - Interpolation runs on the raw YAML text before parsing, so it works
-  anywhere in the file, not just inside `auth:`, and that includes inside
+  anywhere in the file, at any nesting depth, and that includes inside
   `#` comments: a `${VAR}` written in a comment is still substituted and
   validated (an unset required var there still raises), since the
   substitution pass has no notion of YAML comments.
@@ -312,70 +307,36 @@ DATABASE_URL=postgres://localhost/myapp_dev
 - Add `.env` to `.gitignore` in your project — Fymo doesn't do this for
   you, since project scaffolding and `.gitignore` are separate concerns.
 
-### Conditional auth providers: `required: auto`
+## Auth is code you own
 
-A provider entry can carry `required: auto` to make its inclusion depend
-on whether it's actually configured, instead of the app crashing on a
-missing required constructor argument or silently registering a
-half-broken provider:
+There is no `auth:` block in `fymo.yml`. Identity lives in your app:
+`fymo generate auth` scaffolds a password login you own outright
+(`app/auth/` for the resolver, store, extras, and public projection;
+`app/remote/auth.py` for the signup/login/logout/me endpoints;
+`schema/users.sql` for your users table), and fymo auto-discovers
+`app/auth/*.py` so each `@identify` resolver self-registers. Deleting the
+directory turns identity resolution off. The `--clerk` and `--skeleton`
+variants scaffold an external-verifier resolver and a bare stub instead.
 
-```yaml
-auth:
-  providers:
-    - type: clerk
-      required: auto
-```
+Deployment implications:
 
-With `required: auto` set, the registry calls the provider class's
-`is_configured()` classmethod **before** constructing it. If that returns
-`False`, the provider is skipped entirely: no error, no instance, it
-contributes nothing to the app. This lets a provider stay dormant in local
-dev (no Clerk/Auth0/etc. env vars set) and activate once real values land
-in the environment, with no separate conditional wiring in app code.
-Any value other than the literal string `"auto"` for `required` (a typo
-like `Auto`, or anything else) raises a `ProviderConfigError` naming the
-bad value, rather than being silently ignored or crashing the provider's
-constructor with an unrelated `TypeError`.
-
-`ClerkProvider` implements this fully out of the box: `is_configured()`
-checks for `CLERK_ISSUER`, falling back to decoding the Frontend API domain
-out of `PUBLIC_CLERK_PUBLISHABLE_KEY` (Clerk's own `pk_test_`/`pk_live_` key
-shape), and `from_config()` derives `jwks_url` as
-`{issuer}/.well-known/jwks.json` when it isn't given explicitly. Neither
-env var needs a custom wrapper class or an explicit `issuer:`/`jwks_url:`
-in `fymo.yml` -- the config block above is the entire setup.
-
-`is_configured()` defaults to `True` on `BaseProvider`, so every existing
-provider is unaffected: only an entry that both sets `required: auto` and
-points at a provider overriding the hook gets the conditional behavior.
-
-### Auth provider extras: password stays in base, Clerk/OIDC/OAuth are opt-in
-
-The password provider (`hashlib.scrypt`, stdlib-only) is the one real login
-built into fymo -- a bare `pip install fymo` with `auth.enabled: true` and
-no `providers:` list logs a user in with zero extra installs. Clerk, OIDC,
-and OAuth providers live behind named extras instead:
-
-```sh
-pip install 'fymo[clerk]'   # ClerkProvider: pyjwt[crypto] for RS256/JWKS
-pip install 'fymo[oidc]'    # OIDCProvider: stdlib-only today, named for consistency
-pip install 'fymo[oauth]'   # GoogleProvider/OAuthProvider: same, stdlib-only today
-```
-
-`type: clerk` without `fymo[clerk]` installed is a hard error at
-`FymoApp` construction (app startup), naming the exact install command --
-never a silent fallback to a disabled or half-working auth setup. Same
-posture as the granian check above: refuse to start rather than fail on
-someone's first login attempt in production.
+- The framework creates no user tables. Whatever storage your `app/auth/`
+  code uses (the generated SQLite store, your own Postgres tables, an
+  external provider) is yours to provision and migrate like any other app
+  table.
+- External providers (Clerk, Auth0, OAuth) are libraries you call from
+  your own resolver code. Their credentials (issuer URLs, keys) live in
+  the environment your code reads, never in `fymo.yml`.
+- Guards deploy with the code: `@require_auth` on remote functions,
+  `require_auth:` on routes in `fymo.yml`. `fymo build` fails when either
+  is present with zero `@identify` resolvers registered.
 
 ## Provider-owned database objects and schema diff tools
 
 Some fymo providers create real, permanent objects in the app's database:
 `jobs: {provider: procrastinate}` puts its queue tables, functions, and
 types (`procrastinate_jobs`, `procrastinate_events`, …) in the same
-schema as your own tables, and `auth.user_store` pointed at
-`PostgresUserStore` adds the `fymo_users` / `fymo_user_oauth_identities`
-identity tables next to them. Your declarative schema file only declares
+schema as your own tables. Your declarative schema file only declares
 what your app owns, so a schema diff tool (pgschema, migra, and friends)
 sees the provider's objects as strays and generates `DROP TABLE` /
 `DROP FUNCTION` / `DROP TYPE` for every one of them — applying that plan
@@ -390,7 +351,7 @@ fymo schema provider-tables --json   # [{kind, name, provider}, ...] for tooling
 ```
 
 The command reads `fymo.yml`, resolves the configured `jobs:` /
-`broadcasts:` providers and the `auth.user_store` class, and prints
+`broadcasts:` providers, and prints
 every table, type, function, sequence, index, trigger, and extension
 they create — derived from the installed provider library itself, so the
 list matches the version you actually run. No database connection is made. Feed the names into your tool's

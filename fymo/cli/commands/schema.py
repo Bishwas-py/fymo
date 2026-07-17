@@ -19,13 +19,7 @@ Design notes:
     the extra rather than printing a partial list.
   * stdout carries only the object list (plain or --json) so it can be
     piped straight into tooling; every note or error goes to stderr.
-  * The auth user store joins the same way: a configured
-    `auth.user_store` class is resolved (imported, never instantiated,
-    since PostgresUserStore's constructor demands DATABASE_URL at boot
-    while this command promises to need neither a database nor the env
-    var) and asked via its classmethod. The default SQLite store keeps
-    its objects in its own auth.db file and declares nothing. Future
-    providers/stores that create objects join by implementing
+  * Future providers that create objects join by implementing
     owned_schema_objects() and getting resolved in
     _configured_providers() below.
 """
@@ -37,14 +31,13 @@ from pathlib import Path
 from typing import Optional
 
 from fymo.core.config import ConfigManager
-from fymo.core.providers import ProviderConfigError, load_class
+from fymo.core.providers import ProviderConfigError
 from fymo.core.schema import SchemaParseError, owned_schema_objects
 
 
 def _configured_providers(config_manager: ConfigManager):
     """(label, source) pairs for everything fymo.yml configures that can
-    own schema objects. Sources are provider instances for jobs and
-    broadcasts, and the bare class for the auth user store."""
+    own schema objects: provider instances for jobs and broadcasts."""
     from fymo.broadcast.providers.registry import build_broadcast_provider
     from fymo.jobs.providers.registry import build_job_provider
 
@@ -52,16 +45,10 @@ def _configured_providers(config_manager: ConfigManager):
     broadcast_provider = build_broadcast_provider(
         config_manager.get_broadcasts_config().get("provider")
     )
-    sources = [
+    return [
         (job_provider.id, job_provider),
         (broadcast_provider.id, broadcast_provider),
     ]
-
-    store_path = config_manager.get_auth_config().get("user_store")
-    if store_path:
-        store_cls = load_class(store_path)
-        sources.append((store_cls.__name__, store_cls))
-    return sources
 
 
 def run_provider_tables(project_root: Optional[Path] = None, as_json: bool = False) -> None:

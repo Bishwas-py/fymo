@@ -52,25 +52,25 @@ def test_empty_default_resolves_to_empty_string(tmp_path, monkeypatch):
     assert cm.get_app_name() == ""
 
 
-def test_interpolation_applies_to_the_whole_file_not_just_auth(tmp_path, monkeypatch):
+def test_interpolation_applies_to_the_whole_file(tmp_path, monkeypatch):
     monkeypatch.setenv("FYMO_TEST_DESC", "hello world")
     _write_yml(tmp_path, "name: app\ndescription: ${FYMO_TEST_DESC}\n")
     cm = ConfigManager(tmp_path)
     assert cm.get("description") == "hello world"
 
 
-def test_interpolation_inside_nested_auth_providers_section(tmp_path, monkeypatch):
-    monkeypatch.setenv("FYMO_TEST_ISSUER", "https://issuer.example.com")
+def test_interpolation_inside_nested_section(tmp_path, monkeypatch):
+    monkeypatch.setenv("FYMO_TEST_DSN", "postgres://db.example.com/app")
     _write_yml(
         tmp_path,
-        "auth:\n"
-        "  providers:\n"
-        "    - class: app.lib.SomeProvider\n"
-        "      issuer: ${FYMO_TEST_ISSUER}\n",
+        "jobs:\n"
+        "  provider:\n"
+        "    type: procrastinate\n"
+        "    dsn: ${FYMO_TEST_DSN}\n",
     )
     cm = ConfigManager(tmp_path)
-    providers = cm.get_auth_config()["providers"]
-    assert providers[0]["issuer"] == "https://issuer.example.com"
+    provider = cm.get_jobs_config()["provider"]
+    assert provider["dsn"] == "postgres://db.example.com/app"
 
 
 def test_no_placeholders_leaves_config_untouched(tmp_path):

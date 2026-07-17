@@ -91,18 +91,3 @@ def _b64_encode(b: bytes) -> str:
 def _b64_decode(s: str) -> bytes:
     pad = "=" * (-len(s) % 4)
     return base64.urlsafe_b64decode(s + pad)
-
-
-def _decoy_hash() -> str:
-    """A real scrypt hash of a fixed, throwaway password — never a user's.
-
-    Computed once at import time so `login` can run a genuine ~50ms scrypt
-    verify against it on the user-missing path, closing the email-enumeration
-    timing side-channel (see fymo/auth/remote.py:login). It never
-    authenticates anything; it only exists to cost the same as a real one.
-    """
-    return hash_password("fymo-decoy-hash-do-not-use-9f3a1c2b")
-
-
-# Precomputed once at import time — see _decoy_hash().
-DECOY_HASH = _decoy_hash()

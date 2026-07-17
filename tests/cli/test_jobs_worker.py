@@ -37,6 +37,24 @@ def _reset():
 
 
 @pytest.fixture(autouse=True)
+def _evict_stale_app_modules():
+    """An earlier test constructing a FymoApp over a different tmp project
+    can leave a cached `app` package (and its sys.path entry) behind;
+    discovery here would then resolve app.jobs against that stale root and
+    fail. Evict before and after so this file is order-independent."""
+    import sys
+
+    def _evict():
+        for name in list(sys.modules):
+            if name == "app" or name.startswith("app."):
+                del sys.modules[name]
+
+    _evict()
+    yield
+    _evict()
+
+
+@pytest.fixture(autouse=True)
 def _reset_configured_handler():
     """run_jobs_worker calls configure() before its SystemExit in several
     tests here, installing a root handler + level with no cleanup of its
@@ -87,6 +105,8 @@ def test_jobs_worker_configures_logging_from_yml(tmp_path, monkeypatch):
         "  format: json\n"
     )
     (tmp_path / "app" / "jobs").mkdir(parents=True)
+    (tmp_path / "app" / "__init__.py").write_text("")
+    (tmp_path / "app" / "jobs" / "__init__.py").write_text("")
 
     # The default threaded provider has no separate worker loop — it exits
     # with SystemExit(1) AFTER configuration, which is all this test needs.

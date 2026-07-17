@@ -6,9 +6,11 @@ import { createRequire } from 'node:module';
 import { fymoRemotePlugin } from './plugins/remote.mjs';
 import { fymoBroadcastPlugin } from './plugins/broadcast.mjs';
 import { fymoRoutePlugin } from './plugins/router.mjs';
+import { fymoAuthPlugin } from './plugins/fymo_auth.mjs';
 
 const config = JSON.parse(process.argv[2]);
 const routeRuntimePath = path.join(path.dirname(new URL(import.meta.url).pathname), 'runtime', 'route.js');
+const fymoAuthDir = path.join(config.distDir, 'client', '_fymo');
 
 // Resolve esbuild, esbuild-svelte, and svelte-preprocess from the project's
 // own node_modules so the Svelte version used to COMPILE components matches
@@ -56,6 +58,8 @@ async function makeServerCtx() {
         nodePaths: [path.join(config.projectRoot, 'node_modules')],
         plugins: [
             fymoRoutePlugin({ runtimePath: routeRuntimePath }),
+            // Bundled for SSR (never external), mirroring build.mjs.
+            fymoAuthPlugin({ fymoDir: fymoAuthDir }),
             sveltePlugin({ preprocess: sveltePreprocess(), compilerOptions: { generate: 'server', dev: false } }),
             { name: 'fymo-emit', setup(build) { build.onEnd(r => emit({ type: 'server-rebuild', errors: r.errors.map(e => e.text) })); } },
         ],
@@ -97,6 +101,7 @@ async function makeClientCtx() {
             fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
             fymoBroadcastPlugin({ broadcastDir: path.join(config.distDir, 'client', '_broadcast') }),
             fymoRoutePlugin({ runtimePath: routeRuntimePath }),
+            fymoAuthPlugin({ fymoDir: fymoAuthDir }),
             sveltePlugin({ preprocess: sveltePreprocess(), compilerOptions: { generate: 'client', dev: false } }),
             { name: 'fymo-emit', setup(build) { build.onEnd(r => emit({ type: 'client-rebuild', errors: r.errors.map(e => e.text), metafile: r.metafile })); } },
         ],

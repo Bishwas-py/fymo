@@ -1,4 +1,4 @@
-"""The JobProvider seam — mirrors fymo.auth.providers.AuthProvider exactly.
+"""The JobProvider seam.
 
 A provider contributes only the surface it needs. The framework never
 branches on provider *type*, it just calls the two hooks:

@@ -28,7 +28,8 @@ The decoded result has the shape:
       },
       "title":  "Post: Welcome",
       "doc":    { ... },                            # merged getDoc() output (root -> resource -> leaf)
-      "params": { "id": "welcome-to-fymo" }         # Router.match()'s resolved :id-style captures, {} if none
+      "params": { "id": "welcome-to-fymo" },        # Router.match()'s resolved :id-style captures, {} if none
+      "identity": { "uid": "u1", ... }              # public_identity projection, or None when anonymous
     }
 
 `params` is a top-level field independent of `leaf.props` -- a controller
@@ -38,7 +39,7 @@ is never required to echo its own params back for the client to see them
 The `doc`/`title` merge and layout-prop loading go through the exact same
 `ssr_controller.load_layout_props_and_docs`/`merge_docs` helpers the
 full-page SSR path (`template_renderer.py`) uses, so the two call sites
-can't drift apart the way they once did for `current_user()` scoping (see
+can't drift apart the way they once did for identity scoping (see
 `ssr_controller`'s module docstring).
 
 The client uses `id` for chain-diffing in PR B; in PR A every nav swaps
@@ -85,6 +86,19 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
     if not route_info:
         return _200(start_response, {"type": "error", "status": 404, "error": "no_route"})
 
+    # Route-level require_auth (issue #80): a soft-nav transition to a
+    # protected page is the same page load delivered as data, so it takes
+    # the same check as the full-page render (template_renderer.py), before
+    # any controller or manifest work, answered with the redirect envelope.
+    require_auth = route_info.get("require_auth")
+    if require_auth:
+        from fymo.core.page_auth import page_auth_redirect
+        location = page_auth_redirect(
+            require_auth, environ, app.router.signin_path(), route_path
+        )
+        if location is not None:
+            return _200(start_response, {"type": "redirect", "location": location, "status": 302})
+
     controller_name = route_info["controller"]
 
     # Per-resource opt-out from soft navigation. The client preempts via the
@@ -112,19 +126,17 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
 
     params = route_info.get("params", {}) or {}
 
-    # Invoke exactly like full-page SSR does, including the (optional)
-    # read-only auth request scope so current_user() resolves the same way
-    # on both the full-page render and this soft-nav path -- see
-    # ssr_controller for why this must be the same helper both call.
+    # Invoke exactly like full-page SSR does, including the read-only
+    # request scope so current_uid() resolves the same way on both the
+    # full-page render and this soft-nav path (see ssr_controller for
+    # why this must be the same helper both call).
     try:
-        leaf_props, leaf_doc = load_controller_context(
-            controller_mod, params, getattr(app, "auth_enabled", False), environ
-        )
+        leaf_props, leaf_doc = load_controller_context(controller_mod, params, environ)
         layout_props_by_level = {"root": {}, "resource": {}}
         layout_docs = []
         if assets.layout_chain:
             layout_props_by_level, layout_docs = load_layout_props_and_docs(
-                assets.layout_chain, params, getattr(app, "auth_enabled", False), environ
+                assets.layout_chain, params, environ
             )
     except RemoteError as e:
         # getContext() raised NotFound/Unauthorized/Redirect/etc directly,
@@ -184,8 +196,19 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
 
     title = doc_meta.get("title", app.config_manager.get_app_name())
 
+    # The identity slot (issue #80): same projection the full-page render
+    # embeds, so the client's $fymo/auth store updates on every soft nav.
     try:
-        encoded = devalue.stringify({"leaf": leaf, "title": title, "doc": doc_meta, "params": params})
+        from fymo.auth.public import client_identity
+        identity = client_identity(environ)
+    except Exception as e:
+        payload = {"type": "error", "status": 500, "error": "identity_failed"}
+        if getattr(app, "dev", False):
+            payload["message"] = str(e)
+        return _200(start_response, payload)
+
+    try:
+        encoded = devalue.stringify({"leaf": leaf, "title": title, "doc": doc_meta, "params": params, "identity": identity})
     except Exception as e:
         payload = {"type": "error", "status": 500, "error": "encode_failed"}
         if getattr(app, "dev", False):

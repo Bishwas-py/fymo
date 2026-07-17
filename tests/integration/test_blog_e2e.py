@@ -80,7 +80,8 @@ def test_blog_e2e(blog_app: Path):
     # Pull the per-module hash from the manifest after build.
     manifest = json.loads((blog_app / "dist" / "manifest.json").read_text())
     hash_ = manifest["remote_modules"]["posts"]["hash"]
-    # auth.enabled: true => the built-in auth client is generated too.
+    # blog_app owns its auth endpoints (app/remote/auth.py, scaffolded by
+    # `fymo generate auth`), so its client ships like any other module.
     auth_hash = manifest["remote_modules"]["auth"]["hash"]
 
     from fymo import create_app
@@ -113,18 +114,18 @@ def test_blog_e2e(blog_app: Path):
         assert env["status"] == 401
         assert env["error"] == "unauthenticated"
 
-        # Sign up via the generated auth client to obtain a session.
+        # Sign up via the app-owned auth endpoints to obtain a session.
         (_, signup_headers), env = _remote_call(
             app, auth_hash, "signup", ["alex@example.com", "longpassword"],
         )
         assert env["type"] == "result", env
-        session_cookie = _extract_cookie(signup_headers, "fymo_session")
+        session_cookie = _extract_cookie(signup_headers, "session")
         uid_cookie = _extract_cookie(signup_headers, "fymo_uid")
         assert session_cookie
         auth_cookies = f"{uid_cookie}; {session_cookie}"
 
         # Authenticated create_comment succeeds; the author is taken from the
-        # session (alex@example.com -> "alex"), not from client input.
+        # identity's extras (alex@example.com -> "alex"), not client input.
         (status, _), env = _remote_call(
             app, hash_, "create_comment",
             ["welcome-to-fymo", {"body": "Great post"}],

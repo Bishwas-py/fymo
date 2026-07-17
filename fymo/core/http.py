@@ -1,11 +1,6 @@
-"""Neutral raw-WSGI-route primitive, shared by auth providers (OAuth
-redirect/callback routes under /auth/<id>/...) and by apps that need a route
-outside the remote-function / SSR-page model (binary/range media serving,
-webhooks, etc.).
-
-Historically `HttpRoute` lived only in fymo.auth.providers.base — it moved
-here because it isn't auth-specific, and fymo.auth.providers.base now just
-re-exports this same class so existing imports keep working.
+"""Neutral raw-WSGI-route primitive for apps that need a route outside the
+remote-function / SSR-page model (binary/range media serving, webhooks,
+OAuth callback endpoints, etc.).
 """
 from __future__ import annotations
 

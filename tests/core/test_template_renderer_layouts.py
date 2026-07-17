@@ -19,7 +19,6 @@ def _renderer(tmp_path: Path) -> TemplateRenderer:
     config_manager = ConfigManager(tmp_path, {"name": "Test App"})
     asset_manager = AssetManager(tmp_path)
     renderer = TemplateRenderer(tmp_path, config_manager, asset_manager, router, dev=True)
-    renderer.auth_enabled = False
     return renderer
 
 

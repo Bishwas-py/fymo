@@ -149,13 +149,13 @@ def test_soft_nav_root_path(blog_app: Path, monkeypatch):
             app.sidecar.stop()
 
 
-_WHOAMI_CONTROLLER = '''"""Whoami controller: exercises current_user() during soft-nav."""
-from fymo.auth.context import current_user
+_WHOAMI_CONTROLLER = '''"""Whoami controller: exercises current_uid() during soft-nav."""
+from fymo.auth import current_uid, identity_extras
 
 
 def getContext():
-    user = current_user()
-    return {"email": user.email if user else None}
+    uid = current_uid()
+    return {"email": identity_extras().get("email") if uid else None}
 '''
 
 _WHOAMI_TEMPLATE = """<script>
@@ -174,7 +174,7 @@ _WHOAMI_TEMPLATE = """<script>
 
 @pytest.fixture
 def whoami_blog_app(blog_app: Path):
-    """blog_app plus a `whoami` route whose controller calls current_user()."""
+    """blog_app plus a `whoami` route whose controller calls current_uid()."""
     (blog_app / "app" / "controllers" / "whoami.py").write_text(_WHOAMI_CONTROLLER)
     tpl_dir = blog_app / "app" / "templates" / "whoami"
     tpl_dir.mkdir(parents=True)
@@ -190,21 +190,22 @@ def whoami_blog_app(blog_app: Path):
 
 @pytest.mark.usefixtures("node_available")
 def test_soft_nav_sees_logged_in_user_from_session_cookie(whoami_blog_app: Path):
-    """The soft-nav data endpoint must give current_user() the same request
+    """The soft-nav data endpoint must give current_uid() the same request
     scope the full-page SSR path gets -- this is the C1 gap: previously this
-    500'd with `controller_failed` because current_user() was called outside
+    500'd with `controller_failed` because identity was resolved outside
     of any request scope on the soft-nav path.
     """
     from fymo.build.pipeline import BuildPipeline
     BuildPipeline(project_root=whoami_blog_app).build(dev=False)
 
     from fymo import create_app
-    from fymo.auth.session import make_session_token
+    from fymo.auth import sign_token
 
     app = create_app(whoami_blog_app)
     try:
-        user = app.user_store.create("soft-nav@example.com", None)
-        token = make_session_token(user.id, user.session_epoch)
+        from app.auth import store
+        uid = store.create("soft-nav@example.com", "longpassword")
+        token = sign_token(uid)
 
         responses = []
 
@@ -214,7 +215,7 @@ def test_soft_nav_sees_logged_in_user_from_session_cookie(whoami_blog_app: Path)
         out = b"".join(app({
             "REQUEST_METHOD": "GET", "PATH_INFO": "/_fymo/data/whoami", "QUERY_STRING": "",
             "CONTENT_LENGTH": "0", "CONTENT_TYPE": "",
-            "HTTP_COOKIE": f"fymo_session={token}",
+            "HTTP_COOKIE": f"session={token}",
             "SERVER_NAME": "x", "SERVER_PORT": "0", "SERVER_PROTOCOL": "HTTP/1.1",
             "REMOTE_ADDR": "127.0.0.1",
             "wsgi.input": io.BytesIO(b""), "wsgi.errors": sys.stderr, "wsgi.url_scheme": "http",
@@ -233,7 +234,7 @@ def test_soft_nav_sees_logged_in_user_from_session_cookie(whoami_blog_app: Path)
 
 @pytest.mark.usefixtures("node_available")
 def test_soft_nav_logged_out_has_no_user_and_does_not_500(whoami_blog_app: Path):
-    """No session cookie -> current_user() is None, props carry email: None,
+    """No session cookie -> current_uid() is None, props carry email: None,
     and the endpoint must not 500."""
     from fymo.build.pipeline import BuildPipeline
     BuildPipeline(project_root=whoami_blog_app).build(dev=False)
@@ -265,10 +266,6 @@ def test_soft_nav_disabled_resource_returns_error_envelope(blog_app: Path, monke
         "    - name: posts\n"
         "      soft_nav: false\n"
         "    - tags\n"
-        # auth stays enabled so the blog's generated $remote/auth client (which
-        # app/lib/auth.ts imports) is produced during the build.
-        "auth:\n"
-        "  enabled: true\n"
         "build:\n"
         "  output_dir: dist\n"
     )

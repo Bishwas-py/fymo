@@ -1,7 +1,7 @@
 """Test bootstrapping for apps built on fymo.
 
 A test suite never constructs a FymoApp, so the process-wide seams FymoApp
-wires up at startup (the auth session-resolver chain, the storage / jobs /
+wires up at startup (the @identify resolver chain, the storage / jobs /
 broadcasts provider singletons) are all missing in a bare test process.
 This module stands them up for the duration of a block and restores every
 registry exactly as it found it, so tests never leak state into each other.
@@ -13,21 +13,28 @@ Simulate a signed-in caller for a remote function called directly
     from app.remote.posts import create_comment
 
     def test_comment_is_attributed():
-        with signed_in() as user:
+        with signed_in("u_alice") as ident:
             comment = create_comment("hello-world", input=NewComment(body="hi"))
-            assert comment["name"] == user.email.split("@")[0]
+            assert comment["uid"] == ident.uid
 
-Prove one user cannot see or touch another user's data:
+Prove one identity cannot see or touch another identity's data:
 
-    from fymo.testing import acting_as, make_user, signed_in
+    from fymo.testing import acting_as, signed_in
 
     def test_other_users_drafts_are_hidden():
-        alice = make_user(email="alice@example.com")
-        bob = make_user(email="bob@example.com")
-        with signed_in(alice):
+        with signed_in("u_alice"):
             draft = create_draft(title="secret")
-            with acting_as(bob):
+            with acting_as("u_bob"):
                 assert draft["id"] not in [d["id"] for d in get_my_drafts()]
+
+Anonymous requests need no helper at all: open a plain request scope and
+current_uid() returns None, exactly as it does for an unrecognized caller:
+
+    from fymo.remote.context import request_scope
+
+    def test_anonymous_cannot_comment():
+        with request_scope(uid="u_anon", environ={}):
+            assert current_uid() is None
 
 Get get_storage_provider() (plus jobs and broadcasts) working in a test
 process, reading the project's own fymo.yml the way FymoApp.__init__ does:
@@ -38,162 +45,143 @@ process, reading the project's own fymo.yml the way FymoApp.__init__ does:
         with init_providers(project_root):
             get_storage_provider().write("avatars/1.png", data)
 
-`signed_in` wraps the same register_session_resolver + request_scope
-mechanism fymo's router uses for real requests (see fymo.auth.context and
-fymo.remote.context); the resolver it registers reads the acting user from
-a contextvar, which is what lets `acting_as` swap identities mid-block and
-restore on exit, however deeply nested.
-
-The uid rule: the anonymous-identity uid (current_uid()) always follows
-the acting user, derived as "u_test{user.id}", so different users never
-share uid-keyed data (reactions, anonymous attribution) any more than two
-real browsers would. Both signed_in and acting_as take uid= when a test
-needs an exact value.
-
-Importable without pytest. When pytest is installed, the `signed_in_user`
-fixture at the bottom is also available; re-export it from a conftest.py to
-use it:
-
-    from fymo.testing import signed_in_user  # noqa: F401
+signed_in wraps the same @identify + request_scope mechanism fymo uses for
+real requests (see fymo.auth.identity and fymo.remote.context); the one
+module-level resolver it registers reads the acting identity from a
+contextvar, which is what lets sequential and nested blocks each resolve
+their own uid (identify() dedups on definition site, so a per-call closure
+would collapse to a single stale registration) and what lets acting_as swap
+identities mid-block and restore on exit, however deeply nested.
 """
 from __future__ import annotations
 
-import itertools
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Iterator, Optional
+from types import MappingProxyType, SimpleNamespace
+from typing import Iterator, Mapping, Optional
 
-from fymo.auth.store import User
+from fymo.auth.identity import Identity
 
 __all__ = [
-    "make_user",
     "signed_in",
     "acting_as",
     "init_providers",
 ]
 
 
-# --------------- fake users ---------------
+# --------------- signed-in identities ---------------
 
-_next_user_id = itertools.count(1)
-
-
-def make_user(email: str = "test@example.com", **overrides) -> User:
-    """Build a real fymo User with sensible test defaults.
-
-    Every field of fymo.auth.store.User can be overridden by keyword; ids
-    auto-increment per process so two default users never collide.
-    """
-    fields = {
-        "id": next(_next_user_id),
-        "email": email,
-        "password_hash": None,
-        "email_verified": True,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "fymo_uid": None,
-        "session_epoch": 1,
-    }
-    fields.update(overrides)
-    return User(**fields)
-
-
-# --------------- signed-in sessions ---------------
-
-# The user current_user() should resolve to right now. None means no
+# The identity current_uid() should resolve to right now. None means no
 # signed_in block is active. A contextvar (not a plain global) so the
 # swap-and-restore semantics of acting_as hold under threads and nesting.
-_acting_user: ContextVar[Optional[User]] = ContextVar(
-    "fymo_testing_acting_user", default=None
+_acting_identity: ContextVar[Optional[Identity]] = ContextVar(
+    "fymo_testing_acting_identity", default=None
 )
 
-
-def _uid_for(user: User) -> str:
-    return f"u_test{user.id}"
+_MISSING = object()
 
 
-def _testing_resolver(event: dict) -> Optional[User]:
-    return _acting_user.get()
+def _testing_identity_resolver(event) -> Optional[Identity]:
+    return _acting_identity.get()
+
+
+def _set_extras(event: dict, extras: Mapping[str, object]) -> None:
+    from fymo.auth.context import _EXTRAS_KEY
+
+    event[_EXTRAS_KEY] = MappingProxyType(dict(extras))
 
 
 @contextmanager
 def signed_in(
-    user: Optional[User] = None,
+    uid: str = "u_test1",
     *,
-    uid: Optional[str] = None,
-    environ: Optional[dict] = None,
-) -> Iterator[User]:
+    extras: Optional[Mapping[str, object]] = None,
+) -> Iterator[Identity]:
     """Simulate an authenticated caller for the duration of the block.
 
-    Registers a session resolver (the exact mechanism providers use, see
-    fymo.auth.context.register_session_resolver) that resolves to `user`,
-    and opens a remote-function request scope so current_user(),
-    current_uid(), and request_event() all work. Yields the user; pass one
-    from make_user() to customize it, or omit it for a default.
+    Registers an identity resolver through the @identify chain (the exact
+    seam app resolvers use, see fymo.auth.identity) that resolves to
+    Identity(uid=uid), and opens a request scope so current_uid() and
+    request_event() work. Yields the Identity.
 
-    The uid rule: identity is user plus uid, and the uid follows the user.
-    It defaults to "u_test{user.id}" so two different users never share a
-    uid (uid-keyed app data, like reaction rows, stays isolated per user
-    the way it would be for real browsers); pass `uid` explicitly when a
-    test cares about the exact value. `environ` is a WSGI-shaped dict for
-    tests that need specific headers or cookies visible to resolvers.
+    `extras` populates identity_extras() for the scope, standing in for the
+    app's extras hooks; identity_extras() returns them read-only, exactly as
+    it would the merged hook output on a real request.
 
-    On exit the resolver is removed and the scope closed, leaving the
-    resolver registry exactly as it was found.
+    On exit the scope is closed and the resolver chain is restored to the
+    snapshot taken at entry, so back-to-back blocks and pre-registered app
+    resolvers are never disturbed.
     """
-    from fymo.auth import context as auth_context
-    from fymo.remote.context import request_scope
+    from fymo.auth import identity as auth_identity
+    from fymo.remote.context import _current_event, request_scope
 
-    if user is None:
-        user = make_user()
-    if uid is None:
-        uid = _uid_for(user)
-    auth_context.register_session_resolver(_testing_resolver)
-    token = _acting_user.set(user)
+    ident = Identity(uid=uid)
+    prior_chain = auth_identity.registered_identity_resolvers()
+    auth_identity.identify(_testing_identity_resolver)
+    token = _acting_identity.set(ident)
     try:
-        with request_scope(uid=uid, environ=dict(environ or {})):
-            yield user
+        with request_scope(uid=uid, environ={}):
+            if extras is not None:
+                _set_extras(_current_event.get(), extras)
+            yield ident
     finally:
-        _acting_user.reset(token)
-        try:
-            auth_context._session_resolvers.remove(_testing_resolver)
-        except ValueError:
-            pass  # reset_session_resolvers() already dropped it mid-block
+        _acting_identity.reset(token)
+        auth_identity.reset_identity_resolvers()
+        for resolver in prior_chain:
+            auth_identity.identify(resolver)
 
 
 @contextmanager
-def acting_as(user: User, *, uid: Optional[str] = None) -> Iterator[User]:
-    """Swap the resolved identity to `user` for the duration of the block.
+def acting_as(
+    uid: str,
+    *,
+    extras: Optional[Mapping[str, object]] = None,
+) -> Iterator[Identity]:
+    """Swap the resolved identity to Identity(uid=uid) for the block.
 
-    Swaps the FULL identity: current_user() resolves to `user`, and the
-    request scope's uid (what current_uid() returns) follows the same rule
-    as signed_in, defaulting to "u_test{user.id}" unless `uid` is given.
-    Swapping only the user would let uid-keyed app data leak between the
-    two identities, a false pass for exactly the authorization tests this
-    API exists for.
+    Swaps the full identity: current_uid() resolves to `uid` (the per-scope
+    resolution cache is invalidated so the swap wins even after the outer
+    identity already resolved), and identity_extras() follows the new
+    identity: it returns `extras` when given and is empty otherwise, never
+    the enclosing identity's extras. Leaking the outer extras would be a
+    false pass for exactly the authorization tests this API exists for.
 
-    Must be entered inside a signed_in() block; the previously signed-in
-    user and uid are restored on exit, even when the block raises. Nests
-    freely: each exit restores the identity of the enclosing block.
+    Must be entered inside a signed_in() block; the enclosing identity,
+    cached resolution, and extras are restored on exit, even when the block
+    raises. Nests freely: each exit restores the enclosing block's identity.
     """
+    from fymo.auth.context import _EXTRAS_KEY
+    from fymo.auth.identity import _RESOLUTION_KEY
     from fymo.remote.context import _current_event
 
-    if _acting_user.get() is None:
+    if _acting_identity.get() is None:
         raise RuntimeError(
             "acting_as() requires an enclosing signed_in() block; "
             "wrap the test body in `with signed_in(...):` first"
         )
     event = _current_event.get()
+    ident = Identity(uid=uid)
     prior_uid = event["uid"]
-    token = _acting_user.set(user)
-    event["uid"] = uid if uid is not None else _uid_for(user)
+    prior_resolution = event.pop(_RESOLUTION_KEY, _MISSING)
+    prior_extras = event.pop(_EXTRAS_KEY, _MISSING)
+    token = _acting_identity.set(ident)
+    event["uid"] = uid
+    if extras is not None:
+        _set_extras(event, extras)
     try:
-        yield user
+        yield ident
     finally:
+        _acting_identity.reset(token)
         event["uid"] = prior_uid
-        _acting_user.reset(token)
+        if prior_resolution is _MISSING:
+            event.pop(_RESOLUTION_KEY, None)
+        else:
+            event[_RESOLUTION_KEY] = prior_resolution
+        if prior_extras is _MISSING:
+            event.pop(_EXTRAS_KEY, None)
+        else:
+            event[_EXTRAS_KEY] = prior_extras
 
 
 # --------------- provider bootstrap ---------------
@@ -256,25 +244,3 @@ def init_providers(project_root: Path) -> Iterator[SimpleNamespace]:
         with broadcast_mod._lock:
             broadcast_mod._provider = prior_broadcast_provider
             broadcast_mod._channels = prior_broadcast_channels
-
-
-# --------------- optional pytest fixtures ---------------
-#
-# fymo does not depend on pytest at runtime, so the fixtures only exist
-# when pytest is importable. Everything above stays plain context managers
-# usable from any test runner.
-
-try:
-    import pytest as _pytest
-except ImportError:  # pragma: no cover
-    _pytest = None
-
-if _pytest is not None:
-    __all__.append("signed_in_user")
-
-    @_pytest.fixture
-    def signed_in_user() -> Iterator[User]:
-        """A default signed-in user for the whole test. Re-export from your
-        conftest.py: `from fymo.testing import signed_in_user  # noqa: F401`"""
-        with signed_in() as user:
-            yield user

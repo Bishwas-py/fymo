@@ -28,11 +28,14 @@ def test_init_scaffolds_app_support_dir_with_init(tmp_path: Path, monkeypatch):
 def test_init_and_new_scaffold_byte_identical_fymo_yml(tmp_path: Path, monkeypatch):
     """`fymo new <name>` and `fymo init` (run inside a directory named
     <name>) must produce byte-identical fymo.yml files for the same
-    project name -- the two commands share one scaffold now."""
+    project name, since the two commands share one scaffold now. Compared
+    against `fymo new --no-auth`: the default `fymo new` additionally
+    scaffolds password auth, whose signin route entry init (an existing
+    project, no auth generation) deliberately does not get."""
     new_root = tmp_path / "new_root"
     new_root.mkdir()
     monkeypatch.chdir(new_root)
-    create_project("sample_app")
+    create_project("sample_app", auth=False)
     new_fymo_yml = (new_root / "sample_app" / "fymo.yml").read_text()
 
     init_root = tmp_path / "sample_app"

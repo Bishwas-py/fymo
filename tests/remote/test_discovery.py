@@ -2,7 +2,6 @@
 import sys
 from pathlib import Path
 import pytest
-from fymo.core.exceptions import ConfigurationError
 from fymo.remote.discovery import discover_remote_modules, RemoteFunction
 
 
@@ -136,16 +135,3 @@ def test_module_hash_changes_with_source(tmp_path: Path):
                 del sys.modules[name]
 
 
-def test_auth_enabled_string_false_from_interpolation_stays_off(tmp_path: Path):
-    """Regression for issue #30: auth.enabled: ${VAR} interpolates to the
-    plain string "false". A bare truthy check would treat that as on and
-    build auth provider remote modules nobody asked for. No app/remote/
-    directory needed here, an empty result proves the auth branch was
-    never entered (see test_returns_empty_when_no_remote_dir above for the
-    same no-directory baseline)."""
-    assert discover_remote_modules(tmp_path, auth_config={"enabled": "false"}) == {}
-
-
-def test_auth_enabled_raises_configuration_error_on_garbage(tmp_path: Path):
-    with pytest.raises(ConfigurationError, match="auth.enabled"):
-        discover_remote_modules(tmp_path, auth_config={"enabled": "enabeld"})

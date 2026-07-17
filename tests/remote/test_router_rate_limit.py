@@ -18,6 +18,7 @@ from fymo.remote.rate_limit import reset_rate_limit_state
 
 
 MODULE_SRC = (
+    "from fymo.auth import current_uid\n"
     "from fymo.remote import rate_limit\n"
     "@rate_limit(per_minute=2)\n"
     "def pricey() -> str: return 'paid'\n"
@@ -26,6 +27,8 @@ MODULE_SRC = (
     "def per_uid() -> str: return 'uid-scoped'\n"
     "@rate_limit(per_minute=1, scope='user')\n"
     "def per_user() -> str: return 'user-scoped'\n"
+    "@rate_limit(per_minute=5, scope='user')\n"
+    "def whoami() -> str: return current_uid() or 'anon'\n"
 )
 
 
@@ -242,38 +245,7 @@ def test_uid_scope_ignores_forged_cookie(limited_project):
 # ---------------- user scope ----------------
 
 
-@pytest.fixture
-def user_store(tmp_path, monkeypatch):
-    from fymo.auth import context as auth_context
-    from fymo.auth.store import SqliteUserStore
-    store = SqliteUserStore(project_root=tmp_path)
-    monkeypatch.setattr(auth_context, "_user_store", store)
-    yield store
-
-
-def _session_cookie(user) -> str:
-    from fymo.auth.session import make_session_token
-    return f"fymo_session={make_session_token(user.id, user.session_epoch)}"
-
-
-def test_user_scope_keys_on_authenticated_user(limited_project, user_store):
-    _, h = limited_project
-    alice = user_store.create("alice@x.com", None)
-    bob = user_store.create("bob@x.com", None)
-
-    (_, _), first = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(alice)))
-    assert first["type"] == "result"
-    (_, _), blocked = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(alice)))
-    assert blocked["status"] == 429
-    # Same IP, different signed-in user: fresh bucket.
-    (_, _), other = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(bob)))
-    assert other["type"] == "result"
-
-
-def test_user_scope_falls_back_to_uid_when_unauthenticated(limited_project, user_store):
+def test_user_scope_falls_back_to_uid_when_unauthenticated(limited_project):
     _, h = limited_project
     alice, bob = _uid_cookie("u_anon1"), _uid_cookie("u_anon2")
     (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=alice))
@@ -285,13 +257,209 @@ def test_user_scope_falls_back_to_uid_when_unauthenticated(limited_project, user
 
 
 def test_user_scope_falls_back_to_ip_with_no_identity_at_all(limited_project):
-    """No session, no uid cookie, and no user store configured: the limit
-    still binds on IP rather than silently not applying."""
+    """No resolver match and no uid cookie: the limit still binds on IP
+    rather than silently not applying."""
     _, h = limited_project
     (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", []))
     assert first["type"] == "result"
     (_, _), blocked = _call(_make_environ(f"/_fymo/remote/{h}/per_user", []))
     assert blocked["status"] == 429
+
+
+# ---------------- user scope: @identify chain (issue #80) ----------------
+
+
+@pytest.fixture
+def identity_chain():
+    from fymo.auth.identity import reset_identity_resolvers
+    reset_identity_resolvers()
+    yield
+    reset_identity_resolvers()
+
+
+def _keyed_environ(h: str, fn: str, api_key: "str | None" = None, cookies: str = ""):
+    env = _make_environ(f"/_fymo/remote/{h}/{fn}", [], cookies=cookies)
+    if api_key is not None:
+        env["HTTP_X_API_KEY"] = api_key
+    return env
+
+
+def test_user_scope_keys_on_identify_resolver(limited_project, identity_chain):
+    from fymo.auth import Identity, identify
+
+    @identify
+    def by_api_key(event):
+        key = event.headers.get("x-api-key")
+        return Identity(uid=f"key_{key}") if key else None
+
+    _, h = limited_project
+    (_, _), first = _call(_keyed_environ(h, "per_user", api_key="alpha"))
+    assert first["type"] == "result"
+    (_, _), blocked = _call(_keyed_environ(h, "per_user", api_key="alpha"))
+    assert blocked["status"] == 429
+    # Same IP, different resolved identity: fresh bucket.
+    (_, _), other = _call(_keyed_environ(h, "per_user", api_key="beta"))
+    assert other["type"] == "result"
+
+
+def test_user_scope_non_matching_resolver_falls_back_to_uid(limited_project, identity_chain):
+    """With a resolver registered but not matching, the key degrades to the
+    verified fymo_uid tier: the identify chain then fymo_uid then IP."""
+    from fymo.auth import identify
+
+    @identify
+    def never_matches(event):
+        return None
+
+    _, h = limited_project
+    a, b = _uid_cookie("u_anon1"), _uid_cookie("u_anon2")
+    (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
+    assert first["type"] == "result"
+    (_, _), blocked = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
+    assert blocked["status"] == 429
+    (_, _), other = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=b))
+    assert other["type"] == "result"
+
+
+def test_stale_unknown_cookie_falls_back_to_uid_then_ip(limited_project, identity_chain):
+    """A leftover cookie no resolver knows about must not crash and must
+    key on the verified fymo_uid, then IP when that is missing too."""
+    stale = "old_session=1.12345.0.AAAAAAAAAAAAAAAAAAAAAA"
+
+    _, h = limited_project
+    a = f"{stale}; {_uid_cookie('u_anon1')}"
+    b = f"{stale}; {_uid_cookie('u_anon2')}"
+    (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
+    assert first["type"] == "result"
+    (_, _), blocked = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
+    assert blocked["status"] == 429
+    (_, _), other = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=b))
+    assert other["type"] == "result"
+    # No uid cookie either: binds on IP rather than crashing or not applying.
+    (_, _), ip_first = _call(_make_environ(
+        f"/_fymo/remote/{h}/per_user", [], cookies=stale, ip="3.3.3.3"))
+    assert ip_first["type"] == "result"
+    (_, _), ip_blocked = _call(_make_environ(
+        f"/_fymo/remote/{h}/per_user", [], cookies=stale, ip="3.3.3.3"))
+    assert ip_blocked["status"] == 429
+
+
+def test_user_scope_raising_resolver_fails_open_to_next_tier(limited_project, identity_chain):
+    """Fail-open: a resolver crashing during key resolution must not take
+    the request down; the key degrades to the fymo_uid tier instead."""
+    from fymo.auth import identify
+
+    @identify
+    def broken(event):
+        raise RuntimeError("resolver exploded")
+
+    _, h = limited_project
+    a, b = _uid_cookie("u_x1"), _uid_cookie("u_x2")
+    (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
+    assert first["type"] == "result"
+    (_, _), blocked = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
+    assert blocked["status"] == 429
+    (_, _), other = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=b))
+    assert other["type"] == "result"
+
+
+def test_user_scope_raising_resolver_does_not_shadow_later_resolver(limited_project, identity_chain):
+    from fymo.auth import Identity, identify
+
+    @identify
+    def broken(event):
+        raise RuntimeError("resolver exploded")
+
+    @identify
+    def by_api_key(event):
+        key = event.headers.get("x-api-key")
+        return Identity(uid=f"key_{key}") if key else None
+
+    _, h = limited_project
+    (_, _), first = _call(_keyed_environ(h, "per_user", api_key="alpha"))
+    assert first["type"] == "result"
+    (_, _), blocked = _call(_keyed_environ(h, "per_user", api_key="alpha"))
+    assert blocked["status"] == 429
+    (_, _), other = _call(_keyed_environ(h, "per_user", api_key="beta"))
+    assert other["type"] == "result"
+
+
+def test_identify_chain_runs_once_per_request_shared_with_current_uid(limited_project, identity_chain):
+    """Rate-limit key resolution shares current_uid()'s per-request cache:
+    the handler's own current_uid() call must not re-run the chain."""
+    from fymo.auth import Identity, identify
+
+    calls = []
+
+    @identify
+    def counting(event):
+        calls.append(1)
+        return Identity(uid="u_counted")
+
+    _, h = limited_project
+    (_, _), body = _call(_make_environ(f"/_fymo/remote/{h}/whoami", []))
+    assert body["type"] == "result"
+    assert devalue.parse(body["result"]) == "u_counted"
+    assert len(calls) == 1
+
+
+def test_unclean_walk_is_not_cached_handler_stays_fail_loud(limited_project, identity_chain):
+    """Fail-open covers only the rate-limit key. A walk that swallowed a
+    resolver exception is not cached, so current_uid() inside the handler
+    re-runs the chain and keeps its fail-loud contract (500 envelope)."""
+    from fymo.auth import identify
+
+    @identify
+    def broken(event):
+        raise RuntimeError("resolver exploded")
+
+    _, h = limited_project
+    (status, _), body = _call(_make_environ(f"/_fymo/remote/{h}/whoami", []))
+    assert status.startswith("200")
+    assert body["type"] == "error"
+    assert body["status"] == 500
+    assert body["error"] == "internal"
+
+
+def test_user_scope_garbage_resolver_does_not_shadow_later_resolver(limited_project, identity_chain):
+    from fymo.auth import Identity, identify
+
+    @identify
+    def garbage(event):
+        return "not-an-identity"
+
+    @identify
+    def by_api_key(event):
+        key = event.headers.get("x-api-key")
+        return Identity(uid=f"key_{key}") if key else None
+
+    _, h = limited_project
+    (_, _), first = _call(_keyed_environ(h, "per_user", api_key="alpha"))
+    assert first["type"] == "result"
+    (_, _), blocked = _call(_keyed_environ(h, "per_user", api_key="alpha"))
+    assert blocked["status"] == 429
+    (_, _), other = _call(_keyed_environ(h, "per_user", api_key="beta"))
+    assert other["type"] == "result"
+
+
+def test_garbage_return_walk_is_not_cached_handler_stays_fail_loud(limited_project, identity_chain):
+    """The other unclean half: a resolver returning a non-Identity value is
+    skipped for the rate-limit key and the walk is not cached, so the
+    handler's current_uid() re-runs the chain and raises the resolver
+    return-type error (500 envelope). Caching the walk would hand the
+    handler a silent None instead."""
+    from fymo.auth import identify
+
+    @identify
+    def garbage(event):
+        return "not-an-identity"
+
+    _, h = limited_project
+    (status, _), body = _call(_make_environ(f"/_fymo/remote/{h}/whoami", []))
+    assert status.startswith("200")
+    assert body["type"] == "error"
+    assert body["status"] == 500
+    assert body["error"] == "internal"
 
 
 # ---------------- RateLimited raised from app code ----------------

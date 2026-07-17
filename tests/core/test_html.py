@@ -165,3 +165,41 @@ def test_no_layout_css_omits_links():
     )
     assert "stylesheet" not in html
 
+
+
+def test_identity_island_emitted_with_projection_output():
+    """Issue #80 phase 4: the public_identity projection output crosses to
+    the client as its own JSON island, read by $fymo/auth at boot."""
+    assets = RouteAssets(ssr="x", client="x.js", css=None, preload=[])
+    html = build_html(
+        body="", head_extra="", props={}, assets=assets, title="t",
+        identity={"uid": "u42", "name": "Alice"},
+    )
+    assert (
+        '<script type="application/json" id="fymo-identity">'
+        '{"uid": "u42", "name": "Alice"}</script>'
+    ) in html
+
+
+def test_identity_island_null_when_anonymous():
+    """Always emitted, null when anonymous (or when the app has no identity
+    chain), same never-special-case-a-missing-tag rule as route params."""
+    assets = RouteAssets(ssr="x", client="x.js", css=None, preload=[])
+    html = build_html(body="", head_extra="", props={}, assets=assets, title="t")
+    assert '<script type="application/json" id="fymo-identity">null</script>' in html
+
+
+def test_identity_island_is_html_safe():
+    """A uid carrying </script> and quotes must go through the same escape
+    path props use (_safe_json), never a hand-rolled one."""
+    assets = RouteAssets(ssr="x", client="x.js", css=None, preload=[])
+    html = build_html(
+        body="", head_extra="", props={}, assets=assets, title="t",
+        identity={"uid": '</script><script>alert(1)//"', "name": "x&y"},
+    )
+    start = html.index('id="fymo-identity">') + len('id="fymo-identity">')
+    end = html.index('</script>', start)
+    json_block = html[start:end]
+    assert "<" not in json_block, f"unescaped < in JSON block: {json_block!r}"
+    assert ">" not in json_block, f"unescaped > in JSON block: {json_block!r}"
+    assert "&" not in json_block, f"unescaped & in JSON block: {json_block!r}"

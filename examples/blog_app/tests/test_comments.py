@@ -1,7 +1,8 @@
-"""Comment authorship comes from the authenticated session, never from
-client input. fymo.testing simulates the sessions: signed_in() for the
-first caller, acting_as() to switch to a second user mid-test."""
-from fymo.testing import acting_as, make_user, signed_in
+"""Comment authorship comes from the authenticated identity, never from
+client input. fymo.testing simulates the identities: signed_in() for the
+first caller, acting_as() to switch to a second user mid-test; extras
+stand in for the app/auth/extras.py hook that attaches the email."""
+from fymo.testing import acting_as, signed_in
 
 
 def _seed_post(db, slug="hello-world"):
@@ -17,8 +18,7 @@ def test_authenticated_comment_is_attributed_to_the_session_user(db):
     from app.remote.posts import NewComment, create_comment
 
     slug = _seed_post(db)
-    alice = make_user(email="alice@example.com")
-    with signed_in(alice):
+    with signed_in("u_alice", extras={"email": "alice@example.com"}):
         comment = create_comment(slug, input=NewComment(body="first!"))
     assert comment["name"] == "alice"
 
@@ -27,12 +27,10 @@ def test_second_user_cannot_comment_as_the_first(db):
     from app.remote.posts import NewComment, create_comment, get_comments
 
     slug = _seed_post(db)
-    alice = make_user(email="alice@example.com")
-    bob = make_user(email="bob@example.com")
 
-    with signed_in(alice):
+    with signed_in("u_alice", extras={"email": "alice@example.com"}):
         create_comment(slug, input=NewComment(body="alice's take"))
-        with acting_as(bob):
+        with acting_as("u_bob", extras={"email": "bob@example.com"}):
             bobs_comment = create_comment(slug, input=NewComment(body="bob's reply"))
         assert bobs_comment["name"] == "bob"
 
@@ -48,12 +46,10 @@ def test_users_have_isolated_reactions(db):
     from app.remote.posts import toggle_reaction
 
     slug = _seed_post(db)
-    alice = make_user(email="alice@example.com")
-    bob = make_user(email="bob@example.com")
 
-    with signed_in(alice):
+    with signed_in("u_alice"):
         counts = toggle_reaction(slug, "clap")
         assert counts["clap"] == 1
-        with acting_as(bob):
+        with acting_as("u_bob"):
             counts = toggle_reaction(slug, "clap")
         assert counts["clap"] == 2

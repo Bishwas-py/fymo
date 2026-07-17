@@ -59,7 +59,6 @@ class _FakeApp:
         self.router = _FakeRouter()
         self.manifest_cache = _FakeManifestCache()
         self.dev = True
-        self.auth_enabled = False
 
 
 def _register_controller(getContext):

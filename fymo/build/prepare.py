@@ -19,21 +19,25 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from fymo.auth.codegen import emit_identity_client
 from fymo.broadcast.codegen import emit_broadcast_client
 from fymo.build.composition_generator import generate_ssr_tree
 from fymo.build.discovery import discover_routes, discover_all_layouts
 from fymo.build.entry_generator import write_client_entries
 from fymo.build.hygiene import (
     check_auth_enforcement_hygiene,
+    check_auth_key_removed,
     check_directory_hygiene,
     check_global_css_migration,
     check_lib_directory_warnings,
     check_media_key_removed,
+    check_page_auth_hygiene,
     check_remote_exposure_hygiene,
     check_storage_required_for_expose,
     check_template_css_hygiene,
     format_auth_enforcement_error,
     format_hygiene_error,
+    format_page_auth_error,
     format_remote_exposure_error,
 )
 from fymo.build.manifest import RemoteModuleAssets
@@ -157,21 +161,28 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     if media_violations:
         raise BuildError("\n".join(media_violations))
 
+    auth_key_violations = check_auth_key_removed(project_root)
+    if auth_key_violations:
+        raise BuildError("\n".join(auth_key_violations))
+
     storage_violations = check_storage_required_for_expose(project_root)
     if storage_violations:
         raise BuildError("\n".join(storage_violations))
 
-    # Same `auth:` section discover_remote_modules reads below, read once
-    # here too so both calls agree on it.
-    auth_config = read_yaml_section(project_root, "auth")
+    # Runs for both `fymo build` and `fymo dev`, unlike the dev-lenient
+    # check_auth_enforcement_hygiene below -- see check_page_auth_hygiene's
+    # docstring for why route-level require_auth gets no dev leniency.
+    page_auth_violations = check_page_auth_hygiene(project_root)
+    if page_auth_violations:
+        raise BuildError(format_page_auth_error(page_auth_violations))
 
     # Build-only, same as the "no routes" check further down (issue #29):
-    # @require_auth shipped with auth off or zero active providers means
-    # nobody can ever authenticate against that endpoint, but during `fymo
-    # dev` an app is routinely mid-setup (auth not wired up yet), so this
-    # only fails a real `fymo build`, not local dev.
+    # @require_auth shipped with zero @identify resolvers means nobody can
+    # ever authenticate against that endpoint, but during `fymo dev` an app
+    # is routinely mid-setup (app/auth/ not written yet), so this only
+    # fails a real `fymo build`, not local dev.
     if not dev:
-        auth_enforcement_violations = check_auth_enforcement_hygiene(project_root, auth_config)
+        auth_enforcement_violations = check_auth_enforcement_hygiene(project_root)
         if auth_enforcement_violations:
             raise BuildError(format_auth_enforcement_error(auth_enforcement_violations))
 
@@ -204,12 +215,8 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     if _added:
         sys.path.insert(0, project_root_str)
     try:
-        # When auth is enabled, the active providers' remote functions (e.g.
-        # password's signup/login/logout/me under `auth`) ship as part of the
-        # normal manifest -- discovered from the providers, not hardcoded.
         remote_modules = discover_remote_modules(
             project_root,
-            auth_config=auth_config,
             remote_config=remote_config,
         )
     except ValueError as e:
@@ -234,6 +241,10 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
 
     # Codegen for app/broadcasts/*.py -- dist/client/_broadcast/<name>.{js,d.ts}
     emit_broadcast_client(project_root, dist_dir)
+
+    # The $fymo/auth identity store, emitted at dist/client/_fymo/auth.{js,d.ts}.
+    # Unconditional: every generated client entry imports it (issue #80).
+    emit_identity_client(dist_dir)
 
     remote_assets: dict[str, RemoteModuleAssets] = {}
     for module_name, fns in remote_modules.items():

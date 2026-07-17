@@ -4,12 +4,11 @@ Both the full-page render (`template_renderer.TemplateRenderer._load_controller_
 and the soft-nav data endpoint (`soft_nav.handle_data`, serving
 `GET /_fymo/data/<path>`) need to do the exact same thing: import a
 controller module, call its `getContext(**accepted_params)` and `getDoc()`,
-and -- when auth is enabled -- do so inside the same read-only request scope
-that lets `current_user()` resolve the session cookie, mirroring the scope
-remote functions get.
+inside the same read-only request scope that lets `current_uid()` resolve
+the request's identity, mirroring the scope remote functions get.
 
 Previously each call site re-implemented this by hand, and the soft-nav path
-was built without the request-scope wrapping, so `current_user()` worked
+was built without the request-scope wrapping, so identity resolution worked
 during a full page load but raised `RuntimeError` (-> 500 controller_failed)
 on every soft-nav transition, which is fymo's default navigation mode. This
 module is the single implementation both paths call so they can't drift
@@ -22,36 +21,35 @@ from contextlib import nullcontext
 from typing import Any, Dict, List, Tuple
 
 
-def ssr_request_scope(auth_enabled: bool, environ: dict | None):
+def ssr_request_scope(environ: dict | None):
     """Context manager opened around getContext()/getDoc() during SSR/soft-nav.
 
-    When auth is enabled and a request environ is available, this opens the
-    same `request_scope` remote functions use, so `current_user()` and
-    `request_event()` resolve inside a controller exactly like they would
-    from a remote call -- this is what removes the logged-out flash (both
-    the full-page render and the soft-nav data endpoint can return
-    user-aware props instead of always rendering logged-out and waiting for
-    client hydration to fix it up).
+    When a request environ is available, this opens the same `request_scope`
+    remote functions use, so `current_uid()` and `request_event()` resolve
+    inside a controller exactly like they would from a remote call. This
+    is what removes the logged-out flash (both the full-page render and the
+    soft-nav data endpoint can return identity-aware props instead of always
+    rendering logged-out and waiting for client hydration to fix it up).
 
     Deliberately read-only: unlike the remote router, this does NOT call
     start_auth_scope()/consume_pending_cookies(). Both call sites serve a
-    GET, not a login/signup POST -- there is nothing to set a cookie for,
-    and current_user() only reads `_current_event`, so the cookie-queue
+    GET, not a login POST: there is nothing to set a cookie for, and
+    current_uid() only reads `_current_event`, so the cookie-queue
     machinery is unnecessary here.
 
-    A no-op nullcontext() when auth is disabled or no environ was threaded
-    down (e.g. render_template() called directly without one, as some
-    existing tests do) -- behavior-preserving for apps that don't use auth
-    and for direct callers.
+    A no-op nullcontext() when no environ was threaded down (e.g.
+    render_template() called directly without one, as some existing tests
+    do), current_uid() then raises its outside-a-scope RuntimeError, the
+    same answer a remote function called outside a request gets.
     """
-    if not auth_enabled or environ is None:
+    if environ is None:
         return nullcontext()
     from fymo.remote.identity import _ensure_uid
     from fymo.remote.context import request_scope
 
     # Set-Cookie is discarded: neither call site issues a fresh fymo_uid
     # cookie (only the remote/router path does), we only need the uid value
-    # to build the same RequestEvent shape current_user() expects.
+    # to build the same RequestEvent shape resolvers expect.
     uid, _set_cookie = _ensure_uid(environ)
     return request_scope(uid=uid, environ=environ)
 
@@ -59,19 +57,18 @@ def ssr_request_scope(auth_enabled: bool, environ: dict | None):
 def load_controller_context(
     controller: Any,
     params: dict | None,
-    auth_enabled: bool,
     environ: dict | None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Call controller.getContext(**accepted)/getDoc(), scoped for auth.
+    """Call controller.getContext(**accepted)/getDoc(), inside a request scope.
 
     `accepted` is `params` filtered down to the keyword names getContext's
     signature actually declares, same convention route params have always
-    used. Wrapped in `ssr_request_scope(...)` so current_user() works
+    used. Wrapped in `ssr_request_scope(...)` so current_uid() works
     identically whether the caller is the full-page renderer or the
     soft-nav data endpoint.
     """
     params = params or {}
-    with ssr_request_scope(auth_enabled, environ):
+    with ssr_request_scope(environ):
         props: Dict[str, Any] = {}
         getContext = getattr(controller, "getContext", None)
         if callable(getContext):
@@ -90,12 +87,11 @@ def load_controller_context(
 def load_layout_props_and_docs(
     layout_chain,
     params: dict | None,
-    auth_enabled: bool,
     environ: dict | None,
 ) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
     """Invoke each layout's controller (if any) the same way leaf controllers
     are invoked, via load_controller_context() -- same accepted-params
-    filtering, same ssr_request_scope wrapping, so current_user() resolves
+    filtering, same ssr_request_scope wrapping, so current_uid() resolves
     identically in a layout as it does in a page controller or a remote
     function.
 
@@ -117,7 +113,7 @@ def load_layout_props_and_docs(
         if ref.controller_module is None:
             continue
         controller = importlib.import_module(ref.controller_module)
-        props, doc = load_controller_context(controller, params, auth_enabled, environ)
+        props, doc = load_controller_context(controller, params, environ)
         props_by_level[ref.level] = props
         docs_in_order.append(doc)
     return props_by_level, docs_in_order

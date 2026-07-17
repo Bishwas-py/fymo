@@ -11,7 +11,7 @@ _current_event: ContextVar[dict | None] = ContextVar("_current_event", default=N
 # proxy that overwrites the header. Installed once by FymoApp.__init__ from
 # middleware.rate_limit_config.trust_proxy — the remote-function world has no
 # FymoApp reference, so a module-level seam is how the flag gets here. Same
-# pattern as identity._secret / auth_context._user_store.
+# pattern as identity._secret.
 _trust_proxy: bool = False
 
 
@@ -60,6 +60,12 @@ def request_scope(uid: str, environ: dict):
         "headers": headers,
         "scheme": resolve_scheme(environ, _trust_proxy),
     }
+    # Identity resolution that ran before this scope opened (rate-limit key
+    # resolution) caches its outcome on the environ; seed the event cache
+    # from it so current_uid() does not re-run the resolver chain.
+    from fymo.auth.identity import ENVIRON_RESOLUTION_KEY, _RESOLUTION_KEY
+    if ENVIRON_RESOLUTION_KEY in environ:
+        payload[_RESOLUTION_KEY] = environ[ENVIRON_RESOLUTION_KEY]
     token = _current_event.set(payload)
     try:
         yield

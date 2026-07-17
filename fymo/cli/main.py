@@ -19,10 +19,17 @@ def cli():
 @cli.command()
 @click.argument('name')
 @click.option('--template', '-t', default='default', help='Project template to use')
-def new(name, template):
-    """Create a new Fymo project"""
+@click.option('--no-auth', is_flag=True, default=False,
+              help='Skip the default password auth scaffold (app/auth/, /signin page)')
+def new(name, template, no_auth):
+    """Create a new Fymo project.
+
+    The default scaffold includes working password auth: app/auth/,
+    app/remote/auth.py, and a signin page at /signin, ready after
+    `fymo dev`. Use --no-auth for apps bringing their own identity.
+    """
     from fymo.cli.commands.new import create_project
-    create_project(name, template)
+    create_project(name, template, auth=not no_auth)
 
 
 @cli.command()
@@ -61,6 +68,26 @@ def dev_cmd(host, port):
     """Start dev server with file watcher."""
     from fymo.cli.commands.dev import run_dev
     run_dev(host=host, port=port)
+
+
+@cli.group()
+def generate():
+    """Generate app-owned code into the current project."""
+    pass
+
+
+@generate.command(name="auth")
+@click.option('--clerk', is_flag=True, default=False,
+              help='Clerk JWT resolver; the app adds pyjwt[crypto] to its own dependencies')
+@click.option('--skeleton', is_flag=True, default=False,
+              help='Bare resolver stub returning None; build your own mechanism')
+def generate_auth_cmd(clerk, skeleton):
+    """Scaffold app-owned auth into app/auth/ (password login by default)."""
+    if clerk and skeleton:
+        raise click.UsageError("--clerk and --skeleton are mutually exclusive")
+    from fymo.cli.commands.generate_auth import generate_auth
+    variant = 'clerk' if clerk else 'skeleton' if skeleton else 'password'
+    generate_auth(variant)
 
 
 @cli.group()

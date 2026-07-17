@@ -36,7 +36,7 @@ def test_create_comment_rejects_anonymous_users(blog_on_path):
     from app.remote.posts import create_comment, NewComment
     from fymo.auth.context import AuthRequired
 
-    # request scope with no fymo_session cookie => current_user() is None.
+    # request scope with no resolvable identity => current_uid() is None.
     with request_scope(uid="u_anon", environ={}):
         with pytest.raises(AuthRequired):
             create_comment("welcome-to-fymo", NewComment(body="hello"))
