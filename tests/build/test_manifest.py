@@ -26,7 +26,7 @@ def test_atomic_write_via_rename(tmp_path: Path):
     assert out.exists()
     assert not (tmp_path / "manifest.json.tmp").exists()
     data = json.loads(out.read_text())
-    assert data["version"] == 2
+    assert data["version"] == 3
     assert data["routes"]["home"]["ssr"] == "ssr/home.mjs"
 
 
@@ -100,26 +100,36 @@ def test_route_assets_defaults_have_no_layout_chain(tmp_path: Path):
     assert loaded.routes["home"].uses_layout_shell is False
 
 
-def test_manifest_layouts_and_global_css_roundtrip(tmp_path: Path):
+def test_manifest_layouts_roundtrip(tmp_path: Path):
     from fymo.build.manifest import Manifest, RouteAssets, LayoutAssets
     m = Manifest(
         routes={"home": RouteAssets(ssr="ssr/home.mjs", client="client/home.A.js", css=None, preload=[])},
         layouts={"_root": LayoutAssets(client="client/_layout-_root.H1.js", css="client/_layout-_root.H1.css")},
-        global_css="client/global.G1.css",
     )
     out = tmp_path / "manifest.json"
     m.write(out)
     loaded = Manifest.read(out)
     assert loaded == m
     assert loaded.layouts["_root"].client == "client/_layout-_root.H1.js"
-    assert loaded.global_css == "client/global.G1.css"
+    assert loaded.layouts["_root"].css == "client/_layout-_root.H1.css"
 
 
-def test_manifest_layouts_and_global_css_optional(tmp_path: Path):
+def test_manifest_layouts_optional(tmp_path: Path):
     from fymo.build.manifest import Manifest, RouteAssets
     m = Manifest(routes={"home": RouteAssets(ssr="ssr/home.mjs", client="client/home.A.js", css=None, preload=[])})
     out = tmp_path / "manifest.json"
     m.write(out)
     loaded = Manifest.read(out)
     assert loaded.layouts == {}
-    assert loaded.global_css is None
+
+
+def test_manifest_has_no_global_css_field(tmp_path: Path):
+    """Issue #77 removed the _global.css special case; the manifest must not
+    carry (or accept) the field at all."""
+    from fymo.build.manifest import Manifest, RouteAssets
+    m = Manifest(routes={"home": RouteAssets(ssr="ssr/home.mjs", client="client/home.A.js", css=None, preload=[])})
+    out = tmp_path / "manifest.json"
+    m.write(out)
+    data = json.loads(out.read_text())
+    assert "global_css" not in data
+    assert not hasattr(Manifest.read(out), "global_css")

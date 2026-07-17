@@ -150,3 +150,52 @@ def test_check_lib_directory_warnings_does_not_affect_hard_errors(tmp_path: Path
     soft_warnings = check_lib_directory_warnings(tmp_path)
     assert len(soft_warnings) == 1
     assert "app/lib/oops.py" in soft_warnings[0]
+
+
+def test_css_file_in_templates_is_a_violation(tmp_path: Path):
+    """Issue #77: stylesheets live in app/assets/. A loose .css anywhere
+    under app/templates/ is a hard build error naming the move."""
+    from fymo.build.hygiene import check_template_css_hygiene
+
+    (tmp_path / "app" / "templates" / "admin").mkdir(parents=True)
+    (tmp_path / "app" / "templates" / "foo.css").write_text("p {}")
+    (tmp_path / "app" / "templates" / "admin" / "bar.css").write_text("p {}")
+
+    violations = check_template_css_hygiene(tmp_path)
+    assert violations == [
+        "stylesheets live in app/assets/, found app/templates/admin/bar.css",
+        "stylesheets live in app/assets/, found app/templates/foo.css",
+    ]
+
+
+def test_css_in_app_assets_is_not_a_violation(tmp_path: Path):
+    from fymo.build.hygiene import check_template_css_hygiene
+
+    (tmp_path / "app" / "assets").mkdir(parents=True)
+    (tmp_path / "app" / "assets" / "app.css").write_text("body {}")
+    (tmp_path / "app" / "templates").mkdir(parents=True)
+
+    assert check_template_css_hygiene(tmp_path) == []
+
+
+def test_global_css_gets_the_migration_error_not_the_generic_ban(tmp_path: Path):
+    """app/templates/_global.css was the auto-injected magic filename; it
+    gets its own migration message with the exact fix, verbatim, instead of
+    the generic stylesheets-live-in-app/assets/ line."""
+    from fymo.build.hygiene import check_global_css_migration, check_template_css_hygiene
+
+    (tmp_path / "app" / "templates").mkdir(parents=True)
+    (tmp_path / "app" / "templates" / "_global.css").write_text("body {}")
+
+    assert check_global_css_migration(tmp_path) == (
+        "Error: _global.css is no longer auto-injected. Move it to app/assets/app.css\n"
+        "and add `import '../assets/app.css'` to app/templates/_layout.svelte."
+    )
+    assert check_template_css_hygiene(tmp_path) == []
+
+
+def test_no_global_css_no_migration_error(tmp_path: Path):
+    from fymo.build.hygiene import check_global_css_migration
+
+    (tmp_path / "app" / "templates").mkdir(parents=True)
+    assert check_global_css_migration(tmp_path) is None

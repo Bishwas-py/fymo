@@ -246,6 +246,15 @@ class TemplateRenderer:
         # Prepend Svelte's own <head> output
         head_extra = (ssr["head"] or "") + head_extra
 
+        # Union of the layout chain's CSS in chain order (root first, then
+        # resource) -- each layout imports only what it adds, nesting
+        # inherits the rest.
+        layout_css = []
+        for ref in assets.layout_chain:
+            layout_asset = manifest.layouts.get(ref.id)
+            if layout_asset is not None and layout_asset.css:
+                layout_css.append(layout_asset.css)
+
         html = build_html(
             body=ssr["body"],
             head_extra=head_extra,
@@ -254,7 +263,7 @@ class TemplateRenderer:
             title=title,
             doc=doc_meta,
             disabled_soft_nav=self.router.disabled_soft_nav_resources(),
-            global_css=manifest.global_css,
+            layout_css=layout_css,
             params=params,
             identity=identity,
         )

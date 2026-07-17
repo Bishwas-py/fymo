@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
-MANIFEST_VERSION = 2
+MANIFEST_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,6 @@ class Manifest:
     build_time: str = ""
     remote_modules: Dict[str, RemoteModuleAssets] = field(default_factory=dict)
     layouts: Dict[str, LayoutAssets] = field(default_factory=dict)
-    global_css: Optional[str] = None
 
     def write(self, path: Path) -> None:
         data = {
@@ -55,7 +54,6 @@ class Manifest:
             "routes": {name: asdict(r) for name, r in self.routes.items()},
             "remote_modules": {name: asdict(m) for name, m in self.remote_modules.items()},
             "layouts": {name: asdict(l) for name, l in self.layouts.items()},
-            "global_css": self.global_css,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
@@ -99,5 +97,4 @@ class Manifest:
             build_time=data.get("buildTime", ""),
             remote_modules=remote_modules,
             layouts=layouts,
-            global_css=data.get("global_css"),
         )

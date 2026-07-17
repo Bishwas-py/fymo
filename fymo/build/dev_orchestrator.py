@@ -24,7 +24,6 @@ class DevOrchestrator:
         self._latest_metafile: Optional[dict] = None
         self._routes = []
         self._all_layouts = []
-        self._has_global_css = False
         self._remote_assets: dict[str, RemoteModuleAssets] = {}
 
     def add_listener(self, fn: Callable[[dict], None]) -> None:
@@ -44,7 +43,6 @@ class DevOrchestrator:
 
         self._routes = config.routes
         self._all_layouts = config.all_layouts
-        self._has_global_css = config.has_global_css
         self._remote_assets = config.remote_assets
 
         dev_config = {
@@ -102,13 +100,12 @@ class DevOrchestrator:
             return
         outputs = self._latest_metafile.get("outputs", {})
 
-        route_assets, layout_assets, global_css_out = match_esbuild_outputs(
+        route_assets, layout_assets = match_esbuild_outputs(
             client_outputs=outputs,
             routes=self._routes,
             all_layouts=self._all_layouts,
             project_root=self.project_root,
             dist_dir=self.dist_dir,
-            has_global_css=self._has_global_css,
         )
 
         # Lenient by design (unlike BuildPipeline's strict BuildError): a
@@ -122,5 +119,4 @@ class DevOrchestrator:
                 build_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 remote_modules=self._remote_assets,
                 layouts=layout_assets,
-                global_css=global_css_out,
             ).write(self.dist_dir / "manifest.json")

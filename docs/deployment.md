@@ -500,7 +500,7 @@ storage:
 ```
 
 `prefix` is matched against the request path the same way fymo's own
-`/dist/` and `/assets/` routes are (a path prefix, not a template). `dir`
+`/dist/` and `/static/` routes are (a path prefix, not a template). `dir`
 is resolved relative to the storage root (`storage.root`, which defaults
 to the project root when unset), so the entry above serves files a job
 wrote via `get_storage_provider().write("videos/...", data)`. `extensions`

@@ -104,6 +104,55 @@ def check_storage_required_for_expose(project_root: Path) -> List[str]:
     return []
 
 
+def check_global_css_migration(project_root: Path) -> "str | None":
+    """The app/templates/_global.css magic filename (auto-detected, bundled
+    as its own entry, linked on every page) was deleted by issue #77 in
+    favor of layouts importing their CSS explicitly. Deleted, not
+    deprecated: a project still shipping the file would otherwise build
+    fine and silently lose its global styles, so it fails the build with
+    the exact fix instead.
+
+    Checks exists(), not is_file(): a directory literally named _global.css
+    (a bad merge, a stray mkdir) is exists()-true but is_file()-false, and
+    an is_file() check would let it through silently -- the same
+    silent-missing-styles failure this whole check exists to prevent, just
+    reached through an edge case. rglob("*.css") in
+    check_template_css_hygiene below never descends into a directory named
+    _global.css either (its contents wouldn't end in .css by virtue of the
+    parent's name), so this exists() check is the only thing that can catch
+    the directory case at all."""
+    if (project_root / "app" / "templates" / "_global.css").exists():
+        return (
+            "Error: _global.css is no longer auto-injected. Move it to app/assets/app.css\n"
+            "and add `import '../assets/app.css'` to app/templates/_layout.svelte."
+        )
+    return None
+
+
+def check_template_css_hygiene(project_root: Path) -> List[str]:
+    """Return one violation per loose .css file under app/templates/ (issue
+    #77): stylesheets are build inputs and live in app/assets/, imported
+    from a layout or component; app/templates/ holds .svelte files only.
+    `<style>` blocks inside .svelte files are Svelte's component styling
+    and none of this check's business. A real _global.css FILE is skipped
+    here because check_global_css_migration above (called first, see
+    prepare.py) already owns it with a more specific message; the
+    is_file() guard on the skip means a directory named _global.css is
+    never accidentally exempted from this generic ban either -- it just
+    never matches the "*.css" glob in the first place, so the migration
+    check above is what actually catches it."""
+    violations: List[str] = []
+    templates_dir = project_root / "app" / "templates"
+    if templates_dir.is_dir():
+        for f in sorted(templates_dir.rglob("*.css")):
+            if f == templates_dir / "_global.css" and f.is_file():
+                continue
+            violations.append(
+                f"stylesheets live in app/assets/, found {f.relative_to(project_root)}"
+            )
+    return violations
+
+
 def format_hygiene_error(violations: List[str]) -> str:
     bullet_list = "\n".join(f"  - {v}" for v in violations)
     return (

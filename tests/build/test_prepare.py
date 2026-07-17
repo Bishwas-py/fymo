@@ -329,8 +329,9 @@ def test_prepare_build_config_reflects_blog_app_facts(blog_app: Path):
     assert "_layout-_root" in config.client_entries
     assert "_layout-posts" in config.client_entries
 
-    global_css_path = blog_app / "app" / "templates" / "_global.css"
-    assert config.has_global_css == global_css_path.is_file()
+    # The _global.css magic is gone (issue #77): no _global client entry,
+    # ever. Layout-imported CSS rides the _layout-* entries instead.
+    assert "_global" not in config.client_entries
 
     # Every route with a layout chain gets a composed `.tree.svelte` SSR
     # entry point living in cache_dir; routes without one fall back to the

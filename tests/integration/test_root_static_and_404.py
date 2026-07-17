@@ -1,8 +1,10 @@
-"""Root-static allowlist + built-in 404 through the full WSGI dispatch (issue #75).
+"""Root-static allowlist, /static/ serving, + built-in 404 through the full
+WSGI dispatch (issues #75, #77).
 
 Precedence pinned here: app raw routes (app/routes.py) win over the root
 allowlist, which wins over the built-in 404. Unknown routes are a 404 with
-a mode-appropriate body, never a 500.
+a mode-appropriate body, never a 500. app/static/ files serve at /static/;
+/assets/ no longer exists and falls through to the 404 path.
 """
 import io
 import shutil
@@ -131,11 +133,56 @@ def test_well_known_prefix_maps_to_app_static(built_app, prod_app):
 
 def test_allowlist_is_not_an_open_root_directory(built_app, prod_app):
     """Only the fixed well-known names are served at /; arbitrary files in
-    app/static keep requiring the /assets/ prefix."""
+    app/static keep requiring the /static/ prefix."""
     (built_app / "app" / "static" / "notes.txt").write_text("not for root serving")
     status, _, body = _get(prod_app, "/notes.txt")
     assert status == "404 NOT FOUND"
     assert b"not for root serving" not in body
+
+
+# Real woff2 magic + invalid UTF-8, same convention as ICO_BYTES above.
+WOFF2_BYTES = b"wOF2\x00\x01\x00\x00" + bytes(range(256))
+
+
+def test_static_url_serves_app_static_bytes(built_app, prod_app):
+    """Issue #77: files in app/static/ serve at /static/<path>, byte-exact,
+    through the same binary-correct path #74 fixed."""
+    fonts = built_app / "app" / "static" / "fonts"
+    fonts.mkdir(exist_ok=True)
+    (fonts / "Inter.woff2").write_bytes(WOFF2_BYTES)
+    status, headers, body = _get(prod_app, "/static/fonts/Inter.woff2")
+    assert status == "200 OK"
+    assert headers["Content-Type"] == "font/woff2"
+    assert body == WOFF2_BYTES
+    assert headers["ETag"].startswith('"')
+
+
+def test_static_url_conditional_request_gets_304(built_app, prod_app):
+    (built_app / "app" / "static" / "cached.txt").write_text("cache me")
+    _, headers, _ = _get(prod_app, "/static/cached.txt")
+    etag = headers["ETag"]
+    status, _, body = _get(prod_app, "/static/cached.txt", {"HTTP_IF_NONE_MATCH": etag})
+    assert status == "304 NOT MODIFIED"
+    assert body == b""
+
+
+def test_static_url_traversal_is_blocked(built_app, prod_app):
+    (built_app / "secret.txt").write_text("TOP SECRET")
+    status, _, body = _get(prod_app, "/static/../../secret.txt")
+    assert not status.startswith("200")
+    assert b"TOP SECRET" not in body
+
+
+def test_assets_url_no_longer_exists(built_app, prod_app):
+    """Issue #77 companion rename (absorbed #78): /assets/ is gone entirely.
+    No dual serving, no redirect — the request falls through to normal
+    routing and hits #75's built-in 404, even when the file exists in
+    app/static/."""
+    (built_app / "app" / "static" / "present.txt").write_text("reachable only at /static/")
+    status, headers, body = _get(prod_app, "/assets/present.txt")
+    assert status == "404 NOT FOUND"
+    assert headers["Content-Type"] == "text/html"
+    assert b"reachable only at /static/" not in body
 
 
 def test_app_raw_route_wins_over_static_robots_txt(built_app):

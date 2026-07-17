@@ -122,3 +122,77 @@ def test_props_are_nested_when_route_has_layout_chain(tmp_path, monkeypatch):
         "leafProps": {"message": "hi"},
         "layoutProps": {"root": {}, "resource": {}},
     }
+
+
+def _manifest_with_layout_css():
+    from fymo.build.manifest import LayoutAssets
+    return Manifest(
+        routes={
+            "admin": RouteAssets(
+                ssr="ssr/admin.mjs", client="client/admin.A.js", css="client/admin.A.css", preload=[],
+                layout_chain=[
+                    LayoutRefAsset(level="root", id="_root", controller_module=None),
+                    LayoutRefAsset(level="resource", id="admin", controller_module=None),
+                ],
+                uses_layout_shell=True,
+            ),
+            "home": RouteAssets(
+                ssr="ssr/home.mjs", client="client/home.A.js", css=None, preload=[],
+                layout_chain=[LayoutRefAsset(level="root", id="_root", controller_module=None)],
+                uses_layout_shell=True,
+            ),
+        },
+        layouts={
+            "_root": LayoutAssets(client="client/_layout-_root.R.js", css="client/_layout-_root.R.css"),
+            "admin": LayoutAssets(client="client/_layout-admin.S.js", css="client/_layout-admin.S.css"),
+        },
+    )
+
+
+def _render(renderer, path, controller_name):
+    import sys, types
+
+    class FakeManifestCache:
+        def get(self):
+            return _manifest_with_layout_css()
+    renderer.manifest_cache = FakeManifestCache()
+
+    class FakeSidecar:
+        def render(self, route_name, props, doc=None):
+            return {"body": "<div></div>", "head": ""}
+    renderer.sidecar = FakeSidecar()
+
+    mod = types.ModuleType(f"app.controllers.{controller_name}")
+    mod.getContext = lambda: {}
+    mod.getDoc = lambda: {"title": "T"}
+    sys.modules[f"app.controllers.{controller_name}"] = mod
+    try:
+        return renderer.render_template(path)
+    finally:
+        del sys.modules[f"app.controllers.{controller_name}"]
+
+
+def test_page_links_layout_chain_css_root_first(tmp_path):
+    """Issue #77: a page under a section layout links the root layout's CSS
+    then the section layout's CSS then its own, in that order."""
+    renderer = _renderer(tmp_path)
+    renderer.router.routes = {"/admin": {"controller": "admin", "action": "index", "template": "admin/index.svelte"}}
+
+    html, status, _ = _render(renderer, "/admin", "admin")
+
+    assert status == "200 OK"
+    root_idx = html.index('<link rel="stylesheet" href="/dist/client/_layout-_root.R.css">')
+    section_idx = html.index('<link rel="stylesheet" href="/dist/client/_layout-admin.S.css">')
+    route_idx = html.index('<link rel="stylesheet" href="/dist/client/admin.A.css">')
+    assert root_idx < section_idx < route_idx
+
+
+def test_page_outside_section_does_not_link_section_css(tmp_path):
+    renderer = _renderer(tmp_path)
+    renderer.router.routes = {"/": {"controller": "home", "action": "index", "template": "home/index.svelte"}}
+
+    html, status, _ = _render(renderer, "/", "home")
+
+    assert status == "200 OK"
+    assert "_layout-_root.R.css" in html
+    assert "_layout-admin.S.css" not in html

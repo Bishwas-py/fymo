@@ -54,6 +54,11 @@ async function buildServer() {
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
         external: ['$remote/*', '$broadcast/*'],
+        // Layouts import their stylesheets (app/assets/*.css); the client
+        // pass bundles those into the entry's sibling CSS output, but the
+        // node SSR bundle has no use for CSS -- empty-load it so the import
+        // is a no-op instead of a build error or a runtime crash.
+        loader: { '.css': 'empty' },
         // fymoRoutePlugin resolves `$route` to fymo's own shipped
         // runtime/route.js, which lives inside fymo's install location, not
         // the project. Its own `import ... from 'svelte/store'` would
@@ -95,6 +100,20 @@ async function buildClient() {
         minify: !config.dev,
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
+        // Binary assets referenced from bundled CSS (fonts via @font-face,
+        // images via url()) go through the file loader: content-hashed into
+        // dist/client/ per assetNames above, with the css url() rewritten to
+        // publicPath + the hashed filename. publicPath must be the URL the
+        // outdir is actually served under, or the rewritten urls 404.
+        loader: {
+            '.woff2': 'file', '.woff': 'file', '.ttf': 'file', '.otf': 'file',
+            '.png': 'file', '.jpg': 'file', '.jpeg': 'file', '.gif': 'file',
+            '.webp': 'file', '.svg': 'file', '.avif': 'file', '.ico': 'file',
+        },
+        publicPath: '/dist/client',
+        // Root-absolute /static/ urls are verbatim references to app/static
+        // (served unhashed at /static/), not build inputs -- left untouched.
+        external: ['/static/*'],
         // See buildServer()'s nodePaths comment -- the client bundle also
         // imports `$route` -> route.js, with the same svelte/store fallback
         // requirement.

@@ -44,6 +44,9 @@ async function makeServerCtx() {
         sourcemap: 'linked',
         metafile: true,
         external: ['$remote/*', '$broadcast/*'],
+        // Layout-imported stylesheets are a client concern; the node SSR
+        // bundle empty-loads them so the import is a no-op. Mirrors build.mjs.
+        loader: { '.css': 'empty' },
         // fymoRoutePlugin resolves `$route` to fymo's own shipped
         // runtime/route.js, which lives inside fymo's install location, not
         // the project. Its own `import ... from 'svelte/store'` would
@@ -79,6 +82,17 @@ async function makeClientCtx() {
         minify: false,
         sourcemap: 'linked',
         metafile: true,
+        // Binary assets referenced from bundled CSS are content-hashed into
+        // dist/client/ and their url()s rewritten under publicPath;
+        // root-absolute /static/ urls are verbatim static references and
+        // stay external. Mirrors build.mjs.
+        loader: {
+            '.woff2': 'file', '.woff': 'file', '.ttf': 'file', '.otf': 'file',
+            '.png': 'file', '.jpg': 'file', '.jpeg': 'file', '.gif': 'file',
+            '.webp': 'file', '.svg': 'file', '.avif': 'file', '.ico': 'file',
+        },
+        publicPath: '/dist/client',
+        external: ['/static/*'],
         // See makeServerCtx()'s nodePaths comment -- the client bundle also
         // imports `$route` -> route.js, with the same svelte/store fallback
         // requirement.

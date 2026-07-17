@@ -319,3 +319,21 @@ def test_new_scaffolds_package_json_with_full_build_deps(tmp_path, monkeypatch):
     assert dev_deps["esbuild-svelte"] == "^0.9.0"
     assert dev_deps["svelte-preprocess"] == "^6.0.3"
     assert dev_deps["typescript"] == "^5.5.0"
+
+
+def test_new_scaffolds_app_assets_css_imported_by_root_layout(tmp_path, monkeypatch):
+    """Issue #77: stylesheets are build inputs under app/assets/, wired in
+    by an explicit import in the root layout -- no magic filename."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    project = tmp_path / "myapp"
+
+    app_css = project / "app" / "assets" / "app.css"
+    assert app_css.is_file()
+    assert app_css.read_text().strip()
+
+    layout = (project / "app" / "templates" / "_layout.svelte").read_text()
+    assert "import '../assets/app.css';" in layout
+
+    assert (project / "app" / "assets" / "fonts").is_dir()
+    assert not (project / "app" / "templates" / "_global.css").exists()

@@ -16,7 +16,7 @@ class HttpRoute:
     """A raw WSGI route mounted outside fymo's remote-function/SSR routing.
 
     `path` is matched as a PREFIX against the request path — the same style
-    fymo already uses for its own `/dist/` and `/assets/` static routes in
+    fymo already uses for its own `/dist/` and `/static/` static routes in
     `FymoApp._dispatch` — not an exact match and not a templated pattern
     (no `<param>` syntax). `handler` is a WSGI-style callable
     `(environ, start_response) -> iterable` responsible for parsing anything

@@ -237,9 +237,9 @@ def test_entry_missing_required_key_raises_value_error(tmp_path: Path, entry):
         build_expose_routes(tmp_path, [entry], storage=storage)
 
 
-@pytest.mark.parametrize("prefix", ["/dist/videos/", "/assets/videos/", "/dist/"])
+@pytest.mark.parametrize("prefix", ["/dist/videos/", "/static/videos/", "/dist/"])
 def test_prefix_colliding_with_reserved_route_warns(tmp_path: Path, prefix, capsys):
-    """`/dist/` and `/assets/` are matched by FymoApp._dispatch before the
+    """`/dist/` and `/static/` are matched by FymoApp._dispatch before the
     app-routes loop ever runs (fymo/core/server.py), so an exposed prefix
     under either would silently never be reached. Still registers the
     route (this is a warning, not a hard failure) but prints it loudly."""

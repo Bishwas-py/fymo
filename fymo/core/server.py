@@ -402,24 +402,12 @@ class FymoApp:
         return self.template_renderer.render_template(route_path, environ)
     
     
-    def serve_asset(
-        self, path: str, environ: Optional[dict] = None
-    ) -> tuple[bytes, str, str, Dict[str, str]]:
-        """
-        Serve static assets
-
-        Returns:
-            Tuple of (body, status, content_type, extra_headers)
-        """
-        return self.asset_manager.serve_asset(path, environ)
-    
-    
     def _respond_route_miss(self, path, environ, start_response):
         """No raw route and no SSR route matched this path.
 
         Root-static allowlist first: exact well-known filenames and the
         .well-known/ prefix resolve into app/static via the same
-        traversal-guarded, binary-correct serving as /assets/. Anything
+        traversal-guarded, binary-correct serving as /static/. Anything
         else (or an absent file) gets the built-in 404 page, never a 500.
         """
         rel = path.lstrip("/")
@@ -580,9 +568,10 @@ class FymoApp:
             start_response(status, response_headers)
             return [body]
 
-        # Handle asset requests
-        if path.startswith('/assets/'):
-            body, status, content_type, extra = self.serve_asset(path, environ)
+        # Verbatim static files from app/static (unhashed, ETag-validated)
+        if path.startswith('/static/'):
+            rel = path[len('/static/'):]
+            body, status, content_type, extra = self.asset_manager.serve_static_file(rel, environ)
             response_headers = [
                 ("Content-Type", content_type),
                 ("Content-Length", str(len(body))),

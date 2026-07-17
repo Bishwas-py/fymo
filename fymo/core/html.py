@@ -54,14 +54,19 @@ def build_html(
     asset_prefix: str = "/dist",
     doc: Dict[str, Any] = None,
     disabled_soft_nav: list = None,
-    global_css: str = None,
+    layout_css: list = None,
     params: Dict[str, Any] = None,
     identity: Dict[str, Any] = None,
 ) -> str:
-    """Render the minimal HTML envelope. Pieces are concatenated with no boilerplate."""
-    global_css_link = (
-        f'<link rel="stylesheet" href="{asset_prefix}/{global_css}">\n'
-        if global_css else ""
+    """Render the minimal HTML envelope. Pieces are concatenated with no boilerplate.
+
+    `layout_css` is the route's layout chain's CSS paths in chain order
+    (root first, then resource), linked before the route's own CSS so the
+    cascade layers general styles under specific ones.
+    """
+    layout_css_links = "".join(
+        f'<link rel="stylesheet" href="{asset_prefix}/{c}">\n'
+        for c in (layout_css or [])
     )
     css_link = (
         f'<link rel="stylesheet" href="{asset_prefix}/{assets.css}">\n'
@@ -113,7 +118,7 @@ def build_html(
         f"<title>{title}</title>\n"
         f"{disabled_meta}"
         f"{head_extra}"
-        f"{global_css_link}"
+        f"{layout_css_links}"
         f"{css_link}"
         f'<link rel="modulepreload" href="{asset_prefix}/{assets.client}">\n'
         f"{preload}"
