@@ -51,6 +51,25 @@ def require_admin():
         raise ValueError("admin only")
 """
 
+# Explicit-form protected routes: root protected, and an explicit dict route
+# whose path segment equals a controller with a real manifest (todos). These
+# are the shapes whose convention-based aliases (/todos/index, /todos/whatever,
+# /home) previously rendered the protected page anonymously.
+BYPASS_YML = """\
+name: todo_app
+version: 1.0.0
+routes:
+  root:
+    to: home.index
+    require_auth: true
+  todos:
+    to: todos.index
+    require_auth: true
+  signin: home.index
+build:
+  output_dir: dist
+"""
+
 
 @pytest.fixture(autouse=True)
 def _reset_identity_registry():
@@ -202,3 +221,79 @@ def test_boot_fails_loudly_when_signin_route_missing(built_app):
             create_app(built_app, dev=False)
     finally:
         (built_app / "fymo.yml").write_text(original)
+
+
+# --------------- convention-alias bypass of route-level require_auth ---------------
+
+
+@pytest.fixture(scope="module")
+def bypass_app(tmp_path_factory, node_available):
+    dest = tmp_path_factory.mktemp("require_auth_bypass") / "todo_app"
+    shutil.copytree(
+        TODO_APP, dest, ignore=shutil.ignore_patterns("node_modules", "dist", ".fymo")
+    )
+    nm = TODO_APP / "node_modules"
+    if nm.is_dir():
+        (dest / "node_modules").symlink_to(nm)
+    else:
+        pytest.skip("examples/todo_app/node_modules not found — run npm install in examples/todo_app/")
+    (dest / "fymo.yml").write_text(BYPASS_YML)
+    auth_dir = dest / "app" / "auth"
+    auth_dir.mkdir(parents=True)
+    (auth_dir / "__init__.py").write_text("")
+    (auth_dir / "resolver.py").write_text(RESOLVER)
+    BuildPipeline(project_root=dest).build(dev=False)
+    return dest
+
+
+@pytest.fixture()
+def bapp(bypass_app):
+    from fymo import create_app
+    from fymo.auth.identity import reset_identity_resolvers
+
+    for name in list(sys.modules):
+        if name == "app" or name.startswith("app."):
+            del sys.modules[name]
+    application = create_app(bypass_app, dev=False)
+    yield application
+    application.shutdown()
+    reset_identity_resolvers()
+    for name in list(sys.modules):
+        if name == "app" or name.startswith("app."):
+            del sys.modules[name]
+
+
+@pytest.mark.parametrize("path", [
+    "/todos/index",
+    "/todos/whatever",
+    "/home",
+    "/home/index",
+])
+def test_convention_alias_of_protected_route_redirects_anon(bapp, path):
+    status, headers, body = _get(bapp, path)
+    assert status.startswith("302"), f"{path} should redirect, got {status}"
+    assert headers["Location"].startswith("/signin?next=")
+    assert body == b""
+
+
+def test_soft_nav_alias_of_protected_route_gets_redirect_envelope(bapp):
+    status, _, body = _get(bapp, "/_fymo/data/todos/index")
+    assert status.startswith("200")
+    envelope = json.loads(body)
+    assert envelope["type"] == "redirect"
+    assert envelope["status"] == 302
+    assert envelope["location"].startswith("/signin?next=")
+
+
+def test_declared_signin_path_stays_public_despite_shared_controller(bapp):
+    # signin: home.index shares the home controller with the protected root,
+    # but the exact declared /signin path must stay public.
+    status, _, body = _get(bapp, "/signin")
+    assert status == "200 OK"
+    assert b"<html" in body.lower()
+
+
+def test_convention_alias_renders_for_signed_in_user(bapp):
+    status, _, body = _get(bapp, "/todos/index", headers={"x-user": "u1"})
+    assert status == "200 OK"
+    assert b"<html" in body.lower()

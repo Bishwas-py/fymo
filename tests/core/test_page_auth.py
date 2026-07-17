@@ -159,6 +159,90 @@ def test_signin_route_require_auth_ignored_with_warning(tmp_path: Path, capsys):
     assert "signin" in out
 
 
+def test_convention_alias_inherits_require_auth_from_explicit_route(tmp_path: Path):
+    """A convention-based alias resolving to a controller that has a declared
+    protected route must inherit the protection, else it renders the same
+    manifest anonymously."""
+    cfg = _write_yaml(tmp_path, {
+        "dashboard": {"to": "dashboard.index", "require_auth": True},
+        "signin": "signin.index",
+    })
+    r = Router(cfg)
+    assert r.match("/dashboard")["require_auth"] is True
+    # /dashboard/index and /dashboard/anything are convention guesses that the
+    # manifest still keys by the dashboard controller.
+    assert r.match("/dashboard/index").get("convention") is True
+    assert r.match("/dashboard/index")["require_auth"] is True
+    assert r.match("/dashboard/whatever")["require_auth"] is True
+
+
+def test_convention_alias_inherits_from_protected_root(tmp_path: Path):
+    cfg = _write_yaml(tmp_path, {
+        "root": {"to": "home.index", "require_auth": True},
+        "signin": "signin.index",
+    })
+    r = Router(cfg)
+    assert r.match("/home").get("convention") is True
+    assert r.match("/home")["require_auth"] is True
+    assert r.match("/home/index")["require_auth"] is True
+
+
+def test_convention_alias_of_public_controller_stays_public(tmp_path: Path):
+    cfg = _write_yaml(tmp_path, {
+        "root": "home.index",
+        "resources": ["tags"],
+    })
+    r = Router(cfg)
+    assert r.match("/tags/whatever").get("require_auth") is None
+    assert r.match("/home/whatever").get("require_auth") is None
+
+
+def test_convention_inheritance_most_restrictive_guard_wins_over_bool(tmp_path: Path):
+    """When declared routes for one controller mix `true` and a guard path,
+    the guard wins (it implies signed-in AND more)."""
+    cfg = _write_yaml(tmp_path, {
+        "dash": {"to": "dash.index", "require_auth": True},
+        "dash_admin": {"to": "dash.admin", "require_auth": "app.auth.guards.require_admin"},
+        "signin": "signin.index",
+    })
+    r = Router(cfg)
+    assert r.match("/dash/anything")["require_auth"] == "app.auth.guards.require_admin"
+
+
+def test_convention_inheritance_conflicting_guards_first_declared_wins(tmp_path: Path):
+    cfg = _write_yaml(tmp_path, {
+        "a": {"to": "dash.index", "require_auth": "app.auth.guards.first"},
+        "b": {"to": "dash.admin", "require_auth": "app.auth.guards.second"},
+        "signin": "signin.index",
+    })
+    r = Router(cfg)
+    assert r.match("/dash/anything")["require_auth"] == "app.auth.guards.first"
+
+
+def test_signin_target_not_protected_by_its_own_route(tmp_path: Path):
+    """signin: home.index is auto-public; on its own it must not protect the
+    home controller's convention aliases."""
+    cfg = _write_yaml(tmp_path, {
+        "signin": "home.index",
+        "resources": [{"name": "posts", "require_auth": True}],
+    })
+    r = Router(cfg)
+    assert r.match("/home/whatever").get("require_auth") is None
+
+
+def test_declared_signin_path_public_even_when_controller_shared_with_protected(tmp_path: Path):
+    """root and signin both target home.index: the home controller is protected
+    via root, aliases inherit it, but the exact /signin path stays public."""
+    cfg = _write_yaml(tmp_path, {
+        "root": {"to": "home.index", "require_auth": True},
+        "signin": "home.index",
+    })
+    r = Router(cfg)
+    assert r.match("/signin").get("require_auth") is None
+    assert r.match("/home")["require_auth"] is True
+    assert r.match("/home/index")["require_auth"] is True
+
+
 def test_unknown_route_keys_keep_todays_behavior(tmp_path: Path):
     """No `public:`/`on_unauthenticated:` attributes exist; unknown keys in a
     dict route ride along in route info and are ignored, exactly as today."""
