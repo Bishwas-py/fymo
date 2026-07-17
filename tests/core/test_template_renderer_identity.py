@@ -49,7 +49,6 @@ def _renderer(tmp_path: Path) -> TemplateRenderer:
         tmp_path, ConfigManager(tmp_path, {"name": "Test App"}),
         AssetManager(tmp_path), router, dev=True,
     )
-    renderer.auth_enabled = False
 
     class FakeManifestCache:
         def get(self):

@@ -435,7 +435,6 @@ def test_public_page_unaffected(tmp_path: Path):
 class _FakeApp:
     def __init__(self, router):
         self.router = router
-        self.auth_enabled = False
         self.dev = True
         self.manifest_cache = None
 

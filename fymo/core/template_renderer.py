@@ -89,7 +89,7 @@ class TemplateRenderer:
             route_path: The route path to render
             environ: The WSGI environ of the request, when available. Threaded
                 down to the controller so a read-only request scope can be
-                opened around getContext()/getDoc() -- this is what lets
+                opened around getContext()/getDoc(), which is what lets
                 current_uid() resolve the request's identity during SSR
                 instead of only after hydration. None for callers that don't
                 have (or don't need) a request, e.g. direct render_template()

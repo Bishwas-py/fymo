@@ -33,13 +33,13 @@ def ssr_request_scope(environ: dict | None):
 
     Deliberately read-only: unlike the remote router, this does NOT call
     start_auth_scope()/consume_pending_cookies(). Both call sites serve a
-    GET, not a login POST -- there is nothing to set a cookie for, and
+    GET, not a login POST: there is nothing to set a cookie for, and
     current_uid() only reads `_current_event`, so the cookie-queue
     machinery is unnecessary here.
 
     A no-op nullcontext() when no environ was threaded down (e.g.
     render_template() called directly without one, as some existing tests
-    do) -- current_uid() then raises its outside-a-scope RuntimeError, the
+    do), current_uid() then raises its outside-a-scope RuntimeError, the
     same answer a remote function called outside a request gets.
     """
     if environ is None:

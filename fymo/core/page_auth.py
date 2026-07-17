@@ -91,9 +91,8 @@ def _identity_scope(environ: dict):
     """Request scope for the require_auth check, opened before SSR starts.
 
     Same read-only posture as ssr_controller.ssr_request_scope: no cookie
-    queueing, Set-Cookie from _ensure_uid discarded. Unlike that helper this
-    is NOT gated on the legacy auth_enabled flag; the new identity chain is
-    on whenever app/auth/ registers resolvers."""
+    queueing, Set-Cookie from _ensure_uid discarded. The new identity chain
+    is on whenever app/auth/ registers resolvers."""
     from fymo.remote.context import request_scope
     from fymo.remote.identity import _ensure_uid
 
