@@ -179,6 +179,18 @@ class TemplateRenderer:
             return self.render_404(route_path), "404 NOT FOUND"
         route_info = self.router.match(route_path)
 
+        # Route-level require_auth (issue #80): checked before any manifest,
+        # controller, or sidecar work so a protected page never renders (or
+        # costs a render) for a request that will be redirected anyway.
+        require_auth = route_info.get("require_auth")
+        if require_auth:
+            from fymo.core.page_auth import page_auth_redirect
+            location = page_auth_redirect(
+                require_auth, environ, self.router.signin_path(), route_path
+            )
+            if location is not None:
+                raise Redirect(location, status=302)
+
         controller_key = route_info["controller"]
         route_name = controller_key.split(".")[0]
         controller_module = f"app.controllers.{controller_key}"

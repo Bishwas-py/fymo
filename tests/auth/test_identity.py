@@ -258,6 +258,67 @@ def test_current_uid_ignores_legacy_session_resolvers():
         assert current_uid() is None
 
 
+# --------------- resolver return-type validation ---------------
+
+
+def test_resolver_returning_str_raises_typeerror():
+    @identify
+    def bad(event):
+        return "user-42"
+
+    with _scope():
+        with pytest.raises(TypeError) as exc_info:
+            current_uid()
+    msg = str(exc_info.value)
+    assert "bad" in msg
+    assert "str" in msg
+    assert "fymo.auth.Identity(uid=...) or None" in msg
+
+
+def test_resolver_returning_duck_typed_object_raises_typeerror():
+    class Duck:
+        uid = "12345"
+
+    @identify
+    def quacks(event):
+        return Duck()
+
+    with _scope():
+        with pytest.raises(TypeError) as exc_info:
+            current_uid()
+    msg = str(exc_info.value)
+    assert "quacks" in msg
+    assert "Duck" in msg
+
+
+def test_resolver_returning_identity_or_none_is_accepted():
+    @identify
+    def anon(event):
+        return None
+
+    @identify
+    def ok(event):
+        return Identity(uid="u1")
+
+    with _scope():
+        assert current_uid() == "u1"
+
+
+def test_registered_identity_resolvers_snapshot():
+    from fymo.auth.identity import registered_identity_resolvers
+
+    assert registered_identity_resolvers() == ()
+
+    @identify
+    def resolver(event):
+        return None
+
+    snapshot = registered_identity_resolvers()
+    assert snapshot == (resolver,)
+    # A snapshot, not the live list: mutating it must not touch the chain.
+    assert snapshot is not _identity_resolvers
+
+
 # --------------- promoted primitives ---------------
 
 
@@ -288,3 +349,46 @@ def test_verify_token_rejects_expired():
     token = sign_token("user-42", issued_at=1_000_000)
     assert verify_token(token, now=1_000_000 + 10) == "user-42"
     assert verify_token(token, max_age=60, now=1_000_000 + 61) is None
+
+
+def test_verify_token_max_age_exact_boundary():
+    token = sign_token("user-42", issued_at=1_000_000)
+    assert verify_token(token, max_age=60, now=1_000_060) == "user-42"
+    assert verify_token(token, max_age=60, now=1_000_061) is None
+
+
+def test_verify_token_rejects_uid_segment_tampered_alone():
+    from fymo.auth.verify_token import _b64url_encode
+
+    token = sign_token("user-42", issued_at=1_000_000)
+    _, issued_str, sig = token.split(".")
+    forged = f"{_b64url_encode('user-43')}.{issued_str}.{sig}"
+    assert forged != token
+    assert verify_token(forged, now=1_000_010) is None
+
+
+def test_verify_token_rejects_issued_at_segment_tampered_alone():
+    token = sign_token("user-42", issued_at=1_000_000)
+    uid_b64, issued_str, sig = token.split(".")
+    forged = f"{uid_b64}.{int(issued_str) + 1}.{sig}"
+    assert verify_token(forged, now=1_000_010) is None
+
+
+# --------------- domain separation across token kinds ---------------
+
+
+def test_purpose_tokens_never_pass_verify_token():
+    from fymo.auth.session import make_session_token
+    from fymo.auth.verify_token import make_reset_token, make_verify_token
+
+    assert verify_token(make_verify_token(42)) is None
+    assert verify_token(make_reset_token(42)) is None
+    assert verify_token(make_session_token(42, 0)) is None
+
+
+def test_sign_token_never_passes_purpose_verifiers():
+    from fymo.auth.verify_token import verify_reset_token, verify_verify_token
+
+    token = sign_token("42")
+    assert verify_verify_token(token) is None
+    assert verify_reset_token(token) is None

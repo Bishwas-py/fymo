@@ -78,7 +78,12 @@ def identify(fn: IdentityResolver) -> IdentityResolver:
     Registering a resolver whose definition site is already registered
     replaces the stale entry in place (keeping order) instead of appending,
     so the natural registration point, the top level of an app module,
-    stays idempotent under the dev server's module reloads."""
+    stays idempotent under the dev server's module reloads.
+
+    Because dedup keys on the definition site, factory-produced resolvers
+    registered in a loop all share one site and collapse to a single
+    registration (the last one). Register one function per definition site;
+    a loop over identify(make_resolver(x)) will not do what it looks like."""
     key = _resolver_registration_key(fn)
     for i, existing in enumerate(_identity_resolvers):
         if _resolver_registration_key(existing) == key:
@@ -91,6 +96,14 @@ def identify(fn: IdentityResolver) -> IdentityResolver:
 def reset_identity_resolvers() -> None:
     """Drop all registered identity resolvers (re-init / tests)."""
     _identity_resolvers.clear()
+
+
+def registered_identity_resolvers() -> tuple:
+    """Snapshot of the registered resolver chain, in registration order.
+
+    Public accessor for build-time checks (fymo/build/hygiene.py) and
+    diagnostics; the live list stays private."""
+    return tuple(_identity_resolvers)
 
 
 def current_uid() -> Optional[str]:
@@ -116,8 +129,18 @@ def current_uid() -> Optional[str]:
     uid: Optional[str] = None
     for resolve in _identity_resolvers:
         ident = resolve(resolver_event)
-        if ident is not None:
-            uid = ident.uid
-            break
+        if ident is None:
+            continue
+        if not isinstance(ident, Identity):
+            name = (
+                f"{getattr(resolve, '__module__', '?')}."
+                f"{getattr(resolve, '__qualname__', repr(resolve))}"
+            )
+            raise TypeError(
+                f"identity resolver {name} returned {type(ident).__name__}; "
+                "resolvers must return fymo.auth.Identity(uid=...) or None"
+            )
+        uid = ident.uid
+        break
     event[_RESOLUTION_KEY] = uid
     return uid

@@ -211,6 +211,17 @@ class FymoApp:
             expose_routes = build_expose_routes(self.project_root, expose_config, self.storage_provider)
         self._app_routes = discover_app_http_routes(self.project_root) + expose_routes
         self.router = self._initialize_router()
+
+        # Identity resolvers (issue #80): import app/auth/*.py so @identify
+        # resolvers self-register. Presence of resolvers is the on-switch;
+        # no config key gates this, and it is independent of the legacy
+        # auth: block below. Then validate every route's require_auth value
+        # eagerly: an unimportable dotted guard refuses to boot instead of
+        # failing on someone's first page load.
+        from fymo.auth.discovery import import_auth_modules
+        import_auth_modules(self.project_root)
+        from fymo.core.page_auth import validate_route_guards
+        validate_route_guards(self.router)
         self.template_renderer = TemplateRenderer(
             self.project_root,
             self.config_manager,

@@ -28,10 +28,12 @@ from fymo.build.hygiene import (
     check_directory_hygiene,
     check_lib_directory_warnings,
     check_media_key_removed,
+    check_page_auth_hygiene,
     check_remote_exposure_hygiene,
     check_storage_required_for_expose,
     format_auth_enforcement_error,
     format_hygiene_error,
+    format_page_auth_error,
     format_remote_exposure_error,
 )
 from fymo.build.manifest import RemoteModuleAssets
@@ -147,6 +149,13 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     storage_violations = check_storage_required_for_expose(project_root)
     if storage_violations:
         raise BuildError("\n".join(storage_violations))
+
+    # Runs for both `fymo build` and `fymo dev`, unlike the dev-lenient
+    # check_auth_enforcement_hygiene below -- see check_page_auth_hygiene's
+    # docstring for why route-level require_auth gets no dev leniency.
+    page_auth_violations = check_page_auth_hygiene(project_root)
+    if page_auth_violations:
+        raise BuildError(format_page_auth_error(page_auth_violations))
 
     # Same `auth:` section discover_remote_modules reads below, read once
     # here too so both calls agree on it.

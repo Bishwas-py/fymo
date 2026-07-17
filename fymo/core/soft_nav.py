@@ -85,6 +85,19 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
     if not route_info:
         return _200(start_response, {"type": "error", "status": 404, "error": "no_route"})
 
+    # Route-level require_auth (issue #80): a soft-nav transition to a
+    # protected page is the same page load delivered as data, so it takes
+    # the same check as the full-page render (template_renderer.py), before
+    # any controller or manifest work, answered with the redirect envelope.
+    require_auth = route_info.get("require_auth")
+    if require_auth:
+        from fymo.core.page_auth import page_auth_redirect
+        location = page_auth_redirect(
+            require_auth, environ, app.router.signin_path(), route_path
+        )
+        if location is not None:
+            return _200(start_response, {"type": "redirect", "location": location, "status": 302})
+
     controller_name = route_info["controller"]
 
     # Per-resource opt-out from soft navigation. The client preempts via the

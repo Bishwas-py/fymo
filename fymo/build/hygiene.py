@@ -293,6 +293,123 @@ def check_auth_enforcement_hygiene(project_root: Path, auth_config: "dict | None
     return []
 
 
+def _collect_require_auth_routes(routes_config: dict) -> "List[tuple]":
+    """Return [(route_label, require_auth_value)] for every route in the raw
+    fymo.yml `routes:` mapping that carries require_auth. The route named
+    `signin` is excluded: it is auto-public (the redirect target), so its
+    require_auth is ignored at boot and must not demand enforcement here."""
+    entries: List[tuple] = []
+    root_spec = routes_config.get("root")
+    if isinstance(root_spec, dict) and root_spec.get("require_auth"):
+        entries.append(("root", root_spec["require_auth"]))
+    for entry in routes_config.get("resources") or []:
+        if isinstance(entry, dict) and entry.get("require_auth"):
+            name = entry.get("name")
+            if name != "signin":
+                entries.append((name or "<unnamed resource>", entry["require_auth"]))
+    for key, value in routes_config.items():
+        if key in ("root", "resources"):
+            continue
+        if isinstance(value, dict) and value.get("require_auth"):
+            if key.lstrip("/") != "signin":
+                entries.append((key, value["require_auth"]))
+    return entries
+
+
+def check_page_auth_hygiene(project_root: Path) -> List[str]:
+    """Return violations for route-level require_auth that could never be
+    enforced at request time (issue #80 phase 2): a route carries
+    require_auth but app/auth/ registers no @identify resolver, or a
+    dotted-path guard cannot be imported.
+
+    Deliberately NOT dev-lenient, unlike check_auth_enforcement_hygiene.
+    That check tolerates dev because @require_auth decorators typically land
+    in code before the auth config exists (mid-setup is the normal dev
+    state). Route-level require_auth is the opposite direction: it is added
+    to fymo.yml deliberately, after auth exists, and with no resolver every
+    protected page becomes an unconditional redirect to a signin page that
+    can never establish an identity, a mysterious redirect loop in the
+    browser. Failing `fymo dev` loudly with the fix beats debugging that.
+    Mid-setup apps simply do not set require_auth yet.
+
+    Imports app/auth/*.py the same way check_remote_exposure_hygiene imports
+    app/remote/*.py, then inspects the identify registry through its public
+    accessor. Only resolvers whose defining file lives under project_root
+    count: the registry is process-global and another project loaded earlier
+    in the same process must not satisfy this project's check.
+    """
+    from fymo.build.prepare import read_yaml_section
+
+    routes_config = read_yaml_section(project_root, "routes")
+    if not isinstance(routes_config, dict):
+        return []
+    protected = _collect_require_auth_routes(routes_config)
+    if not protected:
+        return []
+
+    violations: List[str] = []
+
+    from fymo.auth.discovery import import_auth_modules
+    from fymo.auth.identity import registered_identity_resolvers
+
+    import_auth_modules(project_root)
+    root = Path(project_root).resolve()
+
+    def _defined_under_root(fn) -> bool:
+        code = getattr(fn, "__code__", None)
+        if code is None:
+            return False
+        try:
+            Path(code.co_filename).resolve().relative_to(root)
+        except (ValueError, OSError):
+            return False
+        return True
+
+    if not any(_defined_under_root(fn) for fn in registered_identity_resolvers()):
+        route_list = ", ".join(sorted({label for label, _ in protected}))
+        violations.append(
+            f"route(s) {route_list} set require_auth but app/auth/ registers "
+            "no @identify resolver, so no request can ever resolve an identity "
+            "and every visit redirects to signin forever. Add a resolver "
+            "(a function decorated with @identify from fymo.auth, returning "
+            "fymo.auth.Identity(uid=...) or None) in an app/auth/*.py module, "
+            "or remove require_auth from the route(s)."
+        )
+
+    project_root_str = str(project_root)
+    added = project_root_str not in sys.path
+    if added:
+        sys.path.insert(0, project_root_str)
+    try:
+        from fymo.core.page_auth import resolve_guard
+        for label, value in protected:
+            if not isinstance(value, str):
+                continue
+            try:
+                resolve_guard(value)
+            except Exception as e:
+                violations.append(
+                    f"route {label!r}: require_auth guard {value!r} cannot be "
+                    f"imported: {e} (fix the dotted path or define the guard, "
+                    "e.g. app.auth.guards.require_admin)"
+                )
+    finally:
+        if added and project_root_str in sys.path:
+            sys.path.remove(project_root_str)
+
+    return violations
+
+
+def format_page_auth_error(violations: List[str]) -> str:
+    bullet_list = "\n".join(f"  - {v}" for v in violations)
+    return (
+        "Unenforceable route-level require_auth found:\n" + bullet_list +
+        "\n\nrequire_auth in fymo.yml is enforced through the @identify "
+        "resolver chain in app/auth/. Every value must be `true` or an "
+        "importable dotted guard path, and at least one resolver must exist."
+    )
+
+
 def format_auth_enforcement_error(violations: List[str]) -> str:
     bullet_list = "\n".join(f"  - {v}" for v in violations)
     return (
