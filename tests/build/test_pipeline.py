@@ -169,6 +169,21 @@ def test_pipeline_global_css_fails_with_migration_error(example_app: Path):
     )
 
 
+def test_pipeline_global_css_directory_fails_with_migration_error(example_app: Path):
+    """Regression: a directory literally named app/templates/_global.css
+    (a bad merge, a stray mkdir) must fail the same way a file does.
+    is_file() returns False for a directory, so a naive check silently lets
+    this through -- exactly the silent-missing-styles failure this issue
+    exists to prevent, just reached through an edge case."""
+    (example_app / "app" / "templates" / "_global.css").mkdir()
+    with pytest.raises(BuildError) as exc:
+        BuildPipeline(example_app).build(dev=False)
+    assert str(exc.value) == (
+        "Error: _global.css is no longer auto-injected. Move it to app/assets/app.css\n"
+        "and add `import '../assets/app.css'` to app/templates/_layout.svelte."
+    )
+
+
 def test_pipeline_css_file_in_templates_fails_hygiene(example_app: Path):
     """Issue #77: stylesheets have one home. Any loose .css under
     app/templates/ is a hygiene build error naming the move."""
