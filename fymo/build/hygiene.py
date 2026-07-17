@@ -69,6 +69,19 @@ def check_media_key_removed(project_root: Path) -> List[str]:
     return []
 
 
+def check_auth_key_removed(project_root: Path) -> List[str]:
+    """The `auth:` block was removed with the framework-owned auth model
+    (issue #80), hard break with no shim. A config still carrying the old
+    key must fail `fymo build`/`fymo dev` with the migration text,
+    mirroring the boot-time refusal in fymo.core.config.ConfigManager,
+    never be silently ignored."""
+    from fymo.core.config import AUTH_KEY_REMOVED_ERROR
+
+    if "auth" in _read_fymo_yml(project_root):
+        return [AUTH_KEY_REMOVED_ERROR]
+    return []
+
+
 def check_storage_required_for_expose(project_root: Path) -> List[str]:
     """`storage.expose` entries always resolve the files they serve through
     a StorageProvider (fymo.storage.registry), and storage has no default
@@ -213,33 +226,26 @@ def format_remote_exposure_error(violations: List[str]) -> str:
     )
 
 
-def check_auth_enforcement_hygiene(project_root: Path, auth_config: "dict | None") -> List[str]:
+def check_auth_enforcement_hygiene(project_root: Path) -> List[str]:
     """Return one violation per app/remote/*.py function decorated with
-    @require_auth for which nobody could ever actually authenticate (issue
-    #29). require_auth itself fails closed correctly: no session means 401,
-    every time, regardless of why there's no session. The gap is upstream of
-    that. Nothing stops an app from shipping @require_auth while auth.enabled
-    is false, or while every configured provider has declined via
-    `required: auto` (its is_configured() classmethod returned False, see
-    fymo/auth/providers/base.py). Either way, the endpoint can never
-    authenticate anyone, and a real app was found papering over exactly
-    that: a hand-rolled wrapper that treated "auth isn't configured" as
-    "must be local dev" and quietly skipped the check instead.
-
-    Note this only catches providers that actually implement is_configured()
-    (custom providers are the common case today, see docs/deployment.md's
-    `required: auto` section). BaseProvider.is_configured() defaults to
-    True, and none of the built-in google/oidc/clerk providers override it
-    yet, so a built-in provider with a missing client-id/secret env var
-    still constructs (with blank credentials) and counts as active here,
-    even though it can't actually authenticate anyone at runtime. That gap
-    lives in the providers themselves, not this check.
+    @require_auth for which nobody could ever actually authenticate:
+    app/auth/ registers zero @identify resolvers, so no request can ever
+    resolve an identity. require_auth itself fails closed correctly (no
+    resolved uid means 401, every time); the gap is upstream of that. A
+    guarded endpoint in that state is either permanently dead or, in the
+    real case that first filed this check (issue #29), invites a
+    hand-rolled wrapper that treats "auth isn't wired up" as "must be
+    local dev" and quietly skips the guard instead.
 
     Scans for the __fymo_require_auth__ marker fymo.auth.context.require_auth
     stamps on its wrapper, the same way check_remote_exposure_hygiene scans
     for __fymo_remote__. Returns [] immediately when nothing is marked, so
-    apps that don't use @require_auth pay no cost and see no noise regardless
-    of their auth config.
+    apps that don't use @require_auth pay no cost and see no noise.
+
+    Only resolvers whose defining file lives under project_root count,
+    same rule as check_page_auth_hygiene: the registry is process-global
+    and another project loaded earlier in the same process must not
+    satisfy this project's check.
     """
     remote_dir = project_root / "app" / "remote"
     if not remote_dir.is_dir():
@@ -275,22 +281,30 @@ def check_auth_enforcement_hygiene(project_root: Path, auth_config: "dict | None
     if not guarded_sites:
         return []
 
-    auth_config = auth_config or {}
-    if not auth_config.get("enabled"):
-        return [f"{site} is decorated with @require_auth but auth.enabled is not true in fymo.yml"
-                for site in guarded_sites]
+    from fymo.auth.discovery import import_auth_modules
+    from fymo.auth.identity import registered_identity_resolvers
 
-    from fymo.auth.providers.registry import build_providers
+    import_auth_modules(project_root)
+    root = Path(project_root).resolve()
 
-    providers = build_providers(auth_config.get("providers"))
-    if not providers:
-        return [
-            f"{site} is decorated with @require_auth but auth.providers resolves to "
-            "zero active providers (every entry with required: auto declined)"
-            for site in guarded_sites
-        ]
+    def _defined_under_root(fn) -> bool:
+        code = getattr(fn, "__code__", None)
+        if code is None:
+            return False
+        try:
+            Path(code.co_filename).resolve().relative_to(root)
+        except (ValueError, OSError):
+            return False
+        return True
 
-    return []
+    if any(_defined_under_root(fn) for fn in registered_identity_resolvers()):
+        return []
+
+    return [
+        f"{site} is decorated with @require_auth but app/auth/ registers no "
+        "@identify resolver, so no request can ever resolve an identity"
+        for site in guarded_sites
+    ]
 
 
 def _collect_require_auth_routes(routes_config: dict) -> "List[tuple]":
@@ -324,8 +338,8 @@ def check_page_auth_hygiene(project_root: Path) -> List[str]:
 
     Deliberately NOT dev-lenient, unlike check_auth_enforcement_hygiene.
     That check tolerates dev because @require_auth decorators typically land
-    in code before the auth config exists (mid-setup is the normal dev
-    state). Route-level require_auth is the opposite direction: it is added
+    in code before app/auth/ exists (mid-setup is the normal dev state).
+    Route-level require_auth is the opposite direction: it is added
     to fymo.yml deliberately, after auth exists, and with no resolver every
     protected page becomes an unconditional redirect to a signin page that
     can never establish an identity, a mysterious redirect loop in the
@@ -414,9 +428,10 @@ def format_auth_enforcement_error(violations: List[str]) -> str:
     bullet_list = "\n".join(f"  - {v}" for v in violations)
     return (
         "@require_auth site(s) that nobody can ever authenticate against:\n" + bullet_list +
-        "\n\nWith auth off or zero active providers, these endpoints either stay "
+        "\n\nWith zero @identify resolvers registered, these endpoints either stay "
         "permanently unreachable or (more dangerously) invite app code to route "
-        "around @require_auth instead of fixing the underlying config. Enable "
-        "auth.enabled and configure at least one provider in fymo.yml, or remove "
-        "@require_auth from the function(s) above if the guard is no longer needed."
+        "around @require_auth instead of wiring up identity. Add a resolver in "
+        "app/auth/ (run `fymo generate auth`, or decorate a function with "
+        "@identify from fymo.auth), or remove @require_auth from the "
+        "function(s) above if the guard is no longer needed."
     )

@@ -9,27 +9,46 @@ from contextlib import nullcontext
 from fymo.core.ssr_controller import load_controller_context, ssr_request_scope
 
 
-def test_scope_is_noop_when_auth_disabled():
-    """auth_enabled=False must always yield a no-op context, regardless of environ."""
-    scope = ssr_request_scope(False, {"HTTP_COOKIE": "fymo_session=whatever"})
-    assert isinstance(scope, type(nullcontext()))
-
-
 def test_scope_is_noop_when_environ_is_none():
-    """No request environ (e.g. a direct render_template() call in a test) must
-    also short-circuit to a no-op, even if auth is enabled."""
-    scope = ssr_request_scope(True, None)
+    """No request environ (e.g. a direct render_template() call in a test)
+    must short-circuit to a no-op."""
+    scope = ssr_request_scope(None)
     assert isinstance(scope, type(nullcontext()))
 
 
-def test_scope_is_real_when_auth_enabled_and_environ_present(monkeypatch):
-    """When both auth is enabled and an environ is present, the real request
-    scope (not nullcontext) must be opened."""
+def test_scope_is_real_when_environ_present(monkeypatch):
+    """With a request environ, the real request scope (not nullcontext) must
+    be opened, so current_uid() resolves inside controllers."""
     from fymo.remote import identity
 
     monkeypatch.setattr(identity, "_secret", b"x" * 32)
-    scope = ssr_request_scope(True, {"HTTP_COOKIE": ""})
+    scope = ssr_request_scope({"HTTP_COOKIE": ""})
     assert not isinstance(scope, type(nullcontext()))
+
+
+def test_current_uid_resolves_inside_controller_scope(monkeypatch):
+    """The point of the scope: a controller's getContext() can read the
+    @identify chain exactly like a remote function would."""
+    from fymo.auth import Identity, current_uid, identify
+    from fymo.auth.identity import reset_identity_resolvers
+    from fymo.remote import identity
+
+    monkeypatch.setattr(identity, "_secret", b"x" * 32)
+    reset_identity_resolvers()
+    try:
+        @identify
+        def by_header(event):
+            uid = event.headers.get("x-user")
+            return Identity(uid=uid) if uid else None
+
+        class Controller:
+            def getContext(self):
+                return {"uid": current_uid()}
+
+        props, _ = load_controller_context(Controller(), {}, {"HTTP_X_USER": "u_ssr"})
+        assert props == {"uid": "u_ssr"}
+    finally:
+        reset_identity_resolvers()
 
 
 def test_load_controller_context_calls_getcontext_and_getdoc():
@@ -41,7 +60,7 @@ def test_load_controller_context_calls_getcontext_and_getdoc():
             return {"title": "Fake"}
 
     props, doc_meta = load_controller_context(
-        FakeController(), {"id": "abc", "extra": "ignored"}, auth_enabled=False, environ=None
+        FakeController(), {"id": "abc", "extra": "ignored"}, environ=None
     )
     assert props == {"id": "abc"}
     assert doc_meta == {"title": "Fake"}
@@ -51,7 +70,7 @@ def test_load_controller_context_handles_missing_hooks():
     class EmptyController:
         pass
 
-    props, doc_meta = load_controller_context(EmptyController(), {}, auth_enabled=False, environ=None)
+    props, doc_meta = load_controller_context(EmptyController(), {}, environ=None)
     assert props == {}
     assert doc_meta == {}
 
@@ -81,8 +100,7 @@ def test_merge_docs_empty_list_returns_empty_dict():
 
 def test_load_layout_props_and_docs_fills_missing_levels_with_empty_dict(monkeypatch):
     from fymo.core.ssr_controller import load_layout_props_and_docs
-    from fymo.build.manifest import LayoutRefAsset
-    props_by_level, docs = load_layout_props_and_docs([], {}, False, None)
+    props_by_level, docs = load_layout_props_and_docs([], {}, None)
     assert props_by_level == {"root": {}, "resource": {}}
     assert docs == []
 
@@ -109,7 +127,7 @@ def test_load_layout_props_and_docs_invokes_controller_per_level(monkeypatch, tm
             LayoutRefAsset(level="root", id="_root", controller_module="layoutpkg.root_ctrl"),
             LayoutRefAsset(level="resource", id="posts", controller_module="layoutpkg.resource_ctrl"),
         ]
-        props_by_level, docs = load_layout_props_and_docs(chain, {}, False, None)
+        props_by_level, docs = load_layout_props_and_docs(chain, {}, None)
         assert props_by_level["root"] == {"nav_items": ["a", "b"]}
         assert props_by_level["resource"] == {"active_tab": "posts"}
         assert docs == [{"title": "Root"}, {}]

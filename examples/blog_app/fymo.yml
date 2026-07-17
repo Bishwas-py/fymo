@@ -9,9 +9,6 @@ routes:
     - tags
     - redirect_demo
 
-auth:
-  enabled: true
-
 # Every function in app/remote/posts.py is marked @remote (see that file).
 # With mode: strict, that's what actually makes them reachable over the
 # wire, rather than file placement alone deciding it.

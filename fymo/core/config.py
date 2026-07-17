@@ -28,9 +28,9 @@ def load_dotenv(project_root: Path) -> None:
 
     Hand-rolled rather than a python-dotenv dependency: the subset of the
     format actually needed (KEY=value, # comments, blank lines, optional
-    matching quotes) is small and stable, matching the lazy-optional-dep
-    philosophy already used for pyjwt in auth/providers/clerk.py rather
-    than adding a hard dependency for a few lines of parsing.
+    matching quotes) is small and stable, matching fymo's lazy-optional-dep
+    philosophy rather than adding a hard dependency for a few lines of
+    parsing.
     """
     dotenv_path = project_root / ".env"
     if not dotenv_path.is_file():
@@ -184,6 +184,19 @@ MEDIA_KEY_REMOVED_ERROR = (
 )
 
 
+# The `auth:` block was removed with the framework-owned auth model (issue
+# #80): identity now lives in code, not config. Hard break, no shim; this
+# message is the migration doc. Raised here at boot and surfaced by
+# `fymo build`/`fymo dev` via check_auth_key_removed (fymo/build/hygiene.py).
+AUTH_KEY_REMOVED_ERROR = (
+    "the `auth:` block was removed, identity now lives in code. Run "
+    "`fymo generate auth` (password login, or --clerk / --skeleton) to "
+    "scaffold app-owned auth into app/auth/, then delete the auth: block "
+    "from fymo.yml. @require_auth still guards remote functions; "
+    "route-level `require_auth:` guards pages."
+)
+
+
 class ConfigManager:
     """Manages configuration loading and access for Fymo applications"""
 
@@ -200,6 +213,8 @@ class ConfigManager:
         self._load_config()
         if "media" in self.config:
             raise ConfigurationError(MEDIA_KEY_REMOVED_ERROR)
+        if "auth" in self.config:
+            raise ConfigurationError(AUTH_KEY_REMOVED_ERROR)
     
     def _load_config(self) -> None:
         """Load configuration from fymo.yml or config files"""
@@ -242,10 +257,6 @@ class ConfigManager:
         """`security:` section. Holds headers config."""
         return self.get('security', {}) or {}
 
-    def get_auth_config(self) -> Dict[str, Any]:
-        """`auth:` section. Holds enabled flag + user_store import path."""
-        return self.get('auth', {}) or {}
-
     def get_jobs_config(self) -> Dict[str, Any]:
         """`jobs:` section. Holds the JobProvider selection (bare string,
         `type`/`class` dict, or absent — see fymo.jobs.providers.registry)."""
@@ -285,7 +296,7 @@ class ConfigManager:
         `provider`/`class` dict, or absent, see fymo.storage.registry).
         Returns None, not {}, when absent: callers need to tell "no storage
         configured" apart from "configured but empty", since storage has no
-        silent default the way auth/jobs/broadcasts do."""
+        silent default the way jobs/broadcasts do."""
         return self.get('storage', None)
 
     def to_dict(self) -> Dict[str, Any]:

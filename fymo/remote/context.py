@@ -11,7 +11,7 @@ _current_event: ContextVar[dict | None] = ContextVar("_current_event", default=N
 # proxy that overwrites the header. Installed once by FymoApp.__init__ from
 # middleware.rate_limit_config.trust_proxy — the remote-function world has no
 # FymoApp reference, so a module-level seam is how the flag gets here. Same
-# pattern as identity._secret / auth_context._user_store.
+# pattern as identity._secret.
 _trust_proxy: bool = False
 
 

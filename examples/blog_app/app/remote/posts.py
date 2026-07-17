@@ -5,7 +5,7 @@ from typing import TypedDict, Literal
 from pydantic import BaseModel, Field
 
 from fymo.remote import current_uid, NotFound, remote, decode_cursor, paginate
-from fymo.auth import require_auth, current_user
+from fymo.auth import identity_extras, require_auth
 from app.data.db import get_db
 
 logger = logging.getLogger("blog_app")
@@ -116,10 +116,12 @@ def get_comments(slug: str) -> list[Comment]:
 @remote
 @require_auth
 def create_comment(slug: str, input: NewComment) -> Comment:
-    # Author comes from the authenticated session, never client input. Display
-    # the email's local part as a handle rather than the full address.
-    author = current_user().email.split("@")[0]
+    # Author comes from the authenticated identity, never client input. The
+    # extras hook in app/auth/extras.py attaches the users row's email; the
+    # handle shown is its local part, falling back to the uid for an
+    # identity with no row (deleted account, bare test identity).
     uid = current_uid()
+    author = str(identity_extras().get("email") or uid).split("@")[0]
     cid = get_db().execute(
         "INSERT INTO comments (post_slug, uid, name, body, created_at) VALUES (?, ?, ?, ?, ?)",
         [slug, uid, author, input.body, datetime.now(timezone.utc).isoformat()],

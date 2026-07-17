@@ -1,9 +1,9 @@
-"""Named extras exist in pyproject.toml (issue #59): Clerk/OIDC/OAuth are
-opt-in installs, never pulled in by a bare `pip install fymo`. Reads the
-real pyproject.toml at the repo root rather than re-deriving the expected
-values, so a future edit to the extras themselves doesn't have to also
-touch this test to stay honest about intent -- it only pins the shape:
-the three names must exist, and clerk must actually carry pyjwt.
+"""The auth provider extras died with the framework-owned auth model
+(issue #80 phase 6): external providers are separate packages you call
+from app/auth/ code, never fymo extras, so `clerk`/`oidc`/`oauth` must
+not exist and pyjwt must appear nowhere in pyproject.toml. The jobs
+extras (procrastinate/postgres) stay: psycopg is still a real optional
+dependency of the job queue.
 """
 import sys
 from pathlib import Path
@@ -21,23 +21,27 @@ def _load_pyproject() -> dict:
         return tomllib.load(f)
 
 
-def test_clerk_oidc_oauth_extras_are_all_defined():
+def test_auth_provider_extras_are_gone():
     extras = _load_pyproject()["project"]["optional-dependencies"]
     for name in ("clerk", "oidc", "oauth"):
-        assert name in extras, f"fymo[{name}] extra is missing from pyproject.toml"
+        assert name not in extras, f"fymo[{name}] extra must not exist anymore"
 
 
-def test_clerk_extra_pulls_in_pyjwt_with_crypto():
+def test_jobs_extras_survive():
     extras = _load_pyproject()["project"]["optional-dependencies"]
-    clerk_deps = " ".join(extras["clerk"])
-    assert "pyjwt" in clerk_deps.lower()
-    assert "crypto" in clerk_deps.lower()
+    assert "procrastinate" in extras
+    assert "postgres" in extras
+    assert any("psycopg" in dep for dep in extras["procrastinate"])
 
 
-def test_base_dependencies_never_mention_pyjwt_or_cryptography():
-    """The core `dependencies` list (unlike optional-dependencies) is what a
-    bare `pip install fymo` actually pulls in -- pyjwt/cryptography must
-    never leak in there, or fymo[clerk] stops meaning anything."""
-    deps = " ".join(_load_pyproject()["project"]["dependencies"]).lower()
-    assert "pyjwt" not in deps
-    assert "cryptography" not in deps
+def test_pyjwt_appears_nowhere_in_pyproject():
+    data = _load_pyproject()
+    everything = []
+    everything.extend(data["project"]["dependencies"])
+    for deps in data["project"].get("optional-dependencies", {}).values():
+        everything.extend(deps)
+    for deps in data.get("dependency-groups", {}).values():
+        everything.extend(str(d) for d in deps)
+    joined = " ".join(everything).lower()
+    assert "pyjwt" not in joined
+    assert "cryptography" not in joined

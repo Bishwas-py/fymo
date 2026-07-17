@@ -82,7 +82,7 @@ def _environ(session=None):
     return env
 
 
-def _register_session_resolver():
+def _register_cookie_resolver():
     @identify
     def by_session(event):
         token = event.cookies.get("session")
@@ -90,7 +90,7 @@ def _register_session_resolver():
 
 
 def test_signed_in_render_embeds_projection_in_island_and_sidecar(tmp_path):
-    _register_session_resolver()
+    _register_cookie_resolver()
 
     @public_identity
     def project(ident):
@@ -107,7 +107,7 @@ def test_signed_in_render_embeds_projection_in_island_and_sidecar(tmp_path):
 
 
 def test_anonymous_render_embeds_null_identity(tmp_path):
-    _register_session_resolver()
+    _register_cookie_resolver()
     renderer = _renderer(tmp_path)
     html, status, _ = renderer.render_template("/", environ=_environ())
     assert status == "200 OK"
@@ -123,7 +123,7 @@ def test_no_resolvers_render_embeds_null_identity_without_environ_needed(tmp_pat
 
 
 def test_default_projection_is_uid_only(tmp_path):
-    _register_session_resolver()
+    _register_cookie_resolver()
     renderer = _renderer(tmp_path)
     html, _, _ = renderer.render_template("/", environ=_environ(session=SESSION_TOKEN))
     assert '<script type="application/json" id="fymo-identity">{"uid": "u_alice"}</script>' in html
@@ -133,7 +133,7 @@ def test_extras_and_session_token_never_reach_the_html(tmp_path):
     """The security invariant: identity_extras never auto-serialize, and the
     raw session cookie value never appears anywhere in the payload. Only
     the projection's whitelisted fields cross."""
-    _register_session_resolver()
+    _register_cookie_resolver()
     register_identity_extras_hook(
         lambda uid: {"email": "alice@corp.internal", "role": "superadmin-extras-value"}
     )

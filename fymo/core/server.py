@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fymo.core.config import ConfigManager, load_dotenv, parse_bool
+from fymo.core.config import ConfigManager, load_dotenv
 from fymo.core.assets import AssetManager
 from fymo.core.template_renderer import TemplateRenderer
 from fymo.core.router import Router
@@ -214,10 +214,9 @@ class FymoApp:
 
         # Identity resolvers (issue #80): import app/auth/*.py so @identify
         # resolvers self-register. Presence of resolvers is the on-switch;
-        # no config key gates this, and it is independent of the legacy
-        # auth: block below. Then validate every route's require_auth value
-        # eagerly: an unimportable dotted guard refuses to boot instead of
-        # failing on someone's first page load.
+        # no config key gates this. Then validate every route's require_auth
+        # value eagerly: an unimportable dotted guard refuses to boot instead
+        # of failing on someone's first page load.
         from fymo.auth.discovery import import_auth_modules
         import_auth_modules(self.project_root)
         from fymo.core.page_auth import validate_route_guards
@@ -250,20 +249,6 @@ class FymoApp:
         # has no FymoApp reference. See fymo/remote/context.py.
         from fymo.remote import context as _remote_context
         _remote_context.set_trust_proxy(self.middleware.rate_limit_config.trust_proxy)
-
-        # Optional auth subsystem. When enabled, a UserStore is constructed
-        # and registered process-wide so current_user() / @require_auth can
-        # find it from any remote function. The built-in `auth` system
-        # module is also registered with discovery so signup/login/logout/me
-        # appear in the manifest like any other remote function.
-        self.auth_enabled = False
-        auth_cfg = self.config_manager.get_auth_config()
-        if parse_bool(auth_cfg.get("enabled", False), field="auth.enabled"):
-            self._init_auth(auth_cfg)
-        # Mirror onto the renderer (constructed above, before auth_enabled was
-        # known) so SSR only opens a request scope for apps that use auth --
-        # see TemplateRenderer._ssr_request_scope.
-        self.template_renderer.auth_enabled = self.auth_enabled
 
         # Job provider: always on (default ThreadedJobProvider needs no
         # config), mirroring get_shared_runner()'s always-available default.
@@ -313,91 +298,6 @@ class FymoApp:
             raise RuntimeError(
                 f"dist/ not found at {dist_dir}. Run `fymo build` first."
             )
-
-    @staticmethod
-    def _load_configured_class(dotted_path: str):
-        """Resolve a dotted `module.sub.ClassName` config path to the class object.
-
-        Shared by the `auth.user_store` and `auth.email_sender` loading below —
-        both take a dotted path from fymo.yml and need the same
-        rpartition + import_module + getattr resolution. Raises
-        ValueError/ImportError/AttributeError on a bad path; instantiation is
-        left to the caller (kept out of this helper) so a constructor failure
-        is never mistaken for, or reported as, an import failure.
-        """
-        module_path, _, cls_name = dotted_path.rpartition(".")
-        if not module_path or not cls_name:
-            raise ValueError(f"invalid path: {dotted_path!r}")
-        import importlib
-        mod = importlib.import_module(module_path)
-        return getattr(mod, cls_name)
-
-    def _init_auth(self, auth_cfg: dict) -> None:
-        """Instantiate the configured UserStore and register it process-wide."""
-        store_path = auth_cfg.get("user_store") or "fymo.auth.store.SqliteUserStore"
-        try:
-            cls = self._load_configured_class(store_path)
-        except Exception as e:
-            raise RuntimeError(
-                f"auth.user_store={store_path!r} could not be imported: {e}"
-            ) from e
-
-        store = cls(self.project_root)
-        from fymo.auth.context import set_user_store
-        set_user_store(store)
-        self.user_store = store
-
-        # Instantiate the configured EmailSender (default: logs the
-        # verification link, no SMTP dependency) and register it process-wide.
-        # Same dotted-path-in-fymo.yml pattern as auth.user_store above.
-        sender_path = auth_cfg.get("email_sender") or "fymo.auth.email.LoggingEmailSender"
-        try:
-            sender_cls = self._load_configured_class(sender_path)
-        except Exception as e:
-            raise RuntimeError(
-                f"auth.email_sender={sender_path!r} could not be imported: {e}"
-            ) from e
-
-        sender = sender_cls(self.project_root)
-        from fymo.auth.context import set_email_sender
-        set_email_sender(sender)
-        self.email_sender = sender
-
-        # Build the configured providers and install their session resolvers.
-        # Defaults to [password]; extra providers (OAuth, token) come from
-        # auth.providers in fymo.yml. Deliberately unguarded: a provider that
-        # needs an optional extra (e.g. ClerkProvider needing pyjwt[crypto],
-        # issue #59) raises RuntimeError from its own __init__/from_config
-        # when that extra isn't installed, and that propagates straight out
-        # of FymoApp.__init__ here. Refusing to start beats booting with
-        # auth half-wired and only discovering the gap at someone's first
-        # login attempt.
-        from fymo.auth.providers.registry import (
-            build_providers, install_providers, system_remote_modules,
-        )
-        providers = build_providers(auth_cfg.get("providers"))
-        install_providers(providers)
-        self.auth_providers = providers
-        # Register providers' remote functions (password → `auth` module) with
-        # the remote router — replaces the old hardcoded _SYSTEM_MODULES table.
-        from fymo.remote import router as _remote_router
-        _remote_router.set_system_modules(system_remote_modules(providers))
-        # Flatten provider HTTP routes into a (method, path) -> handler map.
-        self._auth_routes = {
-            (r.method, r.path): r.handler
-            for p in providers
-            for r in p.http_routes()
-        }
-
-        self.auth_enabled = True
-
-    def _dispatch_auth_route(self, environ, start_response, path):
-        """Route /auth/... to a provider handler, or None if none matches."""
-        method = environ.get("REQUEST_METHOD", "GET")
-        handler = self._auth_routes.get((method, path))
-        if handler is None:
-            return None
-        return handler(environ, start_response)
 
     def shutdown(self) -> None:
         """Stop this app's Node sidecar.
@@ -492,8 +392,8 @@ class FymoApp:
         Args:
             route_path: The route path to render
             environ: The WSGI environ of the request, when available. Passed
-                through to the controller so current_user() can resolve the
-                session cookie during SSR when auth is enabled.
+                through to the controller so current_uid() can resolve the
+                request's identity during SSR.
 
         Returns:
             Tuple of (html, status_code, extra_headers) -- extra_headers
@@ -653,12 +553,6 @@ class FymoApp:
                 dev=self.middleware.dev,
                 trust_proxy=self.middleware.rate_limit_config.trust_proxy,
             )
-
-        # Provider-mounted auth routes (OAuth start/callback, etc.).
-        if getattr(self, "auth_enabled", False) and path.startswith("/auth/"):
-            handled = self._dispatch_auth_route(environ, start_response, path)
-            if handled is not None:
-                return handled
 
         if path.startswith("/_fymo/remote/"):
             from fymo.remote import router as router_mod

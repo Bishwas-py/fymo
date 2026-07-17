@@ -92,21 +92,12 @@ def test_fymo_app_explicit_optin_string_false_from_interpolation_resolves_false(
     assert remote_router._explicit_optin is False
 
 
-# ---------------- server.py auth.enabled wiring ----------------
+# ---------------- server.py auth: refusal ----------------
 
 
-def test_fymo_app_auth_enabled_string_false_from_interpolation_stays_off(
-    tmp_path: Path, monkeypatch,
-):
-    """Regression for issue #30: auth.enabled: ${VAR} interpolating to the
-    string "false" must not run auth initialization. A bare truthy check
-    on auth_cfg.get("enabled") would treat any non-empty string as on.
-
-    _init_auth is monkeypatched to raise if called at all, since FymoApp's
-    __init__ raises on missing dist/ before returning, so there is no
-    instance left afterward to inspect a self.auth_enabled attribute on.
-    Whether _init_auth ran is the only observable signal here.
-    """
+def test_fymo_app_refuses_auth_block_at_boot(tmp_path: Path, monkeypatch):
+    """A fymo.yml still carrying the removed auth: block must refuse to boot
+    with the migration text, before any other startup work."""
     monkeypatch.setenv("FYMO_TEST_AUTH_ENABLED", "false")
     _write_yml(
         tmp_path,
@@ -114,24 +105,5 @@ def test_fymo_app_auth_enabled_string_false_from_interpolation_stays_off(
     )
     from fymo.core.server import FymoApp
 
-    def _fail_if_called(self, auth_cfg):
-        raise AssertionError("auth should have stayed off")
-
-    monkeypatch.setattr(FymoApp, "_init_auth", _fail_if_called)
-
-    with pytest.raises(RuntimeError, match="dist/ not found"):
-        FymoApp(tmp_path, dev=True)
-
-
-def test_fymo_app_auth_enabled_raises_configuration_error_on_garbage(
-    tmp_path: Path, monkeypatch,
-):
-    monkeypatch.setenv("FYMO_TEST_AUTH_ENABLED_GARBAGE", "enabeld")
-    _write_yml(
-        tmp_path,
-        "name: AuthTest\nroutes: {}\nauth:\n  enabled: ${FYMO_TEST_AUTH_ENABLED_GARBAGE}\n",
-    )
-    from fymo.core.server import FymoApp
-
-    with pytest.raises(ConfigurationError, match="auth.enabled"):
+    with pytest.raises(ConfigurationError, match="fymo generate auth"):
         FymoApp(tmp_path, dev=True)

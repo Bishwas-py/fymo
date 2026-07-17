@@ -31,15 +31,6 @@ pydantic = ["pydantic>=2.5"]
 procrastinate = ["procrastinate>=3.0", "psycopg[binary,pool]>=3.1"]
 postgres = ["psycopg[binary,pool]>=3.1"]
 granian = ["granian>=2.0,<3"]
-# Clerk verifies RS256 JWTs over JWKS, which needs a real crypto backend.
-clerk = ["pyjwt[crypto]>=2.0"]
-# oidc/oauth (fymo/auth/providers/oauth.py) are pure stdlib urllib today and
-# pull in nothing extra. Named anyway so the three provider extras form one
-# discoverable family (fymo[clerk], fymo[oidc], fymo[oauth]) and so a future
-# dependency for either can be added here without changing what users type
-# to get it.
-oidc = []
-oauth = []
 
 [project.scripts]
 fymo = "fymo.cli.main:main"
@@ -77,7 +68,6 @@ dev = [
     "pytest-asyncio>=0.23",
     "pydantic>=2.5",
     "granian>=2.0,<3",
-    "pyjwt[crypto]>=2.0",
     "procrastinate>=3.0",
     "psycopg[binary,pool]>=3.1",
 ]

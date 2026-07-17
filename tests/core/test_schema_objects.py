@@ -147,8 +147,8 @@ def test_owned_schema_objects_helper_defaults_to_empty():
 def test_owned_schema_objects_helper_calls_the_declaration():
     class Declares:
         def owned_schema_objects(self):
-            return (SchemaObject(kind="table", name="fymo_users"),)
+            return (SchemaObject(kind="table", name="acme_users"),)
 
     assert owned_schema_objects(Declares()) == (
-        SchemaObject(kind="table", name="fymo_users"),
+        SchemaObject(kind="table", name="acme_users"),
     )

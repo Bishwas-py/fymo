@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from fymo.core.config import parse_bool
 from fymo.remote.mode import resolve_remote_mode
 
 
@@ -59,7 +58,6 @@ def _ensure_parent_packages(project_root: Path) -> None:
 def discover_remote_modules(
     project_root: Path,
     *,
-    auth_config: "dict | None" = None,
     remote_config: "dict | None" = None,
 ) -> dict[str, dict[str, RemoteFunction]]:
     """Walk app/remote/*.py and return {module_name: {fn_name: RemoteFunction}}.
@@ -68,10 +66,6 @@ def discover_remote_modules(
     Each non-private function MUST have type-annotated parameters; the
     function discovery raises ValueError if any parameter is untyped.
 
-    When `auth_config` has `enabled: true`, the active auth providers'
-    remote functions are added too (e.g. password's under `auth`), discovered
-    from the providers rather than any hardcoded module.
-
     `remote_config` holds the `remote:` section of fymo.yml, resolved through
     `fymo.remote.mode.resolve_remote_mode`. Under `remote.mode: strict` (or
     the deprecated `explicit_optin: true`), only app-module functions
@@ -79,8 +73,7 @@ def discover_remote_modules(
     `__fymo_remote__ = True`) are discovered — everything else in
     app/remote/*.py is treated as a private helper. Default is implicit
     (every public typed function is discovered, today's back-compat
-    behavior). This only applies to app modules; provider/system remote
-    functions (below) always ship regardless of the mode.
+    behavior).
     """
     out: dict[str, dict[str, RemoteFunction]] = {}
     explicit_optin = resolve_remote_mode(remote_config).strict
@@ -102,14 +95,6 @@ def discover_remote_modules(
             out[module_name] = _collect_module_functions(
                 mod, module_name=module_name, expected_module=full, mod_hash=mod_hash,
                 explicit_optin=explicit_optin,
-            )
-
-    if auth_config and parse_bool(auth_config.get("enabled", False), field="auth.enabled"):
-        from fymo.auth.providers.registry import build_providers, system_remote_modules
-        providers = build_providers(auth_config.get("providers"))
-        for module_name, fns in system_remote_modules(providers).items():
-            out[module_name] = _collect_from_callables(
-                module_name, fns, mod_hash=_functions_hash(fns),
             )
 
     return out
@@ -160,34 +145,3 @@ def _collect_module_functions(
     return fns
 
 
-def _functions_hash(fns: dict[str, Callable]) -> str:
-    """Content hash for a set of provider callables: the source files they're
-    defined in. Changes when the code changes, so the endpoint URL cache-busts."""
-    files = sorted({
-        inspect.getsourcefile(fn) for fn in fns.values() if inspect.getsourcefile(fn)
-    })
-    h = hashlib.sha256()
-    for f in files:
-        h.update(Path(f).read_bytes())
-    return h.hexdigest()[:12]
-
-
-def _collect_from_callables(
-    module_name: str, fns: dict[str, Callable], *, mod_hash: str,
-) -> dict[str, RemoteFunction]:
-    """Build RemoteFunction entries from an explicit {name: callable} map
-    (provider-curated, so no module scanning or __module__ filtering)."""
-    out: dict[str, RemoteFunction] = {}
-    for name, obj in fns.items():
-        sig = inspect.signature(obj)
-        hints = typing.get_type_hints(obj, include_extras=True)
-        for pname in sig.parameters:
-            if pname not in hints:
-                raise ValueError(
-                    f"{module_name}: please annotate parameter {pname!r} of function {name!r}"
-                )
-        out[name] = RemoteFunction(
-            module=module_name, name=name, fn=obj, signature=sig, hints=hints,
-            module_hash=mod_hash,
-        )
-    return out

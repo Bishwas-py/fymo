@@ -39,7 +39,7 @@ is never required to echo its own params back for the client to see them
 The `doc`/`title` merge and layout-prop loading go through the exact same
 `ssr_controller.load_layout_props_and_docs`/`merge_docs` helpers the
 full-page SSR path (`template_renderer.py`) uses, so the two call sites
-can't drift apart the way they once did for `current_user()` scoping (see
+can't drift apart the way they once did for identity scoping (see
 `ssr_controller`'s module docstring).
 
 The client uses `id` for chain-diffing in PR B; in PR A every nav swaps
@@ -126,19 +126,17 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
 
     params = route_info.get("params", {}) or {}
 
-    # Invoke exactly like full-page SSR does, including the (optional)
-    # read-only auth request scope so current_user() resolves the same way
-    # on both the full-page render and this soft-nav path -- see
-    # ssr_controller for why this must be the same helper both call.
+    # Invoke exactly like full-page SSR does, including the read-only
+    # request scope so current_uid() resolves the same way on both the
+    # full-page render and this soft-nav path (see ssr_controller for
+    # why this must be the same helper both call).
     try:
-        leaf_props, leaf_doc = load_controller_context(
-            controller_mod, params, getattr(app, "auth_enabled", False), environ
-        )
+        leaf_props, leaf_doc = load_controller_context(controller_mod, params, environ)
         layout_props_by_level = {"root": {}, "resource": {}}
         layout_docs = []
         if assets.layout_chain:
             layout_props_by_level, layout_docs = load_layout_props_and_docs(
-                assets.layout_chain, params, getattr(app, "auth_enabled", False), environ
+                assets.layout_chain, params, environ
             )
     except RemoteError as e:
         # getContext() raised NotFound/Unauthorized/Redirect/etc directly,

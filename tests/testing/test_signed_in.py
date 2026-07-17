@@ -51,8 +51,10 @@ def test_signed_in_registers_through_the_identify_chain():
 
 
 def test_sequential_signed_in_blocks_resolve_their_own_uid():
-    # Registration happens at call time; the definition-site dedup in
-    # identify() must not make the second block resolve the first uid.
+    # Both blocks register the same module-level resolver; what makes the
+    # second block resolve its own uid is that the resolver reads the acting
+    # identity from a contextvar set at block entry, never from state
+    # captured at registration time.
     with signed_in("u_alice"):
         assert current_uid() == "u_alice"
     with signed_in("u_bob"):
@@ -197,6 +199,16 @@ def test_acting_as_without_extras_does_not_inherit_outer_extras():
         with acting_as("u_other"):
             assert dict(identity_extras()) == {}
         assert identity_extras()["role"] == "admin"
+
+
+def test_acting_as_with_extras_restores_absent_outer_extras():
+    """Outer signed_in without extras: after an acting_as(extras=...) block
+    exits, identity_extras() must read as absent/empty again, never as a
+    leaked restore sentinel."""
+    with signed_in("u_outer"):
+        with acting_as("u_bob", extras={"role": "admin"}):
+            assert identity_extras()["role"] == "admin"
+        assert dict(identity_extras()) == {}
 
 
 def test_acting_as_restores_extras_on_exception():

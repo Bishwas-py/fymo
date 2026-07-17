@@ -245,38 +245,7 @@ def test_uid_scope_ignores_forged_cookie(limited_project):
 # ---------------- user scope ----------------
 
 
-@pytest.fixture
-def user_store(tmp_path, monkeypatch):
-    from fymo.auth import context as auth_context
-    from fymo.auth.store import SqliteUserStore
-    store = SqliteUserStore(project_root=tmp_path)
-    monkeypatch.setattr(auth_context, "_user_store", store)
-    yield store
-
-
-def _session_cookie(user) -> str:
-    from fymo.auth.session import make_session_token
-    return f"fymo_session={make_session_token(user.id, user.session_epoch)}"
-
-
-def test_user_scope_keys_on_authenticated_user(limited_project, user_store):
-    _, h = limited_project
-    alice = user_store.create("alice@x.com", None)
-    bob = user_store.create("bob@x.com", None)
-
-    (_, _), first = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(alice)))
-    assert first["type"] == "result"
-    (_, _), blocked = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(alice)))
-    assert blocked["status"] == 429
-    # Same IP, different signed-in user: fresh bucket.
-    (_, _), other = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(bob)))
-    assert other["type"] == "result"
-
-
-def test_user_scope_falls_back_to_uid_when_unauthenticated(limited_project, user_store):
+def test_user_scope_falls_back_to_uid_when_unauthenticated(limited_project):
     _, h = limited_project
     alice, bob = _uid_cookie("u_anon1"), _uid_cookie("u_anon2")
     (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=alice))
@@ -288,8 +257,8 @@ def test_user_scope_falls_back_to_uid_when_unauthenticated(limited_project, user
 
 
 def test_user_scope_falls_back_to_ip_with_no_identity_at_all(limited_project):
-    """No session, no uid cookie, and no user store configured: the limit
-    still binds on IP rather than silently not applying."""
+    """No resolver match and no uid cookie: the limit still binds on IP
+    rather than silently not applying."""
     _, h = limited_project
     (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", []))
     assert first["type"] == "result"
@@ -333,31 +302,9 @@ def test_user_scope_keys_on_identify_resolver(limited_project, identity_chain):
     assert other["type"] == "result"
 
 
-def test_identify_resolver_wins_over_legacy_session(limited_project, user_store, identity_chain):
-    """New chain first: when an @identify resolver matches, its uid is the
-    key even for a request whose legacy fymo_session would also resolve."""
-    from fymo.auth import Identity, identify
-
-    @identify
-    def everyone_shares_one_identity(event):
-        return Identity(uid="shared")
-
-    _, h = limited_project
-    alice = user_store.create("alice@x.com", None)
-    bob = user_store.create("bob@x.com", None)
-    (_, _), first = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(alice)))
-    assert first["type"] == "result"
-    # Under the legacy chain bob would get his own bucket; the identify
-    # chain wins, so bob lands in alice's "user:shared" bucket.
-    (_, _), blocked = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(bob)))
-    assert blocked["status"] == 429
-
-
-def test_legacy_session_still_keys_when_no_resolver_matches(limited_project, user_store, identity_chain):
-    """Coexistence: with a resolver registered but not matching, the legacy
-    session walk still keys signed-in users individually."""
+def test_user_scope_non_matching_resolver_falls_back_to_uid(limited_project, identity_chain):
+    """With a resolver registered but not matching, the key degrades to the
+    verified fymo_uid tier: the identify chain then fymo_uid then IP."""
     from fymo.auth import identify
 
     @identify
@@ -365,32 +312,23 @@ def test_legacy_session_still_keys_when_no_resolver_matches(limited_project, use
         return None
 
     _, h = limited_project
-    alice = user_store.create("alice@x.com", None)
-    bob = user_store.create("bob@x.com", None)
-    (_, _), first = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(alice)))
+    a, b = _uid_cookie("u_anon1"), _uid_cookie("u_anon2")
+    (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
     assert first["type"] == "result"
-    (_, _), blocked = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(alice)))
+    (_, _), blocked = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
     assert blocked["status"] == 429
-    (_, _), other = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=_session_cookie(bob)))
+    (_, _), other = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=b))
     assert other["type"] == "result"
 
 
-def test_stale_session_no_resolvers_no_store_falls_back_to_uid(limited_project, identity_chain, monkeypatch):
-    """The acceptance criterion: a well-formed fymo_session cookie on an app
-    with zero identify resolvers and no UserStore configured must not crash,
-    must not touch any store, and must key on the verified fymo_uid (then
-    IP) exactly as before."""
-    from fymo.auth import context as auth_context
-    from fymo.auth.session import make_session_token
-    monkeypatch.setattr(auth_context, "_user_store", None)
-    session = f"fymo_session={make_session_token(1, 0)}"
+def test_stale_unknown_cookie_falls_back_to_uid_then_ip(limited_project, identity_chain):
+    """A leftover cookie no resolver knows about must not crash and must
+    key on the verified fymo_uid, then IP when that is missing too."""
+    stale = "old_session=1.12345.0.AAAAAAAAAAAAAAAAAAAAAA"
 
     _, h = limited_project
-    a = f"{session}; {_uid_cookie('u_anon1')}"
-    b = f"{session}; {_uid_cookie('u_anon2')}"
+    a = f"{stale}; {_uid_cookie('u_anon1')}"
+    b = f"{stale}; {_uid_cookie('u_anon2')}"
     (_, _), first = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
     assert first["type"] == "result"
     (_, _), blocked = _call(_make_environ(f"/_fymo/remote/{h}/per_user", [], cookies=a))
@@ -399,10 +337,10 @@ def test_stale_session_no_resolvers_no_store_falls_back_to_uid(limited_project, 
     assert other["type"] == "result"
     # No uid cookie either: binds on IP rather than crashing or not applying.
     (_, _), ip_first = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=session, ip="3.3.3.3"))
+        f"/_fymo/remote/{h}/per_user", [], cookies=stale, ip="3.3.3.3"))
     assert ip_first["type"] == "result"
     (_, _), ip_blocked = _call(_make_environ(
-        f"/_fymo/remote/{h}/per_user", [], cookies=session, ip="3.3.3.3"))
+        f"/_fymo/remote/{h}/per_user", [], cookies=stale, ip="3.3.3.3"))
     assert ip_blocked["status"] == 429
 
 

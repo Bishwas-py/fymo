@@ -1,10 +1,8 @@
-"""identity_extras population on the NEW identity path (issue #80 phase 3).
+"""identity_extras population on the identity path (issue #80 phase 3).
 
-Hooks registered via register_identity_extras_hook() used to fire only from
-the legacy current_user() walk. The generated app/auth/extras.py needs them
-to fire when the @identify chain resolves a uid, receiving that uid as the
-hook subject, so current_extras() can offer a typed replacement for the
-removed current_user() accessor.
+Hooks registered via register_identity_extras_hook() fire when the
+@identify chain resolves a uid, receiving that uid as the hook subject, so
+the generated app/auth/extras.py can offer a typed accessor over them.
 """
 import pytest
 

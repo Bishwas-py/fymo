@@ -83,74 +83,13 @@ def test_missing_procrastinate_package_fails_loudly(procrastinate_project, capsy
     assert "fymo[procrastinate]" in captured.err
 
 
-@pytest.fixture
-def user_store_project(tmp_path: Path) -> Path:
-    return _write_project(
-        tmp_path,
-        "name: schema-test\n"
-        "auth:\n"
-        "  user_store: fymo.auth.postgres_store.PostgresUserStore\n",
-    )
-
-
-def test_configured_postgres_user_store_objects_are_listed(user_store_project, capsys, monkeypatch):
-    """The command's contract is no-database, no-env operation, so the
-    identity tables must enumerate with DATABASE_URL unset even though
-    constructing the store itself would refuse to boot without it."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    run_provider_tables(user_store_project)
-    out_lines = capsys.readouterr().out.strip().splitlines()
-    assert "table fymo_users" in out_lines
-    assert "table fymo_user_oauth_identities" in out_lines
-    assert "sequence fymo_users_id_seq" in out_lines
-    assert "index fymo_users_email_lower_idx" in out_lines
-
-
-def test_user_store_json_output_names_the_store(user_store_project, capsys, monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    run_provider_tables(user_store_project, as_json=True)
-    objects = json.loads(capsys.readouterr().out)
-    users_table = [o for o in objects if o["name"] == "fymo_users"]
-    assert users_table == [
-        {"kind": "table", "name": "fymo_users", "provider": "PostgresUserStore"}
-    ]
-
-
-def test_default_user_store_contributes_nothing(tmp_path, capsys):
-    """auth: configured but on the default SQLite store, whose objects
-    live in its own auth.db file, not a shared Postgres schema."""
-    _write_project(tmp_path, "name: schema-test\nauth:\n  enabled: true\n")
-    run_provider_tables(tmp_path)
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "no configured provider owns schema objects" in captured.err
-
-
-def test_jobs_and_user_store_enumerate_together(tmp_path, capsys, monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    _write_project(
-        tmp_path,
-        "name: schema-test\n"
-        "jobs:\n  provider: procrastinate\n"
-        "auth:\n  user_store: fymo.auth.postgres_store.PostgresUserStore\n",
-    )
-    run_provider_tables(tmp_path)
-    out_lines = capsys.readouterr().out.strip().splitlines()
-    assert "table procrastinate_jobs" in out_lines
-    assert "table fymo_users" in out_lines
-
-
-def test_unimportable_user_store_fails_loudly(tmp_path, capsys):
-    _write_project(
-        tmp_path,
-        "name: schema-test\nauth:\n  user_store: nope.not.There\n",
-    )
-    with pytest.raises(SystemExit) as exc_info:
-        run_provider_tables(tmp_path)
-    assert exc_info.value.code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "nope.not.There" in captured.err
+def test_no_provider_ever_enumerates_identity_tables(procrastinate_project, capsys):
+    """The framework owns no user tables anymore (issue #80): nothing a
+    provider enumerates may mention the retired fymo_users family."""
+    run_provider_tables(procrastinate_project)
+    out = capsys.readouterr().out
+    assert "fymo_users" not in out
+    assert "fymo_user_oauth_identities" not in out
 
 
 def test_schema_parse_error_uses_the_clean_error_path(procrastinate_project, capsys, monkeypatch):

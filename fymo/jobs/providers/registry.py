@@ -1,8 +1,8 @@
 """Build a single JobProvider from fymo.yml's `jobs:` config.
 
-Mirrors fymo.auth.providers.registry's escape hatch exactly: a bare string
-for a built-in, or an object with a `type` (built-in) or `class` (dotted
-path to a custom provider) key plus any extra kwargs.
+The escape-hatch shape: a bare string for a built-in, or an object with a
+`type` (built-in) or `class` (dotted path to a custom provider) key plus
+any extra kwargs.
 """
 from __future__ import annotations
 

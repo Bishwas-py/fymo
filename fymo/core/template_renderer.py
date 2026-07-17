@@ -11,7 +11,7 @@ from typing import Dict, Any, Tuple
 from fymo.core.router import Router
 from fymo.core.config import ConfigManager
 from fymo.core.assets import AssetManager
-from fymo.core.ssr_controller import load_controller_context, ssr_request_scope, load_layout_props_and_docs, merge_docs
+from fymo.core.ssr_controller import load_controller_context, load_layout_props_and_docs, merge_docs
 from fymo.remote.errors import RemoteError, Redirect
 from fymo.utils.colors import Color
 
@@ -42,10 +42,6 @@ class TemplateRenderer:
         self.dev = dev
         self.sidecar = None
         self.manifest_cache = None
-        # Set by FymoApp after auth init (auth is configured after the
-        # renderer is constructed). Gates whether SSR opens a request scope
-        # around getContext()/getDoc() -- see _ssr_request_scope below.
-        self.auth_enabled = False
 
     def _render_error(
         self,
@@ -92,12 +88,12 @@ class TemplateRenderer:
         Args:
             route_path: The route path to render
             environ: The WSGI environ of the request, when available. Threaded
-                down to the controller so that, when auth is enabled, a
-                read-only request scope can be opened around getContext()/
-                getDoc() -- this is what lets current_user() resolve the
-                session cookie during SSR instead of only after hydration.
-                None for callers that don't have (or don't need) a request,
-                e.g. direct render_template() calls in tests.
+                down to the controller so a read-only request scope can be
+                opened around getContext()/getDoc() -- this is what lets
+                current_uid() resolve the request's identity during SSR
+                instead of only after hydration. None for callers that don't
+                have (or don't need) a request, e.g. direct render_template()
+                calls in tests.
 
         Returns:
             Tuple of (html, status_code, extra_headers). extra_headers is
@@ -214,7 +210,7 @@ class TemplateRenderer:
 
         if assets.layout_chain:
             layout_props_by_level, layout_docs = load_layout_props_and_docs(
-                assets.layout_chain, params, self.auth_enabled, environ
+                assets.layout_chain, params, environ
             )
             doc_meta = merge_docs(layout_docs + [leaf_doc])
             sidecar_props = {
@@ -264,25 +260,13 @@ class TemplateRenderer:
         )
         return html, "200 OK"
 
-    def _ssr_request_scope(self, environ: dict | None):
-        """Context manager opened around getContext()/getDoc() during SSR.
-
-        Thin wrapper over the shared `ssr_controller.ssr_request_scope`
-        helper (also used by the soft-nav data endpoint) bound to this
-        renderer's `auth_enabled` flag. Kept as a method so existing callers
-        and tests that reach into `_ssr_request_scope` keep working.
-        """
-        return ssr_request_scope(self.auth_enabled, environ)
-
     def _load_controller_data(
         self, controller_module: str, params: dict | None = None, environ: dict | None = None
     ) -> Tuple[Any, Dict[str, Any], Dict[str, Any]]:
         """Load controller and extract context and document metadata"""
         try:
             controller = importlib.import_module(controller_module)
-            props, doc_meta = load_controller_context(
-                controller, params, self.auth_enabled, environ
-            )
+            props, doc_meta = load_controller_context(controller, params, environ)
             return controller, props, doc_meta
         except (ImportError, AttributeError) as e:
             print(f"{Color.FAIL}Controller error: {e}{Color.ENDC}")

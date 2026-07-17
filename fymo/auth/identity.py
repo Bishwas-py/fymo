@@ -5,10 +5,6 @@ Apps register resolvers with @identify; current_uid() walks the chain
 inside a request scope and returns the first non-None Identity's uid,
 or None for anonymous requests. The framework owns no user shape and
 no user table; mapping a uid to a row is app code.
-
-This surface coexists with the legacy User/UserStore world during the
-migration: current_uid() never consults the legacy session-resolver
-chain, and current_user() never consults this one.
 """
 from __future__ import annotations
 
@@ -161,9 +157,8 @@ def current_uid() -> Optional[str]:
     if uid is not None:
         # Fire the identity-extras hooks with the resolved uid as the
         # subject, so app code (e.g. a generated app/auth/extras.py) can
-        # attach its user row to the scope. Same hooks the legacy
-        # current_user() walk fires with a User; on this path the subject
-        # is the uid string. fymo stores the merged result, never reads it.
+        # attach its user row to the scope. fymo stores the merged result,
+        # never reads it.
         from fymo.auth.context import _populate_identity_extras
         _populate_identity_extras(event, uid)
     return uid

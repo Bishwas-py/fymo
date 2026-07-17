@@ -52,11 +52,10 @@ def rate_limit(per_minute: int, scope: str = "ip") -> Callable[[F], F]:
               as the middleware limiter (first X-Forwarded-For hop only
               when `limits.rate_limit.trust_proxy` is on).
     - "user": the resolved identity's uid, from the @identify resolver
-              chain (fymo.auth.identity) first, then the legacy session
-              resolver chain while the two coexist. When neither identifies
-              the caller, falls back to the verified fymo_uid cookie
-              identity if present, else the client IP, so the limit always
-              binds rather than silently not applying.
+              chain (fymo.auth.identity). When no resolver identifies the
+              caller, falls back to the verified fymo_uid cookie identity
+              if present, else the client IP, so the limit always binds
+              rather than silently not applying.
     - "uid":  the verified fymo_uid anonymous identity, falling back to
               the client IP when the cookie is missing or fails HMAC
               verification (a cookieless caller must not get a fresh
@@ -96,9 +95,8 @@ def rate_limit(per_minute: int, scope: str = "ip") -> Callable[[F], F]:
 
 
 # One registry for the whole process, keyed by ((module, fn_name), scope_key).
-# Same seam pattern as identity._secret / auth_context._user_store: the
-# remote-function world has no FymoApp reference, so process-wide state lives
-# at module level.
+# Same seam pattern as identity._secret: the remote-function world has no
+# FymoApp reference, so process-wide state lives at module level.
 _registry = BucketRegistry()
 
 
@@ -130,8 +128,7 @@ def _identified_uid(environ: dict) -> Optional[str]:
 
     A resolver raising here, or returning a non-Identity value, counts as
     "did not identify" and the walk moves on to the next resolver
-    (fail-open), the same posture as the legacy session walk below: rate
-    limiting runs before the handler, so
+    (fail-open): rate limiting runs before the handler, so
     propagating would turn one broken resolver into an outage for every
     call to this function, while falling through only degrades the key to
     the uid/ip tier (the edge limiter still bounds adversarial traffic).
@@ -177,50 +174,6 @@ def _identified_uid(environ: dict) -> Optional[str]:
     return uid
 
 
-def _authenticated_user_id(environ: dict) -> Optional[int]:
-    """Resolve the signed-in user's id via the LEGACY session chain, or None.
-
-    Coexistence only: this block walks the same resolver chain
-    current_user() does and gets deleted with the User/UserStore model
-    (issue #80); _identified_uid above is the successor. The walk runs
-    against an event built straight from the environ, since enforcement
-    runs before the router opens the request scope. A resolver blowing up
-    (e.g. a stale fymo_session cookie on an app with auth disabled, where
-    the UserStore seam raises) counts as "not signed in" for limiting
-    purposes rather than failing the request.
-    """
-    try:
-        from fymo.auth.context import _fymo_session_resolver, _session_resolvers
-    except ImportError:
-        return None
-    # Mirror request_scope's event shape (fymo/remote/context.py), same
-    # trust_proxy-aware scheme resolution included: a resolver reading a
-    # key that's absent here would KeyError, get swallowed by the except
-    # below, and silently degrade the scope to uid/ip instead of surfacing
-    # the mismatch. "uid" is the one deliberate omission, it isn't resolved
-    # until the router opens the real scope, and no session resolver reads
-    # it (a session is what identifies the caller here, not the anon uid).
-    from fymo.core.middleware import resolve_scheme
-    from fymo.remote import context as _context
-    event = {
-        "cookies": _cookies_from_environ(environ),
-        "headers": {
-            k[5:].replace("_", "-").lower(): v
-            for k, v in environ.items() if k.startswith("HTTP_")
-        },
-        "remote_addr": environ.get("REMOTE_ADDR", ""),
-        "scheme": resolve_scheme(environ, _context._trust_proxy),
-    }
-    for resolve in (_fymo_session_resolver, *_session_resolvers):
-        try:
-            user = resolve(event)
-        except Exception:
-            continue
-        if user is not None:
-            return user.id
-    return None
-
-
 def _verified_uid(environ: dict) -> Optional[str]:
     """The fymo_uid cookie's uid, only if it HMAC-verifies. Never mints a
     fresh uid: a cookieless retry loop would then get a new bucket per
@@ -241,9 +194,6 @@ def _scope_key(rule: RateLimitRule, environ: dict) -> str:
         uid = _identified_uid(environ)
         if uid is not None:
             return f"user:{uid}"
-        user_id = _authenticated_user_id(environ)
-        if user_id is not None:
-            return f"user:{user_id}"
     if rule.scope in ("user", "uid"):
         uid = _verified_uid(environ)
         if uid is not None:

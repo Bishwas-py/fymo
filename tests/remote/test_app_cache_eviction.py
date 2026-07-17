@@ -35,13 +35,18 @@ def _scaffold(root, hello_body: str):
 
 @pytest.fixture(autouse=True)
 def _clean_app_modules():
-    """Belt-and-suspenders: no test in this file should leak an "app" module
-    into any other test file, regardless of what sys.path manipulation it
-    does mid-test."""
+    """Belt-and-suspenders in both directions: a stale "app" module leaked
+    by an earlier test file must not shadow this file's scaffolds, and no
+    test in this file may leak one onward, regardless of what sys.path
+    manipulation it does mid-test."""
+    def _evict():
+        for name in list(sys.modules):
+            if name == "app" or name.startswith("app."):
+                del sys.modules[name]
+
+    _evict()
     yield
-    for name in list(sys.modules):
-        if name == "app" or name.startswith("app."):
-            del sys.modules[name]
+    _evict()
 
 
 def test_no_eviction_across_repeated_calls_within_one_stable_root(tmp_path):

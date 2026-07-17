@@ -1,9 +1,5 @@
-"""Identity resolvers (issue #80, phase 1): Identity, ResolverEvent,
-@identify, current_uid(), and the promoted signed-token primitives.
-
-The new surface coexists with the legacy User/UserStore world in this
-phase; current_uid() walks only the @identify chain and never consults
-the legacy _session_resolvers or the fymo-session cookie resolver.
+"""Identity resolvers (issue #80): Identity, ResolverEvent, @identify,
+current_uid(), and the promoted signed-token primitives.
 """
 import dataclasses
 
@@ -19,7 +15,6 @@ from fymo.auth import (
     verify_password,
     verify_token,
 )
-from fymo.auth.context import register_session_resolver, reset_session_resolvers
 from fymo.auth.identity import reset_identity_resolvers, _identity_resolvers
 from fymo.remote.context import request_scope
 from fymo.remote.identity import set_secret
@@ -31,7 +26,6 @@ def clean_registry():
     reset_identity_resolvers()
     yield
     reset_identity_resolvers()
-    reset_session_resolvers()
 
 
 def _scope(environ=None):
@@ -251,13 +245,6 @@ def test_current_uid_sees_request_event_fields():
     assert seen == {"remote_addr": "192.0.2.7", "cookie": "abc", "scheme": "https"}
 
 
-def test_current_uid_ignores_legacy_session_resolvers():
-    sentinel = object()
-    register_session_resolver(lambda event: sentinel)
-    with _scope():
-        assert current_uid() is None
-
-
 # --------------- resolver return-type validation ---------------
 
 
@@ -374,21 +361,23 @@ def test_verify_token_rejects_issued_at_segment_tampered_alone():
     assert verify_token(forged, now=1_000_010) is None
 
 
-# --------------- domain separation across token kinds ---------------
+# --------------- domain separation across HMAC purposes ---------------
 
 
-def test_purpose_tokens_never_pass_verify_token():
-    from fymo.auth.session import make_session_token
-    from fymo.auth.verify_token import make_reset_token, make_verify_token
+def test_token_signed_under_another_prefix_never_passes_verify_token():
+    """The "token:" prefix is part of the signed payload: a token minted by
+    any other HMAC purpose sharing FYMO_SECRET (a different prefix over the
+    same wire shape) must not verify here."""
+    import base64
+    import hmac as hmac_mod
+    from hashlib import sha256
 
-    assert verify_token(make_verify_token(42)) is None
-    assert verify_token(make_reset_token(42)) is None
-    assert verify_token(make_session_token(42, 0)) is None
+    from fymo.auth.verify_token import _b64url_encode, _get_secret
 
-
-def test_sign_token_never_passes_purpose_verifiers():
-    from fymo.auth.verify_token import verify_reset_token, verify_verify_token
-
-    token = sign_token("42")
-    assert verify_verify_token(token) is None
-    assert verify_reset_token(token) is None
+    uid_b64 = _b64url_encode("user-42")
+    issued_at = 1_000_000
+    payload = f"other:{uid_b64}:{issued_at}".encode("utf-8")
+    mac = hmac_mod.new(_get_secret(), payload, sha256).digest()
+    sig = base64.urlsafe_b64encode(mac).rstrip(b"=").decode("ascii")[:22]
+    forged = f"{uid_b64}.{issued_at}.{sig}"
+    assert verify_token(forged, now=issued_at + 10) is None

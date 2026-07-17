@@ -102,17 +102,17 @@ def test_no_app_lib_py_file_produces_no_warning(example_app: Path, capsys):
 
 
 def test_read_yaml_section_missing_file_returns_empty_dict(tmp_path: Path):
-    assert read_yaml_section(tmp_path, "auth") == {}
+    assert read_yaml_section(tmp_path, "remote") == {}
 
 
 def test_read_yaml_section_bad_yaml_returns_empty_dict(tmp_path: Path):
     (tmp_path / "fymo.yml").write_text(":\n  - not: valid: yaml")
-    assert read_yaml_section(tmp_path, "auth") == {}
+    assert read_yaml_section(tmp_path, "remote") == {}
 
 
 def test_read_yaml_section_returns_requested_key(tmp_path: Path):
-    (tmp_path / "fymo.yml").write_text("auth:\n  enabled: true\nremote:\n  explicit_optin: true\n")
-    assert read_yaml_section(tmp_path, "auth") == {"enabled": True}
+    (tmp_path / "fymo.yml").write_text("jobs:\n  provider: threaded\nremote:\n  explicit_optin: true\n")
+    assert read_yaml_section(tmp_path, "jobs") == {"provider": "threaded"}
     assert read_yaml_section(tmp_path, "remote") == {"explicit_optin": True}
     assert read_yaml_section(tmp_path, "missing") == {}
 
@@ -126,8 +126,8 @@ _REQUIRE_AUTH_MODULE = (
 )
 
 
-def test_require_auth_with_no_active_providers_raises_build_error(example_app: Path):
-    """Issue #29: @require_auth shipped with auth off entirely must fail
+def test_require_auth_with_no_resolvers_raises_build_error(example_app: Path):
+    """@require_auth shipped with zero @identify resolvers must fail
     `fymo build`, naming the site, before node/esbuild runs. @remote here
     keeps the function clear of the unrelated #8 exposure check, isolating
     this test to the auth-enforcement failure."""
@@ -136,14 +136,14 @@ def test_require_auth_with_no_active_providers_raises_build_error(example_app: P
     (example_app / "app" / "remote" / "comments.py").write_text(_REQUIRE_AUTH_MODULE)
     dist_dir = example_app / "dist"
     cache_dir = example_app / ".fymo" / "entries"
-    with pytest.raises(BuildError, match="auth.enabled is not true"):
+    with pytest.raises(BuildError, match="no\\s+@identify resolver"):
         prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
 
 
-def test_require_auth_with_no_active_providers_does_not_fail_dev(example_app: Path, monkeypatch):
+def test_require_auth_with_no_resolvers_does_not_fail_dev(example_app: Path, monkeypatch):
     """Same misconfiguration, but `fymo dev`: an app is routinely mid-setup
-    locally (auth not wired up yet), so this check is build-only, matching
-    the "no routes" check's existing dev-mode exemption."""
+    locally (app/auth/ not written yet), so this check is build-only,
+    matching the "no routes" check's existing dev-mode exemption."""
     (example_app / "app" / "remote").mkdir(parents=True, exist_ok=True)
     (example_app / "app" / "remote" / "__init__.py").write_text("")
     (example_app / "app" / "remote" / "comments.py").write_text(_REQUIRE_AUTH_MODULE)
@@ -155,11 +155,11 @@ def test_require_auth_with_no_active_providers_does_not_fail_dev(example_app: Pa
 
 
 @pytest.mark.usefixtures("node_available")
-def test_blog_app_require_auth_with_password_provider_builds_clean(blog_app: Path):
-    """Regression check, not just a new-code assumption: blog_app already
-    has auth.enabled true, the default password provider, and a real
-    @require_auth site in app/remote/posts.py (create_comment). That's
-    exactly the shape check_auth_enforcement_hygiene must let through."""
+def test_blog_app_require_auth_with_resolver_builds_clean(blog_app: Path):
+    """Regression check, not just a new-code assumption: blog_app has an
+    app/auth/ resolver and a real @require_auth site in
+    app/remote/posts.py (create_comment). That's exactly the shape
+    check_auth_enforcement_hygiene must let through."""
     dist_dir = blog_app / "dist"
     cache_dir = blog_app / ".fymo" / "entries"
     config = prepare_build_config(blog_app, dist_dir, cache_dir, dev=False)

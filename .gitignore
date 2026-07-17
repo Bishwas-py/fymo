@@ -10,5 +10,7 @@ venv/
 .playwright-mcp/
 *.egg-info/
 /build/
+# blog example's runtime users db (app/auth/store.py writes data/app.db)
+/examples/blog_app/data/
 # local working docs (specs/plans) — never committed; substance goes to journal/
 /docs/superpowers/

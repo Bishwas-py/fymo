@@ -1,9 +1,9 @@
-"""SSR-time auth: current_user() must resolve during page render, from a
-copy of blog_app (auth already enabled there) with one extra route added:
-`whoami`, whose controller calls current_user() and puts the email in
-props, and whose template renders it. This proves the "logged-out flash"
-is gone -- the session is visible at render time, not just after the
-client hydrates and makes its own current_user() remote call.
+"""SSR-time identity: current_uid() must resolve during page render, from a
+copy of blog_app (which ships an app/auth/ session resolver) with one extra
+route added: `whoami`, whose controller reads the identity and puts the
+email from identity_extras() in props, and whose template renders it. This
+proves the "logged-out flash" is gone: the session is visible at render
+time, not just after the client hydrates and makes its own remote call.
 """
 import io
 import sys
@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-_WHOAMI_CONTROLLER = '''"""Whoami controller: exercises current_user() during SSR."""
-from fymo.auth.context import current_user
+_WHOAMI_CONTROLLER = '''"""Whoami controller: exercises current_uid() during SSR."""
+from fymo.auth import current_uid, identity_extras
 
 
 def getContext():
-    user = current_user()
-    return {"email": user.email if user else None}
+    uid = current_uid()
+    return {"email": identity_extras().get("email") if uid else None}
 '''
 
 _WHOAMI_TEMPLATE = """<script>
@@ -83,14 +83,15 @@ def test_ssr_sees_logged_in_user_from_session_cookie(whoami_app: Path):
     BuildPipeline(project_root=whoami_app).build(dev=False)
 
     from fymo import create_app
-    from fymo.auth.session import make_session_token
+    from fymo.auth import sign_token
 
     app = create_app(whoami_app)
     try:
-        user = app.user_store.create("alex@example.com", None)
-        token = make_session_token(user.id, user.session_epoch)
+        from app.auth import store
+        uid = store.create("alex@example.com", "longpassword")
+        token = sign_token(uid)
 
-        (status, _), html = _wsgi_get(app, "/whoami", cookies=f"fymo_session={token}")
+        (status, _), html = _wsgi_get(app, "/whoami", cookies=f"session={token}")
         assert status.startswith("200"), (status, html)
         assert b"Logged in as alex@example.com" in html
     finally:

@@ -55,7 +55,6 @@ identities mid-block and restore on exit, however deeply nested.
 """
 from __future__ import annotations
 
-import itertools
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -245,86 +244,3 @@ def init_providers(project_root: Path) -> Iterator[SimpleNamespace]:
         with broadcast_mod._lock:
             broadcast_mod._provider = prior_broadcast_provider
             broadcast_mod._channels = prior_broadcast_channels
-
-
-# --------------- legacy User-based helpers ---------------
-# Deleted together with the legacy auth model (User/UserStore/current_user).
-
-_legacy_next_user_id = itertools.count(1)
-
-_legacy_acting_user: ContextVar = ContextVar(
-    "fymo_testing_legacy_acting_user", default=None
-)
-
-
-def _legacy_make_user(email: str = "test@example.com", **overrides):
-    from datetime import datetime, timezone
-
-    from fymo.auth.store import User
-
-    fields = {
-        "id": next(_legacy_next_user_id),
-        "email": email,
-        "password_hash": None,
-        "email_verified": True,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "fymo_uid": None,
-        "session_epoch": 1,
-    }
-    fields.update(overrides)
-    return User(**fields)
-
-
-def _legacy_uid_for(user) -> str:
-    return f"u_test{user.id}"
-
-
-def _legacy_testing_resolver(event: dict):
-    return _legacy_acting_user.get()
-
-
-@contextmanager
-def _legacy_signed_in(
-    user=None,
-    *,
-    uid: Optional[str] = None,
-    environ: Optional[dict] = None,
-):
-    from fymo.auth import context as auth_context
-    from fymo.remote.context import request_scope
-
-    if user is None:
-        user = _legacy_make_user()
-    if uid is None:
-        uid = _legacy_uid_for(user)
-    auth_context.register_session_resolver(_legacy_testing_resolver)
-    token = _legacy_acting_user.set(user)
-    try:
-        with request_scope(uid=uid, environ=dict(environ or {})):
-            yield user
-    finally:
-        _legacy_acting_user.reset(token)
-        try:
-            auth_context._session_resolvers.remove(_legacy_testing_resolver)
-        except ValueError:
-            pass  # reset_session_resolvers() already dropped it mid-block
-
-
-@contextmanager
-def _legacy_acting_as(user, *, uid: Optional[str] = None):
-    from fymo.remote.context import _current_event
-
-    if _legacy_acting_user.get() is None:
-        raise RuntimeError(
-            "acting_as() requires an enclosing signed_in() block; "
-            "wrap the test body in `with signed_in(...):` first"
-        )
-    event = _current_event.get()
-    prior_uid = event["uid"]
-    token = _legacy_acting_user.set(user)
-    event["uid"] = uid if uid is not None else _legacy_uid_for(user)
-    try:
-        yield user
-    finally:
-        event["uid"] = prior_uid
-        _legacy_acting_user.reset(token)

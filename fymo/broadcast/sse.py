@@ -36,7 +36,7 @@ def _error(start_response, status: str, message: str):
 
 def _run_guard(fn, bound_args: dict, environ: dict) -> bool:
     """Run the channel body as the authorization guard, inside the same
-    request scope remote functions get, so current_user() works. Allow
+    request scope remote functions get, so current_uid() works. Allow
     unless the body raises or returns exactly False (`...`/None bodies —
     the open-channel case — allow)."""
     from fymo.remote.context import request_scope

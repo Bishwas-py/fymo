@@ -1,14 +1,20 @@
 /**
  * Shared client-side auth state for the blog.
  *
- * Wraps the generated `$remote/auth` client in a Svelte store so the Nav and
- * the comment box read one source of truth. The generated client is imported
- * lazily (dynamic `import()` inside browser-only calls) so this module carries
- * no `$remote` runtime dependency during SSR — only the erased type import
- * remains at compile time.
+ * Wraps the app-owned auth endpoints (app/remote/auth.py, scaffolded by
+ * `fymo generate auth` and edited freely) in a Svelte store so the Nav and
+ * the comment box read one source of truth. The generated $remote client is
+ * imported lazily (dynamic `import()` inside browser-only calls) so this
+ * module carries no `$remote` runtime dependency during SSR.
  */
 import { writable } from 'svelte/store';
-import type { UserPublic } from '$remote/auth';
+
+/** The whitelisted subset me() returns; see app/remote/auth.py. */
+export interface UserPublic {
+  uid: string;
+  email: string;
+  created_at?: string;
+}
 
 /** The signed-in user, or null when logged out. */
 export const user = writable<UserPublic | null>(null);
@@ -24,7 +30,7 @@ export async function ensureLoaded(): Promise<void> {
   if (started) return;
   started = true;
   try {
-    user.set(await (await client()).me());
+    user.set(((await (await client()).me()) as UserPublic | null) ?? null);
   } catch {
     user.set(null);
   } finally {
@@ -32,14 +38,18 @@ export async function ensureLoaded(): Promise<void> {
   }
 }
 
-export async function login(email: string, password: string): Promise<UserPublic> {
-  const u = await (await client()).login(email, password);
-  user.set(u);
-  return u;
+/**
+ * Server-driven flow: on success the login endpoint answers with a redirect
+ * envelope and the $remote client navigates (back to the current page), so
+ * the reloaded page sees the session cookie. On bad credentials it throws.
+ */
+export async function login(email: string, password: string): Promise<void> {
+  const next = window.location.pathname + window.location.search;
+  await (await client()).login(email, password, next);
 }
 
 export async function signup(email: string, password: string): Promise<UserPublic> {
-  const u = await (await client()).signup(email, password);
+  const u = (await (await client()).signup(email, password)) as UserPublic;
   user.set(u);
   return u;
 }
