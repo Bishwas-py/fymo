@@ -42,6 +42,28 @@ def _refuse(message: str) -> None:
     raise SystemExit(1)
 
 
+def write_auth_files(root: Path, variant: str) -> list:
+    """Render the variant's templates into `root`; return the written paths
+    (relative). Shared by `fymo generate auth` and `fymo new`; callers own
+    any exists/refusal checks."""
+    files = _VARIANT_FILES[variant]
+    auth_dir = root / "app" / "auth"
+    auth_dir.mkdir(parents=True)
+    (auth_dir / "__init__.py").write_text(_APP_AUTH_INIT)
+    written = ["app/auth/__init__.py"]
+    remote_init = root / "app" / "remote" / "__init__.py"
+    if any(rel.startswith("app/remote/") for rel in files.values()) and not remote_init.exists():
+        remote_init.parent.mkdir(parents=True, exist_ok=True)
+        remote_init.write_text(_APP_REMOTE_INIT)
+        written.append("app/remote/__init__.py")
+    for tmpl_rel, out_rel in files.items():
+        out_path = root / out_rel
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text((_TEMPLATES_DIR / tmpl_rel).read_text())
+        written.append(out_rel)
+    return written
+
+
 def generate_auth(variant: str = "password", project_root: Optional[Path] = None) -> None:
     if variant not in _VARIANT_FILES:
         _refuse(f"Unknown auth variant '{variant}'. Use password (default), clerk, or skeleton.")
@@ -71,19 +93,7 @@ def generate_auth(variant: str = "password", project_root: Optional[Path] = None
             )
 
     Color.print_info(f"Generating app-owned auth ({variant}) into {root}")
-    auth_dir.mkdir(parents=True)
-    (auth_dir / "__init__.py").write_text(_APP_AUTH_INIT)
-    written = ["app/auth/__init__.py"]
-    remote_init = root / "app" / "remote" / "__init__.py"
-    if any(rel.startswith("app/remote/") for rel in files.values()) and not remote_init.exists():
-        remote_init.parent.mkdir(parents=True, exist_ok=True)
-        remote_init.write_text(_APP_REMOTE_INIT)
-        written.append("app/remote/__init__.py")
-    for tmpl_rel, out_rel in files.items():
-        out_path = root / out_rel
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text((_TEMPLATES_DIR / tmpl_rel).read_text())
-        written.append(out_rel)
+    written = write_auth_files(root, variant)
 
     Color.print_success("Generated:")
     for rel in written:

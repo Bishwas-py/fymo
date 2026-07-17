@@ -138,6 +138,163 @@ def test_new_scaffolds_root_layout_with_favicon_link(tmp_path, monkeypatch):
     assert "children" in content
 
 
+AUTH_SCAFFOLD_FILES = [
+    "app/auth/__init__.py",
+    "app/auth/resolver.py",
+    "app/auth/store.py",
+    "app/auth/extras.py",
+    "app/auth/public.py",
+    "app/remote/__init__.py",
+    "app/remote/auth.py",
+    "schema/users.sql",
+    "app/controllers/signin.py",
+    "app/templates/signin/index.svelte",
+]
+
+
+def test_new_scaffolds_working_password_auth_by_default(tmp_path, monkeypatch):
+    """Issue #80 phase 5: a fresh `fymo new` project reaches a working login
+    with zero extra steps. The full password auth file set plus the signin
+    page are part of the default scaffold."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    project = tmp_path / "myapp"
+    for rel in AUTH_SCAFFOLD_FILES:
+        assert (project / rel).is_file(), f"missing {rel}"
+
+
+def test_new_auth_files_are_the_generate_auth_templates(tmp_path, monkeypatch):
+    """fymo new must reuse the exact `fymo generate auth` code path, not a
+    parallel copy of the templates: the rendered files are byte-identical
+    to the password variant's template sources."""
+    from fymo.cli.commands.generate_auth import _TEMPLATES_DIR, _VARIANT_FILES
+
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    project = tmp_path / "myapp"
+    for tmpl_rel, out_rel in _VARIANT_FILES["password"].items():
+        assert (project / out_rel).read_text() == (_TEMPLATES_DIR / tmpl_rel).read_text()
+
+
+def test_new_fymo_yml_routes_signin(tmp_path, monkeypatch):
+    import yaml
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    data = yaml.safe_load((tmp_path / "myapp" / "fymo.yml").read_text())
+    assert data["routes"]["signin"] == "signin.index"
+
+
+def test_new_fymo_yml_mentions_require_auth_in_comments_only(tmp_path, monkeypatch):
+    """The default scaffold ships no active require_auth: it must boot
+    without opinions about what to protect. require_auth appears in the
+    fymo.yml comment block only, matching the file's existing comment style."""
+    import yaml
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    content = (tmp_path / "myapp" / "fymo.yml").read_text()
+    assert "require_auth" in content
+    data = yaml.safe_load(content)
+    assert "require_auth" not in str(data)
+
+
+def test_new_signin_template_wires_remote_auth_and_identity(tmp_path, monkeypatch):
+    """The signin page calls the generated remote functions and reads the
+    $fymo/auth identity store; login carries the ?next= path require_auth
+    redirects arrive with. The remote callables are threaded through the
+    controller context as props (the SSR pass deliberately externalizes
+    $remote/*, so a top-level value import would break the SSR module;
+    blog_app's Comments flow is the reference for this pattern)."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    project = tmp_path / "myapp"
+    controller = (project / "app" / "controllers" / "signin.py").read_text()
+    assert "from app.remote.auth import" in controller
+    assert "'login': login" in controller
+    assert "'signup': signup" in controller
+    content = (project / "app" / "templates" / "signin" / "index.svelte").read_text()
+    assert "$fymo/auth" in content
+    assert "login" in content
+    assert "signup" in content
+    assert "next" in content
+    assert "from '$remote" not in content
+
+
+def test_new_controllers_use_get_context_convention(tmp_path, monkeypatch):
+    """The runtime reads getContext()/getDoc() from controllers
+    (fymo/core/ssr_controller.py); a module-level `context` dict is never
+    consulted, so a scaffold shipping one renders empty props. Both
+    scaffolded controllers must use the real convention."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    for name in ("home", "signin"):
+        content = (tmp_path / "myapp" / "app" / "controllers" / f"{name}.py").read_text()
+        assert "def getContext(" in content, name
+        assert "\ncontext = " not in content, name
+
+
+def test_new_gitignore_ignores_data_dir(tmp_path, monkeypatch):
+    """The generated store keeps the sqlite db at data/app.db and its own
+    docstring says to keep it out of git; the scaffold's .gitignore must
+    actually do that."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    gitignore = (tmp_path / "myapp" / ".gitignore").read_text()
+    assert "/data/" in gitignore
+
+
+def test_new_no_auth_skips_auth_scaffold(tmp_path, monkeypatch):
+    import yaml
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp", auth=False)
+    project = tmp_path / "myapp"
+    for rel in AUTH_SCAFFOLD_FILES:
+        assert not (project / rel).exists(), f"unexpected {rel}"
+    assert not (project / "app" / "auth").exists()
+    assert not (project / "schema").exists()
+    data = yaml.safe_load((project / "fymo.yml").read_text())
+    assert "signin" not in data["routes"]
+
+
+def test_cli_new_no_auth_flag(tmp_path):
+    from click.testing import CliRunner
+    from fymo.cli.main import cli
+
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(cli, ["new", "myapp", "--no-auth"])
+        assert result.exit_code == 0, result.output
+        assert (Path.cwd() / "myapp" / "fymo.yml").is_file()
+        assert not (Path.cwd() / "myapp" / "app" / "auth").exists()
+
+
+def test_new_next_steps_reflect_scaffolded_auth(tmp_path, monkeypatch, capsys):
+    """The default scaffold already contains working auth, so the printed
+    next steps must say so and must not tell the user to run the generator."""
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    out = capsys.readouterr().out
+    assert "/signin" in out
+    assert "generate auth" not in out
+
+
+def test_new_no_auth_next_steps_point_at_generate_auth(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp", auth=False)
+    out = capsys.readouterr().out
+    assert "fymo generate auth" in out
+    assert "/signin" not in out
+
+
+def test_default_scaffold_passes_page_auth_hygiene(tmp_path, monkeypatch):
+    """No active require_auth in the scaffold means the require_auth-without-
+    resolver check has nothing to fire on; pin that."""
+    from fymo.build.hygiene import check_page_auth_hygiene
+
+    monkeypatch.chdir(tmp_path)
+    create_project("myapp")
+    assert check_page_auth_hygiene(tmp_path / "myapp") == []
+
+
 def test_new_scaffolds_package_json_with_full_build_deps(tmp_path, monkeypatch):
     """Issue #55: a fresh `fymo new` project could never build. fymo/build/js/build.mjs
     requires esbuild-svelte and svelte-preprocess directly, and app/lib code commonly

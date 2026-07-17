@@ -19,10 +19,17 @@ def cli():
 @cli.command()
 @click.argument('name')
 @click.option('--template', '-t', default='default', help='Project template to use')
-def new(name, template):
-    """Create a new Fymo project"""
+@click.option('--no-auth', is_flag=True, default=False,
+              help='Skip the default password auth scaffold (app/auth/, /signin page)')
+def new(name, template, no_auth):
+    """Create a new Fymo project.
+
+    The default scaffold includes working password auth: app/auth/,
+    app/remote/auth.py, and a signin page at /signin, ready after
+    `fymo dev`. Use --no-auth for apps bringing their own identity.
+    """
     from fymo.cli.commands.new import create_project
-    create_project(name, template)
+    create_project(name, template, auth=not no_auth)
 
 
 @cli.command()
