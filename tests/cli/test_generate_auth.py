@@ -20,14 +20,16 @@ from fymo.auth.identity import reset_identity_resolvers
 from fymo.cli.commands.generate_auth import generate_auth
 from fymo.remote import devalue, router as router_mod
 from fymo.remote.context import request_scope
+from fymo.remote.discovery import discover_remote_modules
 from fymo.remote.identity import set_secret
 
 PASSWORD_FILES = [
     "app/auth/__init__.py",
     "app/auth/resolver.py",
     "app/auth/store.py",
-    "app/auth/routes.py",
     "app/auth/extras.py",
+    "app/remote/__init__.py",
+    "app/remote/auth.py",
     "schema/users.sql",
 ]
 
@@ -48,6 +50,11 @@ def _scaffold_project(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _generated_py_files(project: Path):
+    yield from (project / "app" / "auth").glob("*.py")
+    yield from (project / "app" / "remote").glob("*.py")
+
+
 def _cleanup_app_modules() -> None:
     for name in list(sys.modules):
         if name == "app" or name.startswith("app."):
@@ -64,7 +71,6 @@ def _clean():
     reset_identity_resolvers()
     auth_context.reset_identity_extras_hooks()
     _cleanup_app_modules()
-    router_mod.set_system_modules({})
 
 
 # --------------- file sets ---------------
@@ -84,7 +90,7 @@ def test_clerk_variant_writes_resolver_only(tmp_path, monkeypatch):
     generate_auth("clerk")
     assert (project / "app/auth/resolver.py").is_file()
     assert not (project / "app/auth/store.py").exists()
-    assert not (project / "app/auth/routes.py").exists()
+    assert not (project / "app/remote/auth.py").exists()
     assert not (project / "schema/users.sql").exists()
 
 
@@ -94,6 +100,7 @@ def test_skeleton_variant_writes_resolver_only(tmp_path, monkeypatch):
     generate_auth("skeleton")
     assert (project / "app/auth/resolver.py").is_file()
     assert not (project / "app/auth/store.py").exists()
+    assert not (project / "app/remote/auth.py").exists()
 
 
 # --------------- refusals ---------------
@@ -109,6 +116,32 @@ def test_refuses_when_app_auth_exists(tmp_path, monkeypatch, capsys):
     combined = out.out + out.err
     assert "app/auth" in combined
     assert "delete or move" in combined.lower()
+
+
+def test_refuses_when_app_remote_auth_exists(tmp_path, monkeypatch, capsys):
+    project = _scaffold_project(tmp_path)
+    (project / "app" / "remote").mkdir()
+    (project / "app" / "remote" / "auth.py").write_text("def taken(): pass\n")
+    monkeypatch.chdir(project)
+    with pytest.raises(SystemExit):
+        generate_auth("password")
+    combined = "".join(capsys.readouterr())
+    assert "app/remote/auth.py" in combined
+    assert not (project / "app" / "auth").exists()
+
+
+def test_existing_app_remote_dir_is_fine(tmp_path, monkeypatch):
+    """Apps legitimately have app/remote/ already; only the auth.py file
+    the generator wants to own may refuse."""
+    project = _scaffold_project(tmp_path)
+    (project / "app" / "remote").mkdir()
+    (project / "app" / "remote" / "__init__.py").write_text("")
+    (project / "app" / "remote" / "posts.py").write_text("def list() -> list: return []\n")
+    monkeypatch.chdir(project)
+    generate_auth("password")
+    assert (project / "app/remote/auth.py").is_file()
+    assert (project / "app/remote/posts.py").read_text() == "def list() -> list: return []\n"
+    assert (project / "app/remote/__init__.py").read_text() == ""
 
 
 def test_refuses_outside_a_fymo_project(tmp_path, monkeypatch, capsys):
@@ -137,7 +170,7 @@ def test_generated_python_compiles_all_variants(tmp_path, monkeypatch):
         project = _scaffold_project(tmp_path / variant)
         monkeypatch.chdir(project)
         generate_auth(variant)
-        for py in (project / "app" / "auth").glob("*.py"):
+        for py in _generated_py_files(project):
             compile(py.read_text(), str(py), "exec")
 
 
@@ -147,7 +180,7 @@ def test_generated_code_never_imports_legacy_auth(tmp_path, monkeypatch):
         project = _scaffold_project(tmp_path / variant)
         monkeypatch.chdir(project)
         generate_auth(variant)
-        for py in (project / "app" / "auth").glob("*.py"):
+        for py in _generated_py_files(project):
             text = py.read_text()
             for snippet in FORBIDDEN_SNIPPETS:
                 assert snippet not in text, f"{py.name} ({variant}) references {snippet}"
@@ -175,6 +208,9 @@ def test_next_steps_printed(tmp_path, monkeypatch, capsys):
     assert "signin" in out
     assert "require_auth" in out
     assert "schema/users.sql" in out
+    # The endpoints land in app/remote/auth.py directly, so no manual
+    # wrap-or-move step may be suggested anymore.
+    assert "wrap or move" not in out
 
 
 # --------------- click surface ---------------
@@ -186,7 +222,7 @@ def test_cli_generate_auth_variants(tmp_path):
 
     runner = CliRunner()
     for args, marker in (
-        (["generate", "auth"], "app/auth/routes.py"),
+        (["generate", "auth"], "app/remote/auth.py"),
         (["generate", "auth", "--clerk"], "pyjwt"),
         (["generate", "auth", "--skeleton"], "resolver"),
     ):
@@ -248,11 +284,17 @@ def _b64url(s: str) -> str:
     return base64.urlsafe_b64encode(s.encode("utf-8")).rstrip(b"=").decode("ascii")
 
 
+# The discovered content hash of app/remote/auth.py, set by generated_app.
+# Requests hit /_fymo/remote/<this hash>/<fn>, same URL shape the browser
+# client uses.
+_auth_module_hash = None
+
+
 def _call(fn: str, args: list, cookies: str = ""):
     body = json.dumps({"payload": _b64url(devalue.stringify(args))}).encode()
     env = {
         "REQUEST_METHOD": "POST",
-        "PATH_INFO": f"/_fymo/remote/apphash/{fn}",
+        "PATH_INFO": f"/_fymo/remote/{_auth_module_hash}/{fn}",
         "CONTENT_LENGTH": str(len(body)),
         "CONTENT_TYPE": "application/json",
         "HTTP_COOKIE": cookies,
@@ -281,25 +323,29 @@ def _session_cookie(headers) -> "str | None":
 
 @pytest.fixture
 def generated_app(tmp_path, monkeypatch):
-    """Scaffold a project, generate password auth, import it, and wire the
-    generated remote functions into the router the way a curated module is."""
+    """Scaffold a project, generate password auth, and reach the endpoints
+    through the real pipeline: import_auth_modules registers the resolver,
+    discover_remote_modules scans app/remote/*.py exactly as the build
+    does, and the router imports app.remote.auth itself per request. The
+    only harness stitch is _resolve_module_for_hash, wired to the
+    discovered hash->module map, standing in for the production
+    ManifestCache.module_for_hash lookup that dev/prod servers install.
+    Nothing injects the functions: if discovery could not see them, every
+    call here would 404."""
     project = _scaffold_project(tmp_path)
     monkeypatch.chdir(project)
     generate_auth("password")
     import_auth_modules(project)
-    sys.path.insert(0, str(project))
-    try:
-        import importlib
-        routes = importlib.import_module("app.auth.routes")
-    finally:
-        sys.path.remove(str(project))
-    fns = {"signup": routes.signup, "login": routes.login,
-           "logout": routes.logout, "me": routes.me}
-    router_mod.set_system_modules({"authmod": fns})
-    monkeypatch.setattr(
-        router_mod, "_resolve_module_for_hash",
-        lambda h: "authmod" if h == "apphash" else None,
-    )
+    monkeypatch.syspath_prepend(str(project))
+    discovered = discover_remote_modules(project)
+    assert set(discovered.get("auth", {})) == {"signup", "login", "logout", "me"}
+    hash_to_module = {
+        next(iter(fns.values())).module_hash: module
+        for module, fns in discovered.items()
+    }
+    monkeypatch.setattr(router_mod, "_resolve_module_for_hash", hash_to_module.get)
+    global _auth_module_hash
+    _auth_module_hash = next(iter(discovered["auth"].values())).module_hash
     return project
 
 
@@ -346,11 +392,39 @@ def test_login_redirects_and_sets_cookie(generated_app):
 
 
 def test_login_open_redirect_guard(generated_app):
+    """Browsers normalize backslashes to slashes in http(s) URLs, so
+    "/\\evil.example" becomes the protocol-relative "//evil.example" after
+    the redirect: backslash anywhere in `next` must fall back to "/".
+    A leading space fails the startswith("/") check, pinned here so the
+    whitespace vector stays covered if the guard is ever rewritten."""
     _call("signup", ["dave@example.com", "longpassword"])
-    for evil in ("//evil.example", "https://evil.example", "javascript:alert(1)"):
+    evil_nexts = (
+        "//evil.example",
+        "https://evil.example",
+        "javascript:alert(1)",
+        "/\\evil.example",
+        "/\\/evil.example",
+        " //evil.example",
+    )
+    for evil in evil_nexts:
         (_, _), env = _call("login", ["dave@example.com", "longpassword", evil])
         assert env["type"] == "redirect"
         assert env["location"] == "/", f"unsafe next {evil!r} leaked through"
+
+
+def test_password_over_max_length_is_rejected(generated_app):
+    """scrypt cost grows with input size; the router's 1 MiB body cap alone
+    still allows CPU-amplifying passwords, so _validate caps them at 1024."""
+    (_, _), env = _call("signup", ["hank@example.com", "x" * 1025])
+    assert env["type"] == "error"
+    assert env["status"] == 400
+
+    (_, _), env = _call("login", ["hank@example.com", "x" * 1025])
+    assert env["type"] == "error"
+    assert env["status"] == 400
+
+    (_, _), env = _call("signup", ["hank@example.com", "x" * 1024])
+    assert env["type"] == "result"
 
 
 def test_me_round_trip_and_logout(generated_app):

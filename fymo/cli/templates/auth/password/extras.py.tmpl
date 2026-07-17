@@ -14,7 +14,7 @@ identity-extras hook and exposes it behind a typed accessor:
 Extend Extras with whatever your app needs next to the identity (role,
 org, plan, ...): add the column, load it in _load_row, add the field.
 Extras stay server-side; expose a safe subset to the client yourself
-(see me() in app/auth/routes.py).
+(see me() in app/remote/auth.py).
 """
 from dataclasses import dataclass
 
