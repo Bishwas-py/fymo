@@ -42,7 +42,9 @@ def test_hygiene_violation_raises_before_node_check(example_app: Path, monkeypat
         prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
 
 
-def test_media_without_storage_raises_build_error(example_app: Path):
+def test_top_level_media_key_raises_build_error(example_app: Path):
+    """The removed `media:` key must fail `fymo build` with the migration
+    text naming `storage.expose`, mirroring the boot-time refusal."""
     (example_app / "fymo.yml").write_text(
         "media:\n"
         "  - prefix: /media/videos/\n"
@@ -51,7 +53,21 @@ def test_media_without_storage_raises_build_error(example_app: Path):
     )
     dist_dir = example_app / "dist"
     cache_dir = example_app / ".fymo" / "entries"
-    with pytest.raises(BuildError, match="storage:"):
+    with pytest.raises(BuildError, match=r"storage\.expose"):
+        prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
+
+
+def test_expose_without_provider_raises_build_error(example_app: Path):
+    (example_app / "fymo.yml").write_text(
+        "storage:\n"
+        "  expose:\n"
+        "    - prefix: /media/videos/\n"
+        "      dir: videos\n"
+        "      extensions: [webm]\n"
+    )
+    dist_dir = example_app / "dist"
+    cache_dir = example_app / ".fymo" / "entries"
+    with pytest.raises(BuildError, match=r"storage\.provider"):
         prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
 
 

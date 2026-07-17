@@ -29,6 +29,17 @@ routes:
 remote:
   mode: strict
 
+# Files committed to git belong in app/static/. Files created at runtime
+# (uploads, recordings, anything a job writes) live under storage:, and an
+# expose: entry is what gives a storage directory a URL. Uncomment to use:
+# storage:
+#   provider: local
+#   root: data
+#   expose:
+#     - prefix: /media/videos/
+#       dir: videos
+#       extensions: [webm]
+
 # Build configuration
 build:
   output_dir: dist

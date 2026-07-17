@@ -1,6 +1,6 @@
 """Tests for LocalStorageProvider (fymo/storage/providers/local.py).
 
-Mirrors tests/core/test_media.py's traversal/symlink coverage, since
+Mirrors tests/core/test_expose.py's traversal/symlink coverage, since
 LocalStorageProvider carries over that module's containment check.
 """
 from pathlib import Path

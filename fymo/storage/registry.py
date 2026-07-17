@@ -42,7 +42,8 @@ def build_storage_provider(config: Any, project_root: Path) -> StorageProvider:
 
     def _default():
         raise StorageConfigError(
-            "storage: section is required when media: is configured, no default provider"
+            "storage: is configured but empty and there is no default provider, "
+            "set storage.provider (e.g. `storage: {provider: local}`)"
         )
 
     def _local(**opts):
@@ -51,9 +52,13 @@ def build_storage_provider(config: Any, project_root: Path) -> StorageProvider:
     builtins = {"local": _local}
 
     normalized = config
-    if isinstance(config, dict) and "provider" in config and "type" not in config:
+    if isinstance(config, dict):
         normalized = dict(config)
-        normalized["type"] = normalized.pop("provider")
+        # `expose` is route config consumed by fymo.core.expose (via
+        # fymo/core/server.py), not a provider constructor kwarg.
+        normalized.pop("expose", None)
+        if "provider" in normalized and "type" not in normalized:
+            normalized["type"] = normalized.pop("provider")
 
     return instantiate_provider(
         normalized,
