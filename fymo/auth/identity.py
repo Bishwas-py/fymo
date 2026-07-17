@@ -126,7 +126,15 @@ def current_uid() -> Optional[str]:
             "current_uid() called outside of a remote-function request scope"
         )
     if _RESOLUTION_KEY in event:
-        return event[_RESOLUTION_KEY]
+        uid = event[_RESOLUTION_KEY]
+        if uid is not None:
+            # The resolution may have been seeded from a walk that ran
+            # before this scope opened (the rate limiter caches its clean
+            # walk on the environ), so the hooks have not fired yet here.
+            # _populate_identity_extras is a no-op once extras exist.
+            from fymo.auth.context import _populate_identity_extras
+            _populate_identity_extras(event, uid)
+        return uid
     resolver_event = ResolverEvent(
         remote_addr=event.get("remote_addr", ""),
         cookies=event.get("cookies", {}),

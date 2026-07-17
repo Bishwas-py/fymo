@@ -92,3 +92,27 @@ def test_no_hooks_registered_is_fine():
     with _scope():
         assert current_uid() == "u1"
         assert dict(identity_extras()) == {}
+
+
+def test_hook_fires_when_resolution_was_seeded_from_environ():
+    """The rate limiter resolves the chain before the request scope opens
+    and caches the outcome on the environ; request_scope seeds the event's
+    resolution cache from it, so current_uid() takes the cache-hit path.
+    Extras population must fire there too, or every rate-limited request
+    silently loses its extras."""
+    from fymo.auth.identity import ENVIRON_RESOLUTION_KEY
+
+    register_identity_extras_hook(lambda uid: {"seen": uid})
+
+    calls = []
+
+    @identify
+    def resolver(event):
+        calls.append(1)
+        return Identity(uid="user-9")
+
+    environ = {ENVIRON_RESOLUTION_KEY: "user-9"}
+    with _scope(environ):
+        assert current_uid() == "user-9"
+        assert calls == []
+        assert identity_extras()["seen"] == "user-9"
