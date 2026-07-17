@@ -1,7 +1,11 @@
 """Comment authorship comes from the authenticated session, never from
 client input. fymo.testing simulates the sessions: signed_in() for the
 first caller, acting_as() to switch to a second user mid-test."""
-from fymo.testing import acting_as, make_user, signed_in
+from fymo.testing import (
+    _legacy_acting_as as acting_as,
+    _legacy_make_user as make_user,
+    _legacy_signed_in as signed_in,
+)
 
 
 def _seed_post(db, slug="hello-world"):

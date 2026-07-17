@@ -10,7 +10,12 @@ import fymo.storage as storage_mod
 from fymo.auth import context as auth_context
 from fymo.auth.context import current_user
 from fymo.remote.context import _current_event
-from fymo.testing import acting_as, init_providers, make_user, signed_in
+from fymo.testing import (
+    _legacy_acting_as as acting_as,
+    _legacy_make_user as make_user,
+    _legacy_signed_in as signed_in,
+    init_providers,
+)
 
 
 def _snapshot():

@@ -1,182 +1,207 @@
-"""fymo.testing.signed_in / acting_as: fake authenticated sessions for tests."""
+"""fymo.testing.signed_in / acting_as: fake authenticated identities for tests.
+
+The new model (issue #80): identity is an opaque uid resolved through the
+@identify chain. signed_in registers a test resolver through that chain and
+opens a request scope; acting_as swaps the resolved identity mid-block.
+"""
 import pytest
 
-from fymo.auth import context as auth_context
-from fymo.auth.context import current_user, register_session_resolver, reset_session_resolvers
-from fymo.remote.identity import current_uid
-from fymo.testing import acting_as, make_user, signed_in
+from fymo.auth import Identity, current_uid, identify, identity_extras
+from fymo.auth.identity import (
+    registered_identity_resolvers,
+    reset_identity_resolvers,
+)
+from fymo.remote.context import _current_event, request_scope
+from fymo.testing import acting_as, signed_in
 
 
-def test_signed_in_default_user_resolves_via_current_user():
-    with signed_in() as user:
-        assert current_user() == user
-        assert current_user().email == user.email
+@pytest.fixture(autouse=True)
+def clean_registry():
+    reset_identity_resolvers()
+    yield
+    reset_identity_resolvers()
 
 
-def test_signed_in_custom_user():
-    alice = make_user(email="alice@example.com")
-    with signed_in(alice):
-        resolved = current_user()
-        assert resolved is alice
-        assert resolved.email == "alice@example.com"
+# --------------- signed_in ---------------
 
 
-def test_make_user_assigns_unique_ids():
-    a = make_user()
-    b = make_user()
-    assert a.id != b.id
+def test_signed_in_yields_identity_with_default_uid():
+    with signed_in() as ident:
+        assert isinstance(ident, Identity)
+        assert ident.uid == "u_test1"
 
 
-def test_make_user_accepts_overrides():
-    u = make_user(email="x@example.com", id=42, email_verified=False)
-    assert u.id == 42
-    assert u.email == "x@example.com"
-    assert u.email_verified is False
-
-
-def test_signed_in_provides_request_scope_uid():
-    with signed_in(uid="u_custom"):
-        assert current_uid() == "u_custom"
-
-
-def test_signed_in_default_uid_derives_from_user():
-    user = make_user(id=7)
-    with signed_in(user):
-        assert current_uid() == "u_test7"
-
-
-def test_sequential_signed_in_users_get_distinct_uids():
-    with signed_in(make_user(email="one@example.com")):
-        uid_one = current_uid()
-    with signed_in(make_user(email="two@example.com")):
-        uid_two = current_uid()
-    assert uid_one != uid_two
-
-
-def test_current_user_raises_outside_block():
+def test_signed_in_default_uid_resolves():
     with signed_in():
-        pass
-    with pytest.raises(RuntimeError):
-        current_user()
+        assert current_uid() == "u_test1"
 
 
-def test_acting_as_swaps_and_restores():
-    alice = make_user(email="alice@example.com")
-    bob = make_user(email="bob@example.com")
-    with signed_in(alice):
-        assert current_user() is alice
-        with acting_as(bob):
-            assert current_user() is bob
-        assert current_user() is alice
+def test_signed_in_custom_uid_resolves():
+    with signed_in("u_alice") as ident:
+        assert ident.uid == "u_alice"
+        assert current_uid() == "u_alice"
 
 
-def test_acting_as_swaps_uid_with_the_user():
-    alice = make_user(id=11)
-    bob = make_user(id=22)
-    with signed_in(alice):
-        assert current_uid() == "u_test11"
-        with acting_as(bob):
-            assert current_uid() == "u_test22"
-        assert current_uid() == "u_test11"
+def test_signed_in_registers_through_the_identify_chain():
+    assert registered_identity_resolvers() == ()
+    with signed_in():
+        chain = registered_identity_resolvers()
+        assert len(chain) == 1
+    assert registered_identity_resolvers() == ()
 
 
-def test_acting_as_accepts_uid_override():
-    bob = make_user(email="bob@example.com")
-    with signed_in(uid="u_outer"):
-        with acting_as(bob, uid="u_inner"):
+def test_sequential_signed_in_blocks_resolve_their_own_uid():
+    # Registration happens at call time; the definition-site dedup in
+    # identify() must not make the second block resolve the first uid.
+    with signed_in("u_alice"):
+        assert current_uid() == "u_alice"
+    with signed_in("u_bob"):
+        assert current_uid() == "u_bob"
+
+
+def test_signed_in_blocks_nest_inner_wins_then_outer_restores():
+    with signed_in("u_outer"):
+        assert current_uid() == "u_outer"
+        with signed_in("u_inner"):
             assert current_uid() == "u_inner"
         assert current_uid() == "u_outer"
+    assert registered_identity_resolvers() == ()
 
 
-def test_acting_as_nested_uids_restore_level_by_level():
-    a = make_user(id=101)
-    b = make_user(id=102)
-    c = make_user(id=103)
-    with signed_in(a):
-        with acting_as(b):
-            with acting_as(c):
-                assert current_uid() == "u_test103"
-            assert current_uid() == "u_test102"
-        assert current_uid() == "u_test101"
+def test_signed_in_preserves_preexisting_resolvers():
+    def sentinel(event):
+        return None
 
-
-def test_acting_as_restores_uid_on_exception():
-    alice = make_user(id=31)
-    bob = make_user(id=32)
-    with signed_in(alice):
-        with pytest.raises(ValueError):
-            with acting_as(bob):
-                raise ValueError("boom")
-        assert current_uid() == "u_test31"
-
-
-def test_acting_as_yields_the_user():
-    bob = make_user(email="bob@example.com")
-    with signed_in():
-        with acting_as(bob) as inner:
-            assert inner is bob
-
-
-def test_acting_as_nests():
-    a = make_user(email="a@example.com")
-    b = make_user(email="b@example.com")
-    c = make_user(email="c@example.com")
-    with signed_in(a):
-        with acting_as(b):
-            with acting_as(c):
-                assert current_user() is c
-            assert current_user() is b
-        assert current_user() is a
-
-
-def test_acting_as_outside_signed_in_raises():
-    bob = make_user(email="bob@example.com")
-    with pytest.raises(RuntimeError):
-        with acting_as(bob):
-            pass
-
-
-def test_acting_as_restores_on_exception():
-    alice = make_user(email="alice@example.com")
-    bob = make_user(email="bob@example.com")
-    with signed_in(alice):
-        with pytest.raises(ValueError):
-            with acting_as(bob):
-                raise ValueError("boom")
-        assert current_user() is alice
-
-
-def test_signed_in_leaves_resolver_registry_as_found():
-    sentinel = lambda event: None
-    register_session_resolver(sentinel)
-    try:
-        assert auth_context._session_resolvers == [sentinel]
-        with signed_in():
-            pass
-        assert auth_context._session_resolvers == [sentinel]
-    finally:
-        reset_session_resolvers()
+    identify(sentinel)
+    with signed_in("u_x"):
+        assert current_uid() == "u_x"
+    assert registered_identity_resolvers() == (sentinel,)
 
 
 def test_signed_in_cleans_up_when_body_raises():
-    from fymo.remote.context import _current_event
-
-    resolvers_before = list(auth_context._session_resolvers)
-    event_before = _current_event.get()
     with pytest.raises(ValueError):
         with signed_in():
             raise ValueError("boom")
-    assert auth_context._session_resolvers == resolvers_before
-    assert _current_event.get() == event_before
+    assert registered_identity_resolvers() == ()
+    assert _current_event.get() is None
     with pytest.raises(RuntimeError):
-        current_user()
+        current_uid()
 
 
-def test_signed_in_blocks_nest():
-    alice = make_user(email="alice@example.com")
-    bob = make_user(email="bob@example.com")
-    with signed_in(alice):
-        with signed_in(bob):
-            assert current_user() is bob
-        assert current_user() is alice
-    assert auth_context._session_resolvers == []
+def test_anonymous_scope_outside_signed_in_resolves_none():
+    with request_scope(uid="u_anon", environ={}):
+        assert current_uid() is None
+
+
+def test_no_resolver_leaks_into_a_later_plain_scope():
+    with signed_in("u_alice"):
+        assert current_uid() == "u_alice"
+    with request_scope(uid="u_anon", environ={}):
+        assert current_uid() is None
+
+
+# --------------- extras ---------------
+
+
+def test_signed_in_without_extras_has_empty_extras():
+    with signed_in():
+        assert dict(identity_extras()) == {}
+
+
+def test_signed_in_extras_flow_through_identity_extras():
+    with signed_in("u_admin", extras={"role": "admin", "org": "acme"}):
+        assert identity_extras()["role"] == "admin"
+        assert identity_extras()["org"] == "acme"
+
+
+def test_signed_in_extras_are_read_only():
+    with signed_in(extras={"role": "admin"}):
+        with pytest.raises(TypeError):
+            identity_extras()["role"] = "hacker"
+
+
+def test_signed_in_extras_do_not_leak_into_next_block():
+    with signed_in("u_admin", extras={"role": "admin"}):
+        pass
+    with signed_in("u_plain"):
+        assert dict(identity_extras()) == {}
+
+
+# --------------- acting_as ---------------
+
+
+def test_acting_as_yields_identity():
+    with signed_in():
+        with acting_as("u_bob") as ident:
+            assert isinstance(ident, Identity)
+            assert ident.uid == "u_bob"
+
+
+def test_acting_as_swaps_and_restores_uid():
+    with signed_in("u_alice"):
+        assert current_uid() == "u_alice"
+        with acting_as("u_bob"):
+            assert current_uid() == "u_bob"
+        assert current_uid() == "u_alice"
+
+
+def test_acting_as_overrides_cached_resolution():
+    with signed_in("u_alice"):
+        # Prime the per-scope resolution cache before swapping.
+        assert current_uid() == "u_alice"
+        with acting_as("u_bob"):
+            assert current_uid() == "u_bob"
+
+
+def test_acting_as_restores_uncached_state():
+    with signed_in("u_alice"):
+        # No current_uid() call before the swap: the cache slot is empty,
+        # and it must still be empty (not "u_bob") after the swap exits.
+        with acting_as("u_bob"):
+            assert current_uid() == "u_bob"
+        assert current_uid() == "u_alice"
+
+
+def test_acting_as_nests_level_by_level():
+    with signed_in("u_a"):
+        with acting_as("u_b"):
+            with acting_as("u_c"):
+                assert current_uid() == "u_c"
+            assert current_uid() == "u_b"
+        assert current_uid() == "u_a"
+
+
+def test_acting_as_restores_on_exception():
+    with signed_in("u_alice"):
+        with pytest.raises(ValueError):
+            with acting_as("u_bob"):
+                raise ValueError("boom")
+        assert current_uid() == "u_alice"
+
+
+def test_acting_as_outside_signed_in_raises():
+    with pytest.raises(RuntimeError):
+        with acting_as("u_bob"):
+            pass
+
+
+def test_acting_as_extras_follow_the_identity():
+    with signed_in("u_admin", extras={"role": "admin"}):
+        with acting_as("u_viewer", extras={"role": "viewer"}):
+            assert identity_extras()["role"] == "viewer"
+        assert identity_extras()["role"] == "admin"
+
+
+def test_acting_as_without_extras_does_not_inherit_outer_extras():
+    with signed_in("u_admin", extras={"role": "admin"}):
+        with acting_as("u_other"):
+            assert dict(identity_extras()) == {}
+        assert identity_extras()["role"] == "admin"
+
+
+def test_acting_as_restores_extras_on_exception():
+    with signed_in("u_admin", extras={"role": "admin"}):
+        with pytest.raises(ValueError):
+            with acting_as("u_other", extras={"role": "viewer"}):
+                raise ValueError("boom")
+        assert identity_extras()["role"] == "admin"
