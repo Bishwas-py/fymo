@@ -375,6 +375,9 @@ def getContext():
 
   // login/signup are the remote functions from app/remote/auth.py,
   // threaded through the controller context (see app/controllers/signin.py).
+  // Do not import them as values from '$remote/auth' at the top level:
+  // that alias is client-only and a value import breaks the page during
+  // server-side rendering. `import type` from '$remote/auth' is fine.
   let { title, login, signup } = $props();
 
   let mode = $state('login');

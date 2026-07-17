@@ -1,6 +1,7 @@
 """Tests for `fymo new` project scaffolding."""
 from pathlib import Path
 import json
+import re
 
 from fymo.cli.commands.new import create_project
 
@@ -216,7 +217,13 @@ def test_new_signin_template_wires_remote_auth_and_identity(tmp_path, monkeypatc
     assert "login" in content
     assert "signup" in content
     assert "next" in content
-    assert "from '$remote" not in content
+    # No top-level VALUE import from $remote (breaks SSR); `import type`
+    # is fine, and so is prose about the rule in comments. Matches both
+    # quote spellings so a reworded template cannot dodge the guard.
+    value_import = re.compile(
+        r"^\s*import\s+(?!type\b)[^;]*from\s+[\"']\$remote", re.MULTILINE
+    )
+    assert not value_import.search(content)
 
 
 def test_new_controllers_use_get_context_convention(tmp_path, monkeypatch):

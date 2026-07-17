@@ -34,3 +34,4 @@ def initialize_project():
 
     Color.print_success("Fymo initialized successfully!")
     Color.print_info("Next steps: Create your controllers and templates in the app/ directory")
+    Color.print_info("Need auth? Run `fymo generate auth` (unlike `fymo new`, init does not scaffold it)")
