@@ -483,6 +483,47 @@ def test_unclean_walk_is_not_cached_handler_stays_fail_loud(limited_project, ide
     assert body["error"] == "internal"
 
 
+def test_user_scope_garbage_resolver_does_not_shadow_later_resolver(limited_project, identity_chain):
+    from fymo.auth import Identity, identify
+
+    @identify
+    def garbage(event):
+        return "not-an-identity"
+
+    @identify
+    def by_api_key(event):
+        key = event.headers.get("x-api-key")
+        return Identity(uid=f"key_{key}") if key else None
+
+    _, h = limited_project
+    (_, _), first = _call(_keyed_environ(h, "per_user", api_key="alpha"))
+    assert first["type"] == "result"
+    (_, _), blocked = _call(_keyed_environ(h, "per_user", api_key="alpha"))
+    assert blocked["status"] == 429
+    (_, _), other = _call(_keyed_environ(h, "per_user", api_key="beta"))
+    assert other["type"] == "result"
+
+
+def test_garbage_return_walk_is_not_cached_handler_stays_fail_loud(limited_project, identity_chain):
+    """The other unclean half: a resolver returning a non-Identity value is
+    skipped for the rate-limit key and the walk is not cached, so the
+    handler's current_uid() re-runs the chain and raises the resolver
+    return-type error (500 envelope). Caching the walk would hand the
+    handler a silent None instead."""
+    from fymo.auth import identify
+
+    @identify
+    def garbage(event):
+        return "not-an-identity"
+
+    _, h = limited_project
+    (status, _), body = _call(_make_environ(f"/_fymo/remote/{h}/whoami", []))
+    assert status.startswith("200")
+    assert body["type"] == "error"
+    assert body["status"] == 500
+    assert body["error"] == "internal"
+
+
 # ---------------- RateLimited raised from app code ----------------
 
 

@@ -128,9 +128,10 @@ def _identified_uid(environ: dict) -> Optional[str]:
     resolution cache from it, so the chain still runs at most once per
     request even when the handler calls current_uid().
 
-    A resolver raising here counts as "did not identify" and the walk moves
-    on to the next resolver (fail-open), the same posture as the legacy
-    session walk below: rate limiting runs before the handler, so
+    A resolver raising here, or returning a non-Identity value, counts as
+    "did not identify" and the walk moves on to the next resolver
+    (fail-open), the same posture as the legacy session walk below: rate
+    limiting runs before the handler, so
     propagating would turn one broken resolver into an outage for every
     call to this function, while falling through only degrades the key to
     the uid/ip tier (the edge limiter still bounds adversarial traffic).
