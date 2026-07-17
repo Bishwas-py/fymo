@@ -55,7 +55,7 @@ async function makeServerCtx() {
         nodePaths: [path.join(config.projectRoot, 'node_modules')],
         plugins: [
             fymoRoutePlugin({ runtimePath: routeRuntimePath }),
-            // Bundled for SSR (never external) -- mirrors build.mjs.
+            // Bundled for SSR (never external), mirroring build.mjs.
             fymoAuthPlugin({ fymoDir: fymoAuthDir }),
             sveltePlugin({ preprocess: sveltePreprocess(), compilerOptions: { generate: 'server', dev: false } }),
             { name: 'fymo-emit', setup(build) { build.onEnd(r => emit({ type: 'server-rebuild', errors: r.errors.map(e => e.text) })); } },

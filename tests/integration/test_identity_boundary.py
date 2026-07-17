@@ -204,6 +204,31 @@ def test_anonymous_ssr_renders_signin_branch_and_null_island(app):
     assert '<script type="application/json" id="fymo-identity">null</script>' in html
 
 
+def test_sequential_renders_through_one_sidecar_never_bleed_identity(app):
+    """The sidecar is one persistent process and the per-render identity
+    global must be reset unconditionally. A conditional reset (only
+    assigning when the frame carries an identity) leaks the previous
+    user's identity into the next anonymous render. All renders here go
+    through the same app instance, so the same sidecar process."""
+    status, _, body = _get(app, "/", headers={"x-user": "uALICE"})
+    assert status == "200 OK"
+    assert "Hi user-uALICE" in body.decode()
+
+    status, _, body = _get(app, "/")
+    html = body.decode()
+    assert status == "200 OK"
+    assert "uALICE" not in html
+    assert "Hi user-" not in html
+    assert "Sign in" in html
+    assert '<script type="application/json" id="fymo-identity">null</script>' in html
+
+    status, _, body = _get(app, "/", headers={"x-user": "uBOB"})
+    html = body.decode()
+    assert status == "200 OK"
+    assert "Hi user-uBOB" in html
+    assert "uALICE" not in html
+
+
 def test_soft_nav_envelope_carries_identity(app):
     status, _, body = _get(app, "/_fymo/data/home", headers={"x-user": "u42"})
     assert status.startswith("200")

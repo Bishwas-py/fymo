@@ -236,7 +236,7 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     # Codegen for app/broadcasts/*.py -- dist/client/_broadcast/<name>.{js,d.ts}
     emit_broadcast_client(project_root, dist_dir)
 
-    # The $fymo/auth identity store -- dist/client/_fymo/auth.{js,d.ts}.
+    # The $fymo/auth identity store, emitted at dist/client/_fymo/auth.{js,d.ts}.
     # Unconditional: every generated client entry imports it (issue #80).
     emit_identity_client(dist_dir)
 

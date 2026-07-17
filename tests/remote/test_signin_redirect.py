@@ -76,6 +76,9 @@ def _b64url(s: str) -> str:
 def test_end_to_end_dispatch_attaches_signin(tmp_path, monkeypatch):
     """A remote function raising AuthRequired through the real dispatch path
     produces the envelope with the signin field."""
+    for name in list(sys.modules):
+        if name == "app" or name.startswith("app."):
+            del sys.modules[name]
     (tmp_path / "app" / "remote").mkdir(parents=True)
     (tmp_path / "app" / "__init__.py").write_text("")
     (tmp_path / "app" / "remote" / "__init__.py").write_text("")

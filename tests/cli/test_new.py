@@ -34,6 +34,7 @@ def test_scaffolds_tsconfig_with_lib_components_and_remote_aliases(tmp_path: Pat
     assert paths["$lib/*"] == ["./app/lib/*"]
     assert paths["$components/*"] == ["./app/components/*"]
     assert paths["$remote/*"] == ["./dist/client/_remote/*"]
+    assert paths["$fymo/*"] == ["./dist/client/_fymo/*"]
     # No separate server-only alias: the server/client boundary in fymo is
     # language, not directory convention -- app/controllers/*.py and
     # app/remote/*.py are server-only by construction (Python never reaches
