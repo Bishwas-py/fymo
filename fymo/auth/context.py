@@ -243,12 +243,15 @@ def identity_extras() -> Mapping[str, object]:
     return extras
 
 
-def _populate_identity_extras(event: dict, user: User) -> None:
+def _populate_identity_extras(event: dict, subject) -> None:
+    """Run the hooks once for this scope. `subject` is the resolved User on
+    the legacy current_user() path and the resolved uid string on the new
+    current_uid() path (fymo.auth.identity)."""
     if _EXTRAS_KEY in event or not _identity_extras_hooks:
         return
     merged: dict = {}
     for hook in _identity_extras_hooks:
-        merged.update(hook(user))
+        merged.update(hook(subject))
     event[_EXTRAS_KEY] = MappingProxyType(merged)
 
 

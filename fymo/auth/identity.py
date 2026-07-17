@@ -143,4 +143,12 @@ def current_uid() -> Optional[str]:
         uid = ident.uid
         break
     event[_RESOLUTION_KEY] = uid
+    if uid is not None:
+        # Fire the identity-extras hooks with the resolved uid as the
+        # subject, so app code (e.g. a generated app/auth/extras.py) can
+        # attach its user row to the scope. Same hooks the legacy
+        # current_user() walk fires with a User; on this path the subject
+        # is the uid string. fymo stores the merged result, never reads it.
+        from fymo.auth.context import _populate_identity_extras
+        _populate_identity_extras(event, uid)
     return uid
