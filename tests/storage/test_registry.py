@@ -30,6 +30,20 @@ def test_dict_config_roots_local_at_project_root_subdir(tmp_path: Path):
     assert (tmp_path / "data" / "x" / "foo.txt").read_bytes() == b"hi"
 
 
+def test_expose_entries_are_not_passed_to_the_provider_constructor(tmp_path: Path):
+    """`storage.expose` is route config consumed by fymo.core.expose, not a
+    provider constructor kwarg; leaving it in `opts` would TypeError every
+    provider whose __init__ doesn't expect it."""
+    provider = build_storage_provider({
+        "provider": "local",
+        "root": "data",
+        "expose": [{"prefix": "/media/videos/", "dir": "videos", "extensions": ["webm"]}],
+    }, tmp_path)
+    assert isinstance(provider, LocalStorageProvider)
+    provider.write("videos/foo.webm", b"hi")
+    assert (tmp_path / "data" / "videos" / "foo.webm").read_bytes() == b"hi"
+
+
 def test_unknown_builtin_string_raises(tmp_path: Path):
     with pytest.raises(StorageConfigError, match="unknown built-in storage provider: 'nope'"):
         build_storage_provider("nope", tmp_path)

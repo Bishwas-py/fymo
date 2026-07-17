@@ -515,33 +515,56 @@ build the app directly and never import it, so module-level code in
 File output is append-only with no built-in rotation — use logrotate or
 your container platform's log driver.
 
-## Media routes (byte-range file serving)
+## Storage and exposure (`storage.expose`)
 
-Apps that need to serve binary files with `Range` support (video/audio
-seeking and scrubbing, in particular) don't need to hand-write a raw WSGI
-route for it. Declare them in `fymo.yml` instead:
+Where a file belongs follows one rule:
+
+- **In git** (a logo, a font, a favicon): `app/static/`.
+- **Created at runtime** (an upload, a recording, anything a job writes):
+  `storage:`.
+- **Runtime file that needs a URL**: an `expose:` entry under `storage:`.
+
+Apps that need to serve runtime binary files with `Range` support
+(video/audio seeking and scrubbing, in particular) don't need to
+hand-write a raw WSGI route for it. Declare the exposure in `fymo.yml`:
 
 ```yaml
-media:
-  - prefix: /media/videos/
-    dir: data/videos
-    extensions: [webm]
+storage:
+  provider: local
+  root: ${DATA_DIR:-data}
+  expose:
+    - prefix: /media/videos/
+      dir: videos
+      extensions: [webm]
 ```
 
 `prefix` is matched against the request path the same way fymo's own
 `/dist/` and `/static/` routes are (a path prefix, not a template). `dir`
-is resolved relative to the project root. `extensions` is the allow-list
-for the filename after the prefix; anything else, and any filename
-containing `..` or starting with `/`, gets a 400.
+is resolved relative to the storage root (`storage.root`, which defaults
+to the project root when unset), so the entry above serves files a job
+wrote via `get_storage_provider().write("videos/...", data)`. `extensions`
+is the allow-list for the filename after the prefix; anything else, and
+any filename containing `..` or starting with `/`, gets a 400.
 
 fymo owns the rest: single-range `Range: bytes=start-end` requests get a
 206 with `Content-Range`, full-file requests get a 200 with `Content-Length`,
 missing files get a 404, and `Content-Type` is resolved from the filename
-via the standard library's `mimetypes` module. `media:` can list multiple
-entries with different prefixes/dirs/extensions, and the section is
-entirely optional, apps without one register no extra routes at all.
+via the standard library's `mimetypes` module. `expose:` can list multiple
+entries with different prefixes/dirs/extensions, and it is entirely
+optional, apps without it register no extra routes at all. Exposure is
+read-only and opt-in per directory: nothing under `storage:` gets a URL
+unless deliberately listed, the same posture as `@remote`.
 
-See `fymo/core/media.py` for the implementation, and `fymo/core/http.py`
+Two loud failure modes, both on purpose: `storage.expose` with no
+`storage.provider` fails at build and at boot (exposure serves files out of
+the configured storage, so storage must be configured), and an expose `dir`
+that doesn't exist under the storage root yet warns at boot naming the
+resolved path (a warning, not an error, since a job may create it later).
+Top-level `media:`, the old home of these entries, was removed in #76 and
+fails at build and boot with the migration text; move each entry under
+`storage:` unchanged.
+
+See `fymo/core/expose.py` for the implementation, and `fymo/core/http.py`
 for the lower-level raw-WSGI extension point (`app/routes.py`) this sits
 alongside, for the rarer case of a route that isn't just "serve a file
 from a directory" (webhooks, non-file responses, etc.).

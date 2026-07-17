@@ -40,6 +40,57 @@ def check_directory_hygiene(project_root: Path) -> List[str]:
     return violations
 
 
+def _read_fymo_yml(project_root: Path) -> dict:
+    """Best-effort raw read of the whole fymo.yml, same posture as
+    prepare.read_yaml_section (missing file or unparseable YAML resolve to
+    `{}`), but returning the full mapping: check_media_key_removed below
+    needs key *presence*, and read_yaml_section's `or {}` normalization
+    can't tell `media: []` apart from no `media:` key at all."""
+    fymo_yml = project_root / "fymo.yml"
+    if not fymo_yml.is_file():
+        return {}
+    try:
+        import yaml
+        data = yaml.safe_load(fymo_yml.read_text()) or {}
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def check_media_key_removed(project_root: Path) -> List[str]:
+    """Top-level `media:` was folded into `storage.expose` (issue #76), hard
+    break with no shim. A config still carrying the old key must fail
+    `fymo build`/`fymo dev` with the migration text, mirroring the boot-time
+    refusal in fymo.core.config.ConfigManager, never be silently ignored."""
+    from fymo.core.config import MEDIA_KEY_REMOVED_ERROR
+
+    if "media" in _read_fymo_yml(project_root):
+        return [MEDIA_KEY_REMOVED_ERROR]
+    return []
+
+
+def check_storage_required_for_expose(project_root: Path) -> List[str]:
+    """`storage.expose` entries always resolve the files they serve through
+    a StorageProvider (fymo.storage.registry), and storage has no default
+    provider on purpose (see fymo/storage/registry.py's docstring):
+    silently writing to local disk is exactly the footgun that works in
+    dev and quietly loses data behind a load balancer in production. So
+    expose entries with no provider selected would only fail once
+    FymoApp.__init__ runs; catching it here at build time points at the
+    fix (set storage.provider) before that happens."""
+    from fymo.build.prepare import read_yaml_section
+    from fymo.core.expose import EXPOSE_WITHOUT_PROVIDER_ERROR
+
+    storage_config = read_yaml_section(project_root, "storage")
+    if (
+        isinstance(storage_config, dict)
+        and (storage_config.get("expose") or [])
+        and not any(key in storage_config for key in ("provider", "type", "class"))
+    ):
+        return [EXPOSE_WITHOUT_PROVIDER_ERROR]
+    return []
+
+
 def check_global_css_migration(project_root: Path) -> "str | None":
     """The app/templates/_global.css magic filename (auto-detected, bundled
     as its own entry, linked on every page) was deleted by issue #77 in
@@ -87,30 +138,6 @@ def check_template_css_hygiene(project_root: Path) -> List[str]:
                 f"stylesheets live in app/assets/, found {f.relative_to(project_root)}"
             )
     return violations
-
-
-def check_storage_required_for_media(project_root: Path) -> List[str]:
-    """`media:` routes always resolve the files they serve through a
-    StorageProvider (fymo.storage.registry), and storage has no default
-    provider on purpose (see fymo/storage/registry.py's docstring):
-    silently writing to local disk is exactly the footgun that works in
-    dev and quietly loses data behind a load balancer in production. So a
-    `media:` section with no accompanying `storage:` section would only
-    fail once a request actually reaches the route, deep inside
-    FymoApp.__init__, catching it here at build time points at the fix
-    (add `storage:` to fymo.yml) before that happens."""
-    from fymo.build.prepare import read_yaml_section
-
-    media_config = read_yaml_section(project_root, "media")
-    storage_config = read_yaml_section(project_root, "storage")
-    if media_config and not storage_config:
-        return [
-            "media: is configured in fymo.yml but storage: is missing. "
-            "media: routes resolve files through the configured "
-            "StorageProvider and there is no default, add a storage: "
-            "section (e.g. `storage: {provider: local}`)."
-        ]
-    return []
 
 
 def format_hygiene_error(violations: List[str]) -> str:

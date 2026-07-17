@@ -1,5 +1,5 @@
-"""Tests for declarative media routes (fymo.yml `media:` section ->
-fymo.core.media.build_media_routes -> HttpRoute list).
+"""Tests for declarative exposure routes (fymo.yml `storage.expose` entries ->
+fymo.core.expose.build_expose_routes -> HttpRoute list).
 
 These exercise the built route's WSGI handler directly with a real WSGI
 environ (mirroring tests/core/test_app_http_routes.py's `_make_wsgi_env`
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from fymo.core.media import build_media_routes
+from fymo.core.expose import build_expose_routes
 from fymo.storage.providers.local import LocalStorageProvider
 
 
@@ -47,16 +47,16 @@ def _capture():
 
 def _one_route(tmp_path: Path, extensions=("webm",), storage=None):
     storage = storage or LocalStorageProvider(project_root=tmp_path)
-    routes = build_media_routes(tmp_path, [
+    routes = build_expose_routes(tmp_path, [
         {"prefix": "/media/videos/", "dir": "data/videos", "extensions": list(extensions)},
     ], storage=storage)
     assert len(routes) == 1
     return routes[0]
 
 
-def test_absent_media_config_registers_zero_routes(tmp_path: Path):
+def test_absent_expose_config_registers_zero_routes(tmp_path: Path):
     storage = LocalStorageProvider(project_root=tmp_path)
-    assert build_media_routes(tmp_path, [], storage=storage) == []
+    assert build_expose_routes(tmp_path, [], storage=storage) == []
 
 
 def test_full_file_get_returns_200_with_content_length_and_type(tmp_path: Path):
@@ -131,11 +131,11 @@ def test_symlink_inside_media_dir_pointing_outside_is_rejected(tmp_path: Path, t
 
     The secret file lives in a directory unrelated to `tmp_path` (the
     storage root here, since `_one_route` passes it as both
-    `build_media_routes`'s `project_root` and the storage provider's), not
+    `build_expose_routes`'s `project_root` and the storage provider's), not
     merely a sibling of `data/videos` inside it. Once `dir:` is a
     storage-key namespace rather than a physically served root (see
-    fymo.core.media's module docstring), containment is enforced against
-    the provider's root, not against each individual media entry's `dir:`,
+    fymo.core.expose's module docstring), containment is enforced against
+    the provider's root, not against each individual expose entry's `dir:`,
     so the attack has to actually cross that root to be meaningful."""
     video_dir = tmp_path / "data" / "videos"
     video_dir.mkdir(parents=True)
@@ -234,19 +234,43 @@ def test_entry_missing_required_key_raises_value_error(tmp_path: Path, entry):
     fymo.yml entry. A descriptive ValueError names what's actually wrong."""
     storage = LocalStorageProvider(project_root=tmp_path)
     with pytest.raises(ValueError, match="prefix.*dir|dir.*prefix"):
-        build_media_routes(tmp_path, [entry], storage=storage)
+        build_expose_routes(tmp_path, [entry], storage=storage)
 
 
 @pytest.mark.parametrize("prefix", ["/dist/videos/", "/static/videos/", "/dist/"])
 def test_prefix_colliding_with_reserved_route_warns(tmp_path: Path, prefix, capsys):
     """`/dist/` and `/static/` are matched by FymoApp._dispatch before the
-    app-routes loop ever runs (fymo/core/server.py), so a media prefix
+    app-routes loop ever runs (fymo/core/server.py), so an exposed prefix
     under either would silently never be reached. Still registers the
     route (this is a warning, not a hard failure) but prints it loudly."""
     storage = LocalStorageProvider(project_root=tmp_path)
-    build_media_routes(tmp_path, [
+    build_expose_routes(tmp_path, [
         {"prefix": prefix, "dir": "data/videos", "extensions": ["webm"]},
     ], storage=storage)
     captured = capsys.readouterr()
     assert "Warning" in captured.out
     assert prefix in captured.out
+
+
+def test_expose_dir_missing_under_storage_root_warns_with_resolved_path(tmp_path: Path, capsys):
+    """An expose entry whose `dir` doesn't exist yet must warn at boot,
+    naming the resolved path, instead of leaving every request to silently
+    404. A warning, not an error: the directory may legitimately be created
+    later by a job writing into it."""
+    storage = LocalStorageProvider(project_root=tmp_path)
+    build_expose_routes(tmp_path, [
+        {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+    ], storage=storage)
+    captured = capsys.readouterr()
+    assert "Warning" in captured.out
+    assert str(tmp_path / "data" / "videos") in captured.out
+    assert "/media/videos/" in captured.out
+
+
+def test_expose_dir_present_under_storage_root_does_not_warn(tmp_path: Path, capsys):
+    (tmp_path / "data" / "videos").mkdir(parents=True)
+    storage = LocalStorageProvider(project_root=tmp_path)
+    build_expose_routes(tmp_path, [
+        {"prefix": "/media/videos/", "dir": "data/videos", "extensions": ["webm"]},
+    ], storage=storage)
+    assert capsys.readouterr().out == ""

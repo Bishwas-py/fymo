@@ -1,12 +1,12 @@
 """Local-filesystem StorageProvider.
 
-Ports the traversal-safe, symlink-safe containment check `fymo.core.media`
+Ports the traversal-safe, symlink-safe containment check `fymo.core.expose`
 already uses for its `dir:`-configured routes, so a storage `key` (untrusted
 input in exactly the same way a requested filename is) gets the same
 guarantee: no `..` segment, no absolute-path override, and no symlink
 planted inside root that resolves somewhere outside it. `_is_traversal_safe`
 and `_resolve_within` are a direct port, not a reimplementation, of
-`fymo.core.media`'s functions of the same name and behavior.
+`fymo.core.expose`'s functions of the same name and behavior.
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ class LocalStorageProvider(BaseStorageProvider):
         file_size = path.stat().st_size
         # Unsatisfiable per RFC 7233 section 2.1: start at/past EOF, or an
         # end before start. `end` running past EOF is not itself an error,
-        # it's clamped below, matching fymo.core.media's existing behavior.
+        # it's clamped below, matching fymo.core.expose's existing behavior.
         if start < 0 or start >= file_size or end < start:
             raise RangeNotSatisfiable(file_size)
         end = min(end, file_size - 1)
