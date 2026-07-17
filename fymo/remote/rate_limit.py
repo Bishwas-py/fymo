@@ -51,10 +51,12 @@ def rate_limit(per_minute: int, scope: str = "ip") -> Callable[[F], F]:
     - "ip":   the client IP, resolved with the same trust_proxy awareness
               as the middleware limiter (first X-Forwarded-For hop only
               when `limits.rate_limit.trust_proxy` is on).
-    - "user": the authenticated user's id. When the caller is not signed
-              in, falls back to the verified fymo_uid cookie identity if
-              present, else the client IP, so the limit always binds rather
-              than silently not applying.
+    - "user": the resolved identity's uid, from the @identify resolver
+              chain (fymo.auth.identity) first, then the legacy session
+              resolver chain while the two coexist. When neither identifies
+              the caller, falls back to the verified fymo_uid cookie
+              identity if present, else the client IP, so the limit always
+              binds rather than silently not applying.
     - "uid":  the verified fymo_uid anonymous identity, falling back to
               the client IP when the cookie is missing or fails HMAC
               verification (a cookieless caller must not get a fresh
@@ -62,13 +64,14 @@ def rate_limit(per_minute: int, scope: str = "ip") -> Callable[[F], F]:
 
     Two cost/threat trade-offs to know when picking a scope:
 
-    - scope="user" resolves the session BEFORE the limit binds, so every
+    - scope="user" resolves the identity BEFORE the limit binds, so every
       request carrying auth credentials pays the resolver walk (for a
       token provider like Clerk, a JWT verification) even when the answer
-      is 429. That is the same cost any function calling current_user()
-      already pays per request; the middleware's IP-keyed edge limiter is
-      what bounds it. The per-user budget protects the function body and
-      whatever it spends, not the session resolution itself.
+      is 429. A clean walk is cached and shared with the handler's
+      current_uid() through the request event, so the chain still runs at
+      most once per request; the middleware's IP-keyed edge limiter is
+      what bounds the walk itself. The per-user budget protects the
+      function body and whatever it spends, not the identity resolution.
     - scope="uid" (and unauthenticated scope="user") keys on a cookie the
       server hands out freely, so a determined client can farm several
       valid cookies and rotate them for extra budget. It defends against
@@ -114,15 +117,76 @@ def _cookies_from_environ(environ: dict) -> dict:
     return cookies
 
 
-def _authenticated_user_id(environ: dict) -> Optional[int]:
-    """Resolve the signed-in user's id, or None.
+def _identified_uid(environ: dict) -> Optional[str]:
+    """Resolve the @identify chain (fymo.auth.identity), or None.
 
-    Walks the same resolver chain current_user() does, but against an event
-    built straight from the environ, since enforcement runs before the
-    router opens the request scope. A resolver blowing up (e.g. a stale
-    fymo_session cookie on an app with auth disabled, where the UserStore
-    seam raises) counts as "not signed in" for limiting purposes rather
-    than failing the request.
+    Enforcement runs before the router opens the request scope, so the walk
+    happens against a ResolverEvent built straight from the environ,
+    mirroring request_scope's event shape. A clean walk's outcome (including
+    the anonymous None) is cached on the environ under
+    ENVIRON_RESOLUTION_KEY; request_scope seeds the request event's
+    resolution cache from it, so the chain still runs at most once per
+    request even when the handler calls current_uid().
+
+    A resolver raising here counts as "did not identify" and the walk moves
+    on to the next resolver (fail-open), the same posture as the legacy
+    session walk below: rate limiting runs before the handler, so
+    propagating would turn one broken resolver into an outage for every
+    call to this function, while falling through only degrades the key to
+    the uid/ip tier (the edge limiter still bounds adversarial traffic).
+    An unclean walk is NOT cached, so current_uid() inside the handler
+    re-runs the chain and propagates per its own fail-loud contract.
+    """
+    from fymo.auth.identity import (
+        ENVIRON_RESOLUTION_KEY,
+        Identity,
+        ResolverEvent,
+        registered_identity_resolvers,
+    )
+    if ENVIRON_RESOLUTION_KEY in environ:
+        return environ[ENVIRON_RESOLUTION_KEY]
+    from fymo.core.middleware import resolve_scheme
+    from fymo.remote import context as _context
+    event = ResolverEvent(
+        remote_addr=environ.get("REMOTE_ADDR", ""),
+        cookies=_cookies_from_environ(environ),
+        headers={
+            k[5:].replace("_", "-").lower(): v
+            for k, v in environ.items() if k.startswith("HTTP_")
+        },
+        scheme=resolve_scheme(environ, _context._trust_proxy),
+    )
+    uid: Optional[str] = None
+    clean = True
+    for resolve in registered_identity_resolvers():
+        try:
+            ident = resolve(event)
+        except Exception:
+            clean = False
+            continue
+        if ident is None:
+            continue
+        if not isinstance(ident, Identity):
+            clean = False
+            continue
+        uid = ident.uid
+        break
+    if clean:
+        environ[ENVIRON_RESOLUTION_KEY] = uid
+    return uid
+
+
+def _authenticated_user_id(environ: dict) -> Optional[int]:
+    """Resolve the signed-in user's id via the LEGACY session chain, or None.
+
+    Coexistence only: this block walks the same resolver chain
+    current_user() does and gets deleted with the User/UserStore model
+    (issue #80); _identified_uid above is the successor. The walk runs
+    against an event built straight from the environ, since enforcement
+    runs before the router opens the request scope. A resolver blowing up
+    (e.g. a stale fymo_session cookie on an app with auth disabled, where
+    the UserStore seam raises) counts as "not signed in" for limiting
+    purposes rather than failing the request.
     """
     try:
         from fymo.auth.context import _fymo_session_resolver, _session_resolvers
@@ -173,6 +237,9 @@ def _scope_key(rule: RateLimitRule, environ: dict) -> str:
     never collide with a different scope's bucket for the same string.
     """
     if rule.scope == "user":
+        uid = _identified_uid(environ)
+        if uid is not None:
+            return f"user:{uid}"
         user_id = _authenticated_user_id(environ)
         if user_id is not None:
             return f"user:{user_id}"

@@ -50,6 +50,13 @@ _identity_resolvers: List[IdentityResolver] = []
 # already ran this scope (value may be None for anonymous).
 _RESOLUTION_KEY = "identity_resolution"
 
+# WSGI-environ mirror of _RESOLUTION_KEY for resolution that runs before the
+# request scope opens (rate-limit key resolution, fymo/remote/rate_limit.py):
+# a clean pre-scope walk caches its outcome here, and request_scope
+# (fymo/remote/context.py) seeds the event cache from it, so resolvers still
+# run at most once per request.
+ENVIRON_RESOLUTION_KEY = "fymo.identity_resolution"
+
 
 def _resolver_registration_key(fn: IdentityResolver):
     """Identity of a resolver's definition site, stable across importlib.reload.
