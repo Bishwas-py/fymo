@@ -28,7 +28,8 @@ The decoded result has the shape:
       },
       "title":  "Post: Welcome",
       "doc":    { ... },                            # merged getDoc() output (root -> resource -> leaf)
-      "params": { "id": "welcome-to-fymo" }         # Router.match()'s resolved :id-style captures, {} if none
+      "params": { "id": "welcome-to-fymo" },        # Router.match()'s resolved :id-style captures, {} if none
+      "identity": { "uid": "u1", ... }              # public_identity projection, or None when anonymous
     }
 
 `params` is a top-level field independent of `leaf.props` -- a controller
@@ -197,8 +198,19 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
 
     title = doc_meta.get("title", app.config_manager.get_app_name())
 
+    # The identity slot (issue #80): same projection the full-page render
+    # embeds, so the client's $fymo/auth store updates on every soft nav.
     try:
-        encoded = devalue.stringify({"leaf": leaf, "title": title, "doc": doc_meta, "params": params})
+        from fymo.auth.public import client_identity
+        identity = client_identity(environ)
+    except Exception as e:
+        payload = {"type": "error", "status": 500, "error": "identity_failed"}
+        if getattr(app, "dev", False):
+            payload["message"] = str(e)
+        return _200(start_response, payload)
+
+    try:
+        encoded = devalue.stringify({"leaf": leaf, "title": title, "doc": doc_meta, "params": params, "identity": identity})
     except Exception as e:
         payload = {"type": "error", "status": 500, "error": "encode_failed"}
         if getattr(app, "dev", False):

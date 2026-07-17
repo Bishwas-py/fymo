@@ -36,6 +36,7 @@ from fymo.auth.context import (
 )
 from fymo.auth.identity import Identity, ResolverEvent, current_uid, identify
 from fymo.auth.passwords import hash_password, verify_password
+from fymo.auth.public import public_identity
 from fymo.auth.store import User, UserStore, SqliteUserStore, EmailAlreadyExists
 from fymo.auth.verify_token import sign_token, verify_token
 
@@ -49,6 +50,7 @@ __all__ = [
     "ResolverEvent",
     "identify",
     "current_uid",
+    "public_identity",
     "hash_password",
     "verify_password",
     "sign_token",

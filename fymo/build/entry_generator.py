@@ -10,6 +10,7 @@ CLIENT_ENTRY_TEMPLATE = """\
 import {{ hydrate, mount, unmount }} from 'svelte';
 import {{ stringify, parse }} from 'devalue';
 import {{ seedRoute, applyRouteNav }} from '$route';
+import {{ __setIdentity as __fymoSetIdentity }} from '$fymo/auth';
 import Component from '{component_import}';
 
 // Re-export the route's Svelte component so the soft-nav router can
@@ -28,6 +29,11 @@ const initialProps = propsEl ? JSON.parse(propsEl.textContent) : {{}};
 const docEl = document.getElementById('svelte-doc');
 let currentDoc = docEl ? JSON.parse(docEl.textContent) : {{}};
 globalThis.getDoc = () => currentDoc;
+
+// Seed the $fymo/auth identity store from the SSR payload before
+// hydrate(), so the first client render agrees with the server's.
+const identityEl = document.getElementById('fymo-identity');
+__fymoSetIdentity(identityEl ? JSON.parse(identityEl.textContent) : null);
 
 // Seed the reactive route state from this request's own URL + the server's
 // resolved :id-style params, before hydrate() -- so the first subscriber
@@ -104,6 +110,7 @@ async function softNav(path, push = true) {{
     inflight = null;
 
     const data = parse(env.result);
+    __fymoSetIdentity(data.identity ?? null);
     const leaf = data.leaf;
 
     // Block on CSS to avoid FOUC.
@@ -258,6 +265,7 @@ CLIENT_BOOTSTRAP_WITH_SHELL_TEMPLATE = """\
 import {{ hydrate }} from 'svelte';
 import {{ stringify, parse }} from 'devalue';
 import {{ seedRoute, applyRouteNav }} from '$route';
+import {{ __setIdentity as __fymoSetIdentity }} from '$fymo/auth';
 import Shell from './{shell_filename}';
 import InitialLeaf from '{component_import}';
 {initial_resource_layout_import}
@@ -275,6 +283,11 @@ const initialProps = propsEl ? JSON.parse(propsEl.textContent) : {{ leafProps: {
 const docEl = document.getElementById('svelte-doc');
 let currentDoc = docEl ? JSON.parse(docEl.textContent) : {{}};
 globalThis.getDoc = () => currentDoc;
+
+// Seed the $fymo/auth identity store from the SSR payload before
+// hydrate(), so the first client render agrees with the server's.
+const identityEl = document.getElementById('fymo-identity');
+__fymoSetIdentity(identityEl ? JSON.parse(identityEl.textContent) : null);
 
 // Seed the reactive route state from this request's own URL + the server's
 // resolved :id-style params, before hydrate() -- so the first subscriber
@@ -361,6 +374,7 @@ async function softNav(path, push = true) {{
     inflight = null;
 
     const data = parse(env.result);
+    __fymoSetIdentity(data.identity ?? null);
     const leaf = data.leaf;
 
     // Routes that don't use the layout shell (uses_layout_shell=false in the

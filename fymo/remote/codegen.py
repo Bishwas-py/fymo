@@ -27,6 +27,16 @@ B64URL_JS = '''function b64url(s) {
 # `catch (err) { ... err.message ... }` only ever saw a near-meaningless code
 # instead of the real failure reason.
 REMOTE_ERROR_THROW_JS = '''if (env.type === "error") {
+        // 401 unauthenticated with a server-attached signin path: navigate
+        // there like a page-level require_auth would, carrying the current
+        // location as ?next=. The signin path is never embedded at build
+        // time; the server (which owns the routes) is its single source of
+        // truth, the client only contributes the browser's location.
+        if (env.status === 401 && env.signin) {
+            const next = encodeURIComponent(window.location.pathname + window.location.search);
+            window.location.href = env.signin + (env.signin.includes("?") ? "&" : "?") + "next=" + next;
+            return;
+        }
         const e = new Error(env.message || env.error || "remote_error");
         e.status = env.status;
         e.error = env.error;

@@ -114,6 +114,7 @@ gunicorn>=23.0.0
     "skipLibCheck": true,
     "paths": {
       "$remote/*": ["./dist/client/_remote/*"],
+      "$fymo/*": ["./dist/client/_fymo/*"],
       "$lib/*": ["./app/lib/*"],
       "$components/*": ["./app/components/*"]
     }

@@ -24,6 +24,7 @@ _VARIANT_FILES = {
         "password/resolver.py.tmpl": "app/auth/resolver.py",
         "password/store.py.tmpl": "app/auth/store.py",
         "password/extras.py.tmpl": "app/auth/extras.py",
+        "password/public.py.tmpl": "app/auth/public.py",
         "password/remote_auth.py.tmpl": "app/remote/auth.py",
         "password/users.sql.tmpl": "schema/users.sql",
     },

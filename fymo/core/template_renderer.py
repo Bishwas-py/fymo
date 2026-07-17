@@ -225,13 +225,23 @@ class TemplateRenderer:
             doc_meta = leaf_doc
             sidecar_props = leaf_props
 
+        # The identity slot (issue #80): the public_identity projection
+        # output for this request, or None when anonymous / no @identify
+        # chain. Passed to the sidecar so $fymo/auth reads it during SSR,
+        # then embedded in the HTML for the client store to hydrate from.
+        from fymo.auth.public import client_identity
+        identity = client_identity(environ)
+
         try:
             from fymo.core.html import _safe_json
             import json
             # Serialize props through _safe_json first so remote callables become
             # their marker dicts before being JSON-encoded for the IPC message.
             serialized_props = json.loads(_safe_json(sidecar_props))
-            ssr = self.sidecar.render(route_name, serialized_props, doc=doc_meta)
+            render_kwargs = {"doc": doc_meta}
+            if identity is not None:
+                render_kwargs["identity"] = identity
+            ssr = self.sidecar.render(route_name, serialized_props, **render_kwargs)
         except SidecarError as e:
             return self._render_error(e, "SSR Error")
 
@@ -250,6 +260,7 @@ class TemplateRenderer:
             disabled_soft_nav=self.router.disabled_soft_nav_resources(),
             global_css=manifest.global_css,
             params=params,
+            identity=identity,
         )
         return html, "200 OK"
 

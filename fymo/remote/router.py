@@ -66,6 +66,19 @@ def _200(
     return [body]
 
 
+# Path of the route named `signin`, or None when the app has no signin
+# route. Installed by FymoApp.__init__ from Router.signin_path(), the
+# single source of truth for where anonymous callers go, so the generated
+# $remote client can redirect on a 401 without embedding the path at build
+# time. Same module-level seam pattern as _resolve_module_for_hash above.
+_signin_path: "str | None" = None
+
+
+def set_signin_path(path: "str | None") -> None:
+    global _signin_path
+    _signin_path = path
+
+
 def _remote_error_payload(e: RemoteError) -> dict:
     """Envelope body for a RemoteError. RateLimited additionally carries
     retry_after, surfaced so clients can back off instead of retrying blind."""
@@ -73,6 +86,12 @@ def _remote_error_payload(e: RemoteError) -> dict:
     retry_after = getattr(e, "retry_after", None)
     if retry_after is not None:
         payload["retry_after"] = retry_after
+    # Only the unauthenticated code (@require_auth / AuthRequired: "sign in
+    # to call this") gets the signin pointer. A plain 401 Unauthorized
+    # (e.g. wrong password from the signin page's own login remote) must
+    # not bounce the browser back to signin and eat its error message.
+    if e.status == 401 and e.code == "unauthenticated" and _signin_path:
+        payload["signin"] = _signin_path
     return payload
 
 

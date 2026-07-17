@@ -112,3 +112,15 @@ def test_runtime_error_branch_prefers_message_over_error_code(tmp_path: Path):
     runtime = (tmp_path / "__runtime.js").read_text()
     assert "env.message || env.error" in runtime
     assert "e.traceback = env.traceback;" in runtime
+
+
+def test_runtime_401_with_signin_redirects_with_next(tmp_path: Path):
+    """Issue #80 phase 4: when the server attaches a `signin` path to a 401
+    unauthenticated envelope, the generated client navigates there with the
+    browser's current location as ?next= instead of throwing. Shared via
+    REMOTE_ERROR_THROW_JS so the per-route hydration entries can't drift."""
+    from fymo.remote.codegen import emit_runtime
+    emit_runtime(tmp_path)
+    runtime = (tmp_path / "__runtime.js").read_text()
+    assert "env.status === 401 && env.signin" in runtime
+    assert "encodeURIComponent(window.location.pathname + window.location.search)" in runtime

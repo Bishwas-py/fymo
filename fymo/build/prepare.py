@@ -19,6 +19,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from fymo.auth.codegen import emit_identity_client
 from fymo.broadcast.codegen import emit_broadcast_client
 from fymo.build.composition_generator import generate_ssr_tree
 from fymo.build.discovery import discover_routes, discover_all_layouts
@@ -234,6 +235,10 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
 
     # Codegen for app/broadcasts/*.py -- dist/client/_broadcast/<name>.{js,d.ts}
     emit_broadcast_client(project_root, dist_dir)
+
+    # The $fymo/auth identity store -- dist/client/_fymo/auth.{js,d.ts}.
+    # Unconditional: every generated client entry imports it (issue #80).
+    emit_identity_client(dist_dir)
 
     remote_assets: dict[str, RemoteModuleAssets] = {}
     for module_name, fns in remote_modules.items():

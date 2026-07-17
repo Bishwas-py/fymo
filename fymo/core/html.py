@@ -56,6 +56,7 @@ def build_html(
     disabled_soft_nav: list = None,
     global_css: str = None,
     params: Dict[str, Any] = None,
+    identity: Dict[str, Any] = None,
 ) -> str:
     """Render the minimal HTML envelope. Pieces are concatenated with no boilerplate."""
     global_css_link = (
@@ -80,6 +81,13 @@ def build_html(
     # to special-case a missing island vs a genuinely empty dict.
     route_params_island = (
         f'<script type="application/json" id="svelte-route-params">{_safe_json(params or {})}</script>\n'
+    )
+    # The public_identity projection output (issue #80), or null when
+    # anonymous. Always emitted, like the route-params island, so the
+    # $fymo/auth client never special-cases a missing tag; goes through
+    # _safe_json exactly like props so it can't break out of the island.
+    identity_island = (
+        f'<script type="application/json" id="fymo-identity">{_safe_json(identity)}</script>\n'
     )
     # Pass the list of resources whose soft-nav is disabled to the client
     # router so it can skip click interception preemptively (no wasted
@@ -115,6 +123,7 @@ def build_html(
         f'<script type="application/json" id="svelte-props">{_safe_json(props)}</script>\n'
         f"{doc_island}"
         f"{route_params_island}"
+        f"{identity_island}"
         f'<script type="module" src="{asset_prefix}/{assets.client}"></script>\n'
         "</body>\n"
         "</html>\n"

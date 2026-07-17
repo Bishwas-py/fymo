@@ -28,6 +28,7 @@ PASSWORD_FILES = [
     "app/auth/resolver.py",
     "app/auth/store.py",
     "app/auth/extras.py",
+    "app/auth/public.py",
     "app/remote/__init__.py",
     "app/remote/auth.py",
     "schema/users.sql",
@@ -63,12 +64,16 @@ def _cleanup_app_modules() -> None:
 
 @pytest.fixture(autouse=True)
 def _clean():
+    from fymo.auth.public import reset_public_identity
+
     set_secret(b"x" * 32)
     reset_identity_resolvers()
+    reset_public_identity()
     auth_context.reset_identity_extras_hooks()
     _cleanup_app_modules()
     yield
     reset_identity_resolvers()
+    reset_public_identity()
     auth_context.reset_identity_extras_hooks()
     _cleanup_app_modules()
 
@@ -275,6 +280,30 @@ def test_password_resolver_round_trips_signed_token(tmp_path, monkeypatch):
         assert current_uid() == "42"
     with request_scope(uid="u_anon", environ={"HTTP_COOKIE": "session=tampered"}):
         assert current_uid() is None
+
+
+def test_password_public_projection_whitelists_uid_and_name(tmp_path, monkeypatch):
+    """The generated app/auth/public.py registers a public_identity
+    projection that exposes only {uid, name-derived-from-email}: the email
+    address itself (PII) and the rest of the extras stay server-side."""
+    from fymo.auth import sign_token
+    from fymo.auth.public import project_identity, registered_public_identity
+
+    project = _scaffold_project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_auth("password")
+    modules = import_auth_modules(project)
+    assert "app.auth.public" in modules
+    assert registered_public_identity() is not None
+
+    monkeypatch.syspath_prepend(str(project))
+    from app.auth import store
+    uid = store.create("carol@example.com", "hunter2hunter2")
+    token = sign_token(uid)
+    with request_scope(uid="u_anon", environ={"HTTP_COOKIE": f"session={token}"}):
+        projected = project_identity()
+    assert projected == {"uid": uid, "name": "carol"}
+    assert "email" not in projected
 
 
 # --------------- password flow end to end via the remote router ---------------

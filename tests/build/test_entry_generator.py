@@ -233,3 +233,39 @@ def test_root_only_layout_chain_still_renders_leaf_in_else_branch(tmp_path: Path
     shell = (out_dir / "about.shell.svelte").read_text()
     assert "{@render leafSlot()}" in shell
     assert shell.count("{@render leafSlot()}") == 2
+
+
+def test_entry_seeds_identity_store_from_island(tmp_path: Path):
+    """Issue #80 phase 4: the boot code hydrates $fymo/auth's identity store
+    from the fymo-identity island before hydrate(), and refreshes it from
+    every soft-nav data envelope."""
+    route = Route(name="home", entry_path=tmp_path / "templates/home/index.svelte")
+    out_dir = tmp_path / ".fymo" / "entries"
+    write_client_entries([route], out_dir, project_root=tmp_path)
+    text = (out_dir / "home.client.js").read_text()
+    assert "from '$fymo/auth'" in text
+    assert "getElementById('fymo-identity')" in text
+    assert "data.identity" in text
+    # the 401 -> signin redirect rides the shared error branch
+    assert "env.status === 401 && env.signin" in text
+
+
+def test_shell_bootstrap_seeds_identity_store_from_island(tmp_path: Path):
+    from fymo.build.discovery import LayoutRef
+
+    root_layout = tmp_path / "templates" / "_layout.svelte"
+    root_layout.parent.mkdir(parents=True)
+    root_layout.write_text("<div></div>")
+    leaf = tmp_path / "templates" / "home" / "index.svelte"
+    leaf.parent.mkdir(parents=True)
+    leaf.write_text("<div></div>")
+    route = Route(
+        name="home", entry_path=leaf,
+        layout_chain=[LayoutRef(level="root", id="_root", svelte_path=root_layout, controller_module=None)],
+    )
+    out_dir = tmp_path / "out"
+    write_client_entries([route], out_dir, tmp_path)
+    text = (out_dir / "home.client.js").read_text()
+    assert "from '$fymo/auth'" in text
+    assert "getElementById('fymo-identity')" in text
+    assert "data.identity" in text

@@ -222,6 +222,9 @@ class FymoApp:
         import_auth_modules(self.project_root)
         from fymo.core.page_auth import validate_route_guards
         validate_route_guards(self.router)
+        # The signin path is the router's to know; the remote router only
+        # needs it to point 401-unauthenticated envelopes at it (issue #80).
+        _remote_router.set_signin_path(self.router.signin_path())
         self.template_renderer = TemplateRenderer(
             self.project_root,
             self.config_manager,
