@@ -10,8 +10,10 @@ tribal knowledge.
 | Directory | Language | Purpose |
 |---|---|---|
 | `app/controllers` | Python | Page controllers, one module per route, exposing `getContext()`/`getDoc()` to the matching template. |
-| `app/templates` | Svelte / TS | The page components the router renders, one file per route (plus `_layout.svelte` files and `_global.css`). |
+| `app/templates` | Svelte / TS | The page components the router renders, one file per route (plus `_layout.svelte` files). `.svelte` files only — stylesheets live in `app/assets/`. |
 | `app/components` | Svelte / TS | Reusable UI components shared across templates. |
+| `app/assets` | CSS / fonts / images | Build inputs consumed by esbuild: stylesheets imported by layouts, plus the fonts/images they reference via `url()`. Content-hashed into `/dist/`, never served raw. |
+| `app/static` | any | Verbatim files with stable URLs (robots.txt, favicons). Served byte-exact at `/static/<path>` (plus the root allowlist for well-known filenames). |
 | `app/remote` | Python | Functions callable from the browser via the generated `$remote` client. Public, type-annotated top-level functions are exposed by default; mark with `@remote` (`fymo.remote.remote`) to opt into `remote.mode: strict`. |
 | `app/jobs` | Python | Background task registry, submitted through a `JobProvider`. Every non-underscore top-level function becomes a submittable task; mark task entry points with `@task` (`fymo.jobs.task`) to say so explicitly (see below). |
 | `app/broadcasts` | Python | SSE channel definitions, discovered the same way as `app/jobs`. |
@@ -27,6 +29,12 @@ fails the build. Nothing silently ignores the misplaced file: Python never
 imports a stray `.svelte`, and esbuild never bundles a stray `.py`, so
 without this check the file would just do nothing instead of erroring where
 a developer would notice.
+
+The same seam enforces the stylesheet contract: any `.css` file under
+`app/templates/` fails the build naming the move (stylesheets live in
+`app/assets/`, imported from a layout). `<style>` blocks inside `.svelte`
+files are untouched — that's Svelte's component styling and none of the
+framework's business.
 
 ## `app/lib` is a warning, not an error
 

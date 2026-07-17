@@ -42,7 +42,7 @@ from fymo.storage.base import RangeNotSatisfiable, StorageProvider
 # the app-routes loop runs. An expose prefix landing under either of these
 # would silently never be reached, so it's worth a loud warning at startup
 # rather than a confusing 404/wrong-content-type discovered in production.
-_RESERVED_PREFIXES = ("/dist/", "/assets/")
+_RESERVED_PREFIXES = ("/dist/", "/static/")
 
 # Shared by FymoApp startup (fymo/core/server.py) and `fymo build`'s
 # check_storage_required_for_expose (fymo/build/hygiene.py) so the two

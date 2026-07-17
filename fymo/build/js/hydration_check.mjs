@@ -38,8 +38,16 @@
 // below) -- nothing leaks into the next call or the rest of the process.
 
 import { JSDOM } from 'jsdom';
+import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+
+// Chunk imports inside the bundle are browser-absolute ("/dist/client/...")
+// because of esbuild's publicPath; a browser resolves them against the
+// origin, Node's loader can't. hydration_resolve_hook.mjs re-anchors them
+// to the on-disk dist dir. Registered once per process, lazily (inside
+// checkHydration) so merely importing this module never installs hooks.
+let distResolveHookRegistered = false;
 
 /**
  * @param {string} url page URL to fetch and hydrate
@@ -57,6 +65,11 @@ import path from 'node:path';
 export async function checkHydration(url, distDir, timeoutMs = 5000, { afterBoot } = {}) {
   const errors = [];
   const warnings = [];
+
+  if (!distResolveHookRegistered) {
+    register(new URL('./hydration_resolve_hook.mjs', import.meta.url));
+    distResolveHookRegistered = true;
+  }
 
   const res = await fetch(url);
   const html = await res.text();

@@ -47,7 +47,6 @@ class _FakeManifest:
             "redirtest": RouteAssets(ssr="ssr/x.mjs", client="client/x.js", css=None, preload=[]),
         }
         self.layouts = {}
-        self.global_css = []
 
 
 class _FakeManifestCache:

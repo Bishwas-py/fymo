@@ -4,7 +4,7 @@
 `BuildPipeline.build()` and `DevOrchestrator.start()` used to re-derive the
 same sequence line for line: hygiene check, route discovery,
 write_client_entries, layout discovery + `_layout-<id>` entries,
-`_global.css` detection, remote-module discovery (incl. the sys.path
+remote-module discovery (incl. the sys.path
 insert/remove dance) + emit_runtime/emit_module, emit_broadcast_client, SSR
 tree composition -- diverging only at the esbuild invocation itself
 (subprocess.run + strict manifest for `fymo build`, Popen + streaming +
@@ -26,10 +26,12 @@ from fymo.build.entry_generator import write_client_entries
 from fymo.build.hygiene import (
     check_auth_enforcement_hygiene,
     check_directory_hygiene,
+    check_global_css_migration,
     check_lib_directory_warnings,
     check_media_key_removed,
     check_remote_exposure_hygiene,
     check_storage_required_for_expose,
+    check_template_css_hygiene,
     format_auth_enforcement_error,
     format_hygiene_error,
     format_remote_exposure_error,
@@ -50,9 +52,8 @@ class BuildConfig:
     """Everything both entry points need before invoking esbuild."""
     routes: list                      # discover_routes result
     all_layouts: list                 # discover_all_layouts result
-    has_global_css: bool
     ssr_entries: list                 # [{"name", "entryPath"}] -- composed tree or raw leaf
-    client_entries: dict              # {name: str(path)} routes + _layout-* + _global
+    client_entries: dict              # {name: str(path)} routes + _layout-*
     remote_assets: dict               # {module: RemoteModuleAssets}
 
 
@@ -107,6 +108,18 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     hygiene_violations = check_directory_hygiene(project_root)
     if hygiene_violations:
         raise BuildError(format_hygiene_error(hygiene_violations))
+
+    # Also pure filesystem checks, same stage. The _global.css migration
+    # check runs before the generic templates-css ban so a leftover
+    # _global.css gets the message with its exact fix rather than the
+    # generic "move it" line.
+    migration_error = check_global_css_migration(project_root)
+    if migration_error:
+        raise BuildError(migration_error)
+
+    css_violations = check_template_css_hygiene(project_root)
+    if css_violations:
+        raise BuildError("\n".join(css_violations))
 
     # Soft check, same point in the sequence as the hard one above but never
     # raises; see check_lib_directory_warnings' docstring for why app/lib/
@@ -177,10 +190,6 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
         f"_layout-{ref.id}": ref.svelte_path for ref in all_layouts
     }
 
-    global_css_path = templates_dir / "_global.css"
-    has_global_css = global_css_path.is_file()
-    global_css_entry = {"_global": global_css_path} if has_global_css else {}
-
     # SSR entry points: composed tree file when a route has a layout chain,
     # else the raw leaf (unchanged behavior).
     ssr_entries = []
@@ -239,13 +248,11 @@ def prepare_build_config(project_root: Path, dist_dir: Path, cache_dir: Path, de
     client_entries = {
         **{name: str(path) for name, path in client_entry_paths.items()},
         **{name: str(path) for name, path in layout_client_entries.items()},
-        **{name: str(path) for name, path in global_css_entry.items()},
     }
 
     return BuildConfig(
         routes=routes,
         all_layouts=all_layouts,
-        has_global_css=has_global_css,
         ssr_entries=ssr_entries,
         client_entries=client_entries,
         remote_assets=remote_assets,

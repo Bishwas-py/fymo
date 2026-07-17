@@ -14,7 +14,7 @@ client at hydration time (`Cannot read properties of undefined
 (reading 'root')`) since the two disagreed on the prop shape.
 """
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from fymo.build.manifest import LayoutAssets, LayoutRefAsset, RouteAssets
 
@@ -25,16 +25,15 @@ def match_esbuild_outputs(
     all_layouts: List[Any],
     project_root: Path,
     dist_dir: Path,
-    has_global_css: bool,
-) -> Tuple[Dict[str, RouteAssets], Dict[str, LayoutAssets], Optional[str]]:
+) -> Tuple[Dict[str, RouteAssets], Dict[str, LayoutAssets]]:
     """Walk an esbuild client metafile's `outputs` and match each output
-    back to the route, layout, or global-css entry point that produced it.
+    back to the route or layout entry point that produced it.
 
-    Returns (route_assets, layout_assets, global_css_path). A route or
-    layout with no matching output is simply absent from the returned
-    dicts -- callers decide their own policy for that (BuildPipeline raises
-    a hard BuildError; DevOrchestrator skips writing the manifest and waits
-    for the next rebuild, since a route's output can be transiently absent
+    Returns (route_assets, layout_assets). A route or layout with no
+    matching output is simply absent from the returned dicts -- callers
+    decide their own policy for that (BuildPipeline raises a hard
+    BuildError; DevOrchestrator skips writing the manifest and waits for
+    the next rebuild, since a route's output can be transiently absent
     mid-rebuild while watching).
     """
     dist_dir_abs = dist_dir.resolve()
@@ -50,7 +49,6 @@ def match_esbuild_outputs(
     css_by_route: Dict[str, str] = {}
     layout_client: Dict[str, str] = {}
     layout_css: Dict[str, str] = {}
-    global_css_out: Optional[str] = None
 
     for out_path, info in client_outputs.items():
         entry_point = info.get("entryPoint")
@@ -107,9 +105,6 @@ def match_esbuild_outputs(
                     pass
             continue
 
-        if has_global_css and entry_name == "_global.css" and str(rel_to_dist).endswith(".css"):
-            global_css_out = str(rel_to_dist).replace("\\", "/")
-
     chunks: List[str] = []
     for p in client_outputs:
         if Path(p).name.startswith("chunk-") and p.endswith(".js"):
@@ -141,4 +136,4 @@ def match_esbuild_outputs(
         if ref.id in layout_client
     }
 
-    return route_assets, layout_assets, global_css_out
+    return route_assets, layout_assets

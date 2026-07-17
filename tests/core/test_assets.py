@@ -1,4 +1,10 @@
-"""Security + behavior tests for AssetManager static file serving."""
+"""Security + behavior tests for AssetManager static file serving.
+
+serve_static_file takes the path relative to app/static/ (the part after
+the /static/ URL prefix, stripped by FymoApp._dispatch); the dispatch-level
+/static/ URL behavior itself is pinned in
+tests/integration/test_root_static_and_404.py.
+"""
 
 from pathlib import Path
 
@@ -31,27 +37,27 @@ def project(tmp_path: Path) -> Path:
 
 def test_serves_legitimate_static_file(project: Path):
     mgr = AssetManager(project)
-    content, status, _, _ = mgr.serve_asset("/assets/logo.txt")
+    content, status, _, _ = mgr.serve_static_file("logo.txt")
     assert status == "200 OK"
     assert content == b"i am a public asset"
 
 
 def test_dotdot_traversal_cannot_escape_static_dir(project: Path):
-    """`/assets/../../secret.txt` climbs from app/static back to the project
+    """`/static/../../secret.txt` climbs from app/static back to the project
     root and must not read files outside app/static."""
     mgr = AssetManager(project)
-    content, status, _, _ = mgr.serve_asset("/assets/../../secret.txt")
+    content, status, _, _ = mgr.serve_static_file("../../secret.txt")
     assert not status.startswith("200"), f"traversal leaked file: {content!r}"
     assert b"TOP SECRET" not in content
 
 
 def test_absolute_path_injection_cannot_escape_static_dir(project: Path):
-    """`/assets//abs/path` — pathlib's `/` resets to the absolute operand, so a
+    """`/static//abs/path` — pathlib's `/` resets to the absolute operand, so a
     naive join reads an arbitrary absolute file. Must be blocked."""
     mgr = AssetManager(project)
     secret = project / "secret.txt"
-    # serve_asset strips the '/assets/' prefix, leaving an absolute '/....'
-    content, status, _, _ = mgr.serve_asset(f"/assets/{secret}")
+    # _dispatch strips the '/static/' prefix, leaving an absolute '/....'
+    content, status, _, _ = mgr.serve_static_file(str(secret))
     assert not status.startswith("200"), f"absolute-path read leaked file: {content!r}"
     assert b"TOP SECRET" not in content
 
@@ -63,7 +69,7 @@ def test_serves_woff2_byte_identical(project: Path):
     fonts.mkdir()
     (fonts / "Inter.woff2").write_bytes(WOFF2_BYTES)
     mgr = AssetManager(project)
-    content, status, content_type, _ = mgr.serve_asset("/assets/fonts/Inter.woff2")
+    content, status, content_type, _ = mgr.serve_static_file("fonts/Inter.woff2")
     assert status == "200 OK"
     assert content_type == "font/woff2"
     assert content == WOFF2_BYTES
@@ -73,7 +79,7 @@ def test_serves_png_byte_identical(project: Path):
     static = project / "app" / "static"
     (static / "logo.png").write_bytes(PNG_BYTES)
     mgr = AssetManager(project)
-    content, status, content_type, _ = mgr.serve_asset("/assets/logo.png")
+    content, status, content_type, _ = mgr.serve_static_file("logo.png")
     assert status == "200 OK"
     assert content_type == "image/png"
     assert content == PNG_BYTES
@@ -81,7 +87,7 @@ def test_serves_png_byte_identical(project: Path):
 
 def test_static_response_carries_etag_and_cache_control(project: Path):
     mgr = AssetManager(project)
-    _, status, _, headers = mgr.serve_asset("/assets/logo.txt")
+    _, status, _, headers = mgr.serve_static_file("logo.txt")
     assert status == "200 OK"
     assert headers.get("ETag", "").startswith('"')
     assert headers.get("Cache-Control") == "public, max-age=3600"
@@ -89,10 +95,10 @@ def test_static_response_carries_etag_and_cache_control(project: Path):
 
 def test_if_none_match_returns_304_with_empty_body(project: Path):
     mgr = AssetManager(project)
-    _, _, _, headers = mgr.serve_asset("/assets/logo.txt")
+    _, _, _, headers = mgr.serve_static_file("logo.txt")
     etag = headers["ETag"]
     environ = {"HTTP_IF_NONE_MATCH": etag}
-    content, status, _, headers = mgr.serve_asset("/assets/logo.txt", environ)
+    content, status, _, headers = mgr.serve_static_file("logo.txt", environ)
     assert status == "304 NOT MODIFIED"
     assert content == b""
     # The validator is resent so caches can refresh their entry's lifetime.
@@ -102,12 +108,20 @@ def test_if_none_match_returns_304_with_empty_body(project: Path):
 def test_stale_if_none_match_returns_full_body(project: Path):
     mgr = AssetManager(project)
     environ = {"HTTP_IF_NONE_MATCH": '"deadbeef-0"'}
-    content, status, _, _ = mgr.serve_asset("/assets/logo.txt", environ)
+    content, status, _, _ = mgr.serve_static_file("logo.txt", environ)
     assert status == "200 OK"
     assert content == b"i am a public asset"
 
 
 def test_missing_static_file_is_404(project: Path):
     mgr = AssetManager(project)
-    _, status, _, _ = mgr.serve_asset("/assets/nope.png")
+    _, status, _, _ = mgr.serve_static_file("nope.png")
     assert status == "404 NOT FOUND"
+
+
+def test_extracted_css_machinery_is_gone():
+    """The in-memory extracted-css path (/assets/css/) died with the /assets/
+    URL: nothing ever called store_extracted_css, so get_extracted_css could
+    only return None and the branch was unreachable. Deleted, not renamed."""
+    for attr in ("serve_asset", "store_extracted_css", "get_extracted_css", "generate_css_links"):
+        assert not hasattr(AssetManager, attr)
