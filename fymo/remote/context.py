@@ -60,6 +60,12 @@ def request_scope(uid: str, environ: dict):
         "headers": headers,
         "scheme": resolve_scheme(environ, _trust_proxy),
     }
+    # Identity resolution that ran before this scope opened (rate-limit key
+    # resolution) caches its outcome on the environ; seed the event cache
+    # from it so current_uid() does not re-run the resolver chain.
+    from fymo.auth.identity import ENVIRON_RESOLUTION_KEY, _RESOLUTION_KEY
+    if ENVIRON_RESOLUTION_KEY in environ:
+        payload[_RESOLUTION_KEY] = environ[ENVIRON_RESOLUTION_KEY]
     token = _current_event.set(payload)
     try:
         yield
