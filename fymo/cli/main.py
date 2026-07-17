@@ -64,6 +64,26 @@ def dev_cmd(host, port):
 
 
 @cli.group()
+def generate():
+    """Generate app-owned code into the current project."""
+    pass
+
+
+@generate.command(name="auth")
+@click.option('--clerk', is_flag=True, default=False,
+              help='Clerk JWT resolver; the app adds pyjwt[crypto] to its own dependencies')
+@click.option('--skeleton', is_flag=True, default=False,
+              help='Bare resolver stub returning None; build your own mechanism')
+def generate_auth_cmd(clerk, skeleton):
+    """Scaffold app-owned auth into app/auth/ (password login by default)."""
+    if clerk and skeleton:
+        raise click.UsageError("--clerk and --skeleton are mutually exclusive")
+    from fymo.cli.commands.generate_auth import generate_auth
+    variant = 'clerk' if clerk else 'skeleton' if skeleton else 'password'
+    generate_auth(variant)
+
+
+@cli.group()
 def schema():
     """Schema tooling for the database objects fymo providers own."""
     pass
