@@ -1,5 +1,17 @@
 #!/usr/bin/env node
 import { render } from 'svelte/server';
+import { format } from 'node:util';
+
+// stdout carries the binary frame protocol below and nothing else. Component
+// code (or any dependency bundled into the SSR output) may call console.log
+// during a render; by default Node writes that to stdout, interleaving plain
+// text into the frame stream and desyncing the Python parser (issue #84).
+// Rebind every stdout-targeting console method to stderr before the stdin
+// listener is wired, so no render can ever touch the IPC channel.
+// console.error/trace already target stderr and are left alone.
+for (const method of ['log', 'info', 'warn', 'debug']) {
+    console[method] = (...args) => process.stderr.write(format(...args) + '\n');
+}
 
 const cache = new Map();
 const stdout = process.stdout;

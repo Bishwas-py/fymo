@@ -19,7 +19,9 @@ import os
 import select
 import struct
 import subprocess
+import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -56,13 +58,23 @@ class Sidecar:
             return
         if not self.script.is_file():
             raise SidecarError(f"sidecar script not found at {self.script}; run `fymo build` first")
+        # stderr is captured and pumped, not inherited: the sidecar rebinds
+        # console.log/info/warn/debug onto stderr (stdout is the frame
+        # protocol), and the pump prefixes each line so a developer can tell
+        # sidecar output from the WSGI process's own logs. The pump must be a
+        # dedicated always-running thread: a PIPE nobody drains fills the OS
+        # buffer (~64KB) and then blocks Node mid-write, hanging the render.
         self._proc = subprocess.Popen(
             ["node", str(self.script)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=None,  # inherit so logs surface
+            stderr=subprocess.PIPE,
             cwd=str(self.dist_dir),
         )
+        pump = threading.Thread(
+            target=_pump_stderr, args=(self._proc.stderr,), daemon=True
+        )
+        pump.start()
 
     def stop(self) -> None:
         proc = self._proc
@@ -129,23 +141,48 @@ class Sidecar:
         return reply
 
     def _send_frame_locked(self, frame: bytes) -> bytes:
-        """Write `frame`, wait for response, return body bytes. Caller holds lock + proc alive."""
+        """Write `frame`, wait for response, return body bytes. Caller holds lock + proc alive.
+
+        The timeout is a single deadline for the COMPLETE reply frame, not
+        per-read. A select() that only guards the first byte is worthless
+        against a desynced stream: stray bytes arrive instantly, select
+        reports ready, and an unbounded read then blocks forever waiting for
+        a frame that can never complete (issue #84).
+        """
         assert self._proc is not None and self._proc.stdin is not None and self._proc.stdout is not None
         self._proc.stdin.write(frame)
         self._proc.stdin.flush()
-        if self.timeout is not None:
-            ready, _, _ = select.select([self._proc.stdout], [], [], self.timeout)
-            if not ready:
-                raise _Timeout(f"sidecar render exceeded {self.timeout}s")
-        length_bytes = self._read_exact_locked(4)
+        deadline = None if self.timeout is None else time.monotonic() + self.timeout
+        length_bytes = self._read_exact_locked(4, deadline)
         (length,) = struct.unpack(">I", length_bytes)
-        return self._read_exact_locked(length)
+        return self._read_exact_locked(length, deadline)
 
-    def _read_exact_locked(self, n: int) -> bytes:
+    def _read_exact_locked(self, n: int, deadline: Optional[float]) -> bytes:
+        """Read exactly n bytes from the child's stdout, bounded by `deadline`.
+
+        Reads go through os.read on the raw fd, not the BufferedReader:
+        buffered read(k) blocks until exactly k bytes regardless of what
+        select() saw, and its internal buffer is invisible to select, so
+        pairing the two is unsound. Nothing else may read this pipe.
+        """
         assert self._proc is not None and self._proc.stdout is not None
+        fd = self._proc.stdout.fileno()
         buf = b""
         while len(buf) < n:
-            chunk = self._proc.stdout.read(n - len(buf))
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _Timeout(
+                        f"sidecar did not deliver a complete frame within "
+                        f"{self.timeout}s (hung render or desynced stream)"
+                    )
+                ready, _, _ = select.select([fd], [], [], remaining)
+                if not ready:
+                    raise _Timeout(
+                        f"sidecar did not deliver a complete frame within "
+                        f"{self.timeout}s (hung render or desynced stream)"
+                    )
+            chunk = os.read(fd, n - len(buf))
             if not chunk:
                 raise BrokenPipeError("sidecar stdout closed")
             buf += chunk
@@ -171,6 +208,29 @@ class Sidecar:
             pass
         try:
             proc.wait(timeout=1)
+        except Exception:
+            pass
+
+
+def _pump_stderr(pipe) -> None:
+    """Forward a sidecar's stderr to the parent's, line by line, prefixed.
+
+    Runs on a daemon thread for the lifetime of one child process and exits
+    at EOF (child death), so restarts get a fresh pump for the fresh pipe.
+    sys.stderr is looked up per write, not bound at spawn, so stream
+    replacement (pytest capture, WSGI servers that rebind stderr) sees the
+    output too.
+    """
+    try:
+        for raw in iter(pipe.readline, b""):
+            line = raw.decode("utf-8", errors="replace")
+            sys.stderr.write(f"[sidecar] {line}")
+            sys.stderr.flush()
+    except (ValueError, OSError):
+        pass  # pipe closed mid-read during shutdown
+    finally:
+        try:
+            pipe.close()
         except Exception:
             pass
 
