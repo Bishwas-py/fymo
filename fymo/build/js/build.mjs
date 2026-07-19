@@ -18,12 +18,12 @@ import { createRequire } from 'node:module';
 import { fymoRemotePlugin } from './plugins/remote.mjs';
 import { fymoBroadcastPlugin } from './plugins/broadcast.mjs';
 import { fymoRoutePlugin } from './plugins/router.mjs';
-import { fymoAuthPlugin } from './plugins/fymo_auth.mjs';
+import { authPlugin } from './plugins/auth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const config = JSON.parse(process.argv[2]);
 const routeRuntimePath = path.join(__dirname, 'runtime', 'route.js');
-const fymoAuthDir = path.join(config.distDir, 'client', '_fymo');
+const authFile = path.join(config.distDir, 'client', '_auth.js');
 
 // Resolve esbuild, esbuild-svelte, and svelte-preprocess from the project's
 // own node_modules, not fymo's. A bare `import ... from 'esbuild'` resolves
@@ -73,7 +73,7 @@ async function buildServer() {
             // Bundled (never external, unlike $remote): the identity store
             // must exist inside each SSR module so `$identity` renders
             // server-side from the sidecar's per-render global.
-            fymoAuthPlugin({ fymoDir: fymoAuthDir }),
+            authPlugin({ authFile }),
             sveltePlugin({
                 preprocess: sveltePreprocess(),
                 compilerOptions: { generate: 'server', dev: false, css: 'external' },
@@ -122,7 +122,7 @@ async function buildClient() {
             fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
             fymoBroadcastPlugin({ broadcastDir: path.join(config.distDir, 'client', '_broadcast') }),
             fymoRoutePlugin({ runtimePath: routeRuntimePath }),
-            fymoAuthPlugin({ fymoDir: fymoAuthDir }),
+            authPlugin({ authFile }),
             sveltePlugin({
                 preprocess: sveltePreprocess(),
                 compilerOptions: { generate: 'client', dev: false, css: 'external', discloseVersion: false },

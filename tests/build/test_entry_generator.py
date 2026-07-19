@@ -236,14 +236,14 @@ def test_root_only_layout_chain_still_renders_leaf_in_else_branch(tmp_path: Path
 
 
 def test_entry_seeds_identity_store_from_island(tmp_path: Path):
-    """Issue #80 phase 4: the boot code hydrates $fymo/auth's identity store
+    """Issue #80 phase 4: the boot code hydrates $auth's identity store
     from the fymo-identity island before hydrate(), and refreshes it from
     every soft-nav data envelope."""
     route = Route(name="home", entry_path=tmp_path / "templates/home/index.svelte")
     out_dir = tmp_path / ".fymo" / "entries"
     write_client_entries([route], out_dir, project_root=tmp_path)
     text = (out_dir / "home.client.js").read_text()
-    assert "from '$fymo/auth'" in text
+    assert "from '$auth'" in text
     assert "getElementById('fymo-identity')" in text
     assert "data.identity" in text
     # the 401 -> signin redirect rides the shared error branch
@@ -266,6 +266,6 @@ def test_shell_bootstrap_seeds_identity_store_from_island(tmp_path: Path):
     out_dir = tmp_path / "out"
     write_client_entries([route], out_dir, tmp_path)
     text = (out_dir / "home.client.js").read_text()
-    assert "from '$fymo/auth'" in text
+    assert "from '$auth'" in text
     assert "getElementById('fymo-identity')" in text
     assert "data.identity" in text

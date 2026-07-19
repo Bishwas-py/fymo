@@ -1,6 +1,6 @@
 """Frontend identity boundary end to end (issue #80 phase 4).
 
-Builds a real app (todo_app copy) whose template imports the $fymo/auth
+Builds a real app (todo_app copy) whose template imports the $auth
 store, with an @identify resolver and a @public_identity projection, and
 proves the whole boundary through the real pipeline: esbuild resolves the
 $fymo alias, the sidecar renders $identity server-side, the fymo-identity
@@ -59,7 +59,7 @@ def project(ident):
 
 TEMPLATE = """\
 <script>
-  import { identity } from '$fymo/auth';
+  import { identity } from '$auth';
   let { title, message } = $props();
 </script>
 
@@ -273,7 +273,7 @@ def _free_port() -> int:
 
 
 def test_bundle_with_identity_store_hydrates_cleanly(app, built_app):
-    """The compiled client bundle (which imports $fymo/auth and seeds the
+    """The compiled client bundle (which imports $auth and seeds the
     store from the island before hydrate()) must hydrate the anonymous SSR
     HTML with zero console errors/warnings, same jsdom harness as
     tests/integration/test_hydration_real.py."""
@@ -297,3 +297,30 @@ def test_bundle_with_identity_store_hydrates_cleanly(app, built_app):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+@pytest.mark.usefixtures("node_available")
+def test_stale_fymo_auth_import_fails_with_rename_instruction(tmp_path: Path):
+    """Issue #86: the old $fymo/auth specifier must not die as a generic
+    could-not-resolve; the build error names the rename."""
+    dest = tmp_path / "todo_app"
+    shutil.copytree(
+        TODO_APP, dest, ignore=shutil.ignore_patterns("node_modules", "dist", ".fymo")
+    )
+    nm = TODO_APP / "node_modules"
+    if not nm.is_dir():
+        pytest.skip("examples/todo_app/node_modules not found; run npm install in examples/todo_app/")
+    (dest / "node_modules").symlink_to(nm)
+    template = dest / "app" / "templates" / "todos" / "index.svelte"
+    template.write_text(
+        "<script>\n"
+        "  import { identity } from '$fymo/auth';\n"
+        "  let { todos = [] } = $props();\n"
+        "</script>\n"
+        "<div>{$identity ? 'in' : 'out'}</div>\n"
+    )
+    from fymo.build.prepare import BuildError
+
+    with pytest.raises(BuildError) as exc:
+        BuildPipeline(project_root=dest).build(dev=False)
+    assert "$fymo/auth was renamed to $auth" in str(exc.value)

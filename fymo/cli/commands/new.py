@@ -130,7 +130,7 @@ gunicorn>=23.0.0
     "skipLibCheck": true,
     "paths": {
       "$remote/*": ["./dist/client/_remote/*"],
-      "$fymo/*": ["./dist/client/_fymo/*"],
+      "$auth": ["./dist/client/_auth"],
       "$lib/*": ["./app/lib/*"],
       "$components/*": ["./app/components/*"]
     }
@@ -389,7 +389,7 @@ def getContext():
 
     (project_path / 'app' / 'templates' / 'signin').mkdir(parents=True, exist_ok=True)
     signin_template = """<script>
-  import { identity } from '$fymo/auth';
+  import { identity } from '$auth';
 
   // login/signup are the remote functions from app/remote/auth.py,
   // threaded through the controller context (see app/controllers/signin.py).
@@ -438,7 +438,7 @@ def getContext():
   <h1>{title}</h1>
 
   {#if $identity}
-    <!-- The $fymo/auth identity store carries the app/auth/public.py
+    <!-- The $auth identity store carries the app/auth/public.py
          projection ({ uid, name } by default), hydrated at SSR and
          refreshed on every navigation. -->
     <p>Signed in as <strong>{$identity.name}</strong>. <a href="/">Back home</a></p>

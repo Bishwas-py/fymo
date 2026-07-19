@@ -223,7 +223,7 @@ class TemplateRenderer:
 
         # The identity slot (issue #80): the public_identity projection
         # output for this request, or None when anonymous / no @identify
-        # chain. Passed to the sidecar so $fymo/auth reads it during SSR,
+        # chain. Passed to the sidecar so $auth reads it during SSR,
         # then embedded in the HTML for the client store to hydrate from.
         from fymo.auth.public import client_identity
         identity = client_identity(environ)

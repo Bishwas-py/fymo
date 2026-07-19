@@ -1,4 +1,4 @@
-"""Generate the $fymo/auth client module, the identity store the Svelte
+"""Generate the $auth client module, the identity store the Svelte
 layer reads (issue #80 phase 4).
 
 Mirrors the $remote/$broadcast codegen conventions: a .js module plus a
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_AUTH_JS = '''// AUTO-GENERATED. Do not edit. Fymo identity store ($fymo/auth).
+_AUTH_JS = '''// AUTO-GENERATED. Do not edit. Fymo identity store ($auth).
 import { writable } from 'svelte/store';
 
 const _identity = writable(null);
@@ -46,7 +46,7 @@ export function __setIdentity(value) {
 }
 '''
 
-_AUTH_DTS = '''// AUTO-GENERATED. Do not edit. Fymo identity store ($fymo/auth).
+_AUTH_DTS = '''// AUTO-GENERATED. Do not edit. Fymo identity store ($auth).
 import type { Readable } from 'svelte/store';
 
 /** The public_identity projection output; shape is app-defined.
@@ -63,9 +63,9 @@ export declare function __setIdentity(value: PublicIdentity | null): void;
 
 
 def emit_identity_client(dist_dir: Path) -> None:
-    """Write dist/client/_fymo/auth.{js,d.ts}. Always emitted: every
-    generated client entry imports $fymo/auth, identity chain or not."""
-    out = dist_dir / "client" / "_fymo"
+    """Write dist/client/_auth.{js,d.ts}. Always emitted: every generated
+    client entry imports $auth, identity chain or not."""
+    out = dist_dir / "client"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "auth.js").write_text(_AUTH_JS)
-    (out / "auth.d.ts").write_text(_AUTH_DTS)
+    (out / "_auth.js").write_text(_AUTH_JS)
+    (out / "_auth.d.ts").write_text(_AUTH_DTS)
