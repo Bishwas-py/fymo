@@ -347,10 +347,10 @@ def test_prepare_build_config_reflects_blog_app_facts(blog_app: Path):
 
 
 def test_prepare_always_emits_fymo_auth_client(example_app: Path):
-    """Every generated client entry imports $fymo/auth, so the module must
+    """Every generated client entry imports $auth, so the module must
     be emitted unconditionally, identity chain or not (issue #80 phase 4)."""
     dist_dir = example_app / "dist"
     cache_dir = example_app / ".fymo" / "entries"
     prepare_build_config(example_app, dist_dir, cache_dir, dev=False)
-    assert (dist_dir / "client" / "_fymo" / "auth.js").is_file()
-    assert (dist_dir / "client" / "_fymo" / "auth.d.ts").is_file()
+    assert (dist_dir / "client" / "_auth.js").is_file()
+    assert (dist_dir / "client" / "_auth.d.ts").is_file()

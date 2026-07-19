@@ -5,7 +5,7 @@ none of which auto-serializes. The one thing that crosses to the Svelte
 layer is the output of the app's @public_identity projection, computed
 per request and delivered as the `identity` slot: embedded in the SSR
 HTML, carried on every soft-nav data response, and read by the generated
-$fymo/auth client store.
+$auth client store.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ _projection: Optional[PublicIdentityProjection] = None
 def public_identity(fn: PublicIdentityProjection) -> PublicIdentityProjection:
     """Register `fn` as the app's public identity projection:
     (Identity) -> Mapping. Its output is the ONLY identity data serialized
-    to the client (the $fymo/auth `identity` store); identity_extras() and
+    to the client (the $auth `identity` store); identity_extras() and
     everything else stay server-side.
 
     An app has exactly one projection; registering again replaces the

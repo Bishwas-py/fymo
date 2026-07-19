@@ -169,7 +169,7 @@ def test_no_layout_css_omits_links():
 
 def test_identity_island_emitted_with_projection_output():
     """Issue #80 phase 4: the public_identity projection output crosses to
-    the client as its own JSON island, read by $fymo/auth at boot."""
+    the client as its own JSON island, read by $auth at boot."""
     assets = RouteAssets(ssr="x", client="x.js", css=None, preload=[])
     html = build_html(
         body="", head_extra="", props={}, assets=assets, title="t",

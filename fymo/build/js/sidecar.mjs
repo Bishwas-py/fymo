@@ -52,7 +52,7 @@ async function handle(msg) {
         if (type === 'render') {
             const doc = msg.doc || {};
             globalThis.getDoc = () => doc;
-            // Reset per render: the $fymo/auth store reads this during SSR,
+            // Reset per render: the $auth store reads this during SSR,
             // and a leftover value from the previous request must never
             // bleed into the next one.
             globalThis.__fymoIdentity = 'identity' in msg ? msg.identity : null;

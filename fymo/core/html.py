@@ -89,7 +89,7 @@ def build_html(
     )
     # The public_identity projection output (issue #80), or null when
     # anonymous. Always emitted, like the route-params island, so the
-    # $fymo/auth client never special-cases a missing tag; goes through
+    # $auth client never special-cases a missing tag; goes through
     # _safe_json exactly like props so it can't break out of the island.
     identity_island = (
         f'<script type="application/json" id="fymo-identity">{_safe_json(identity)}</script>\n'

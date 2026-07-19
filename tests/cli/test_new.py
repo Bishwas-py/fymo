@@ -35,7 +35,7 @@ def test_scaffolds_tsconfig_with_lib_components_and_remote_aliases(tmp_path: Pat
     assert paths["$lib/*"] == ["./app/lib/*"]
     assert paths["$components/*"] == ["./app/components/*"]
     assert paths["$remote/*"] == ["./dist/client/_remote/*"]
-    assert paths["$fymo/*"] == ["./dist/client/_fymo/*"]
+    assert paths["$auth"] == ["./dist/client/_auth"]
     # No separate server-only alias: the server/client boundary in fymo is
     # language, not directory convention -- app/controllers/*.py and
     # app/remote/*.py are server-only by construction (Python never reaches
@@ -200,7 +200,7 @@ def test_new_fymo_yml_mentions_require_auth_in_comments_only(tmp_path, monkeypat
 
 def test_new_signin_template_wires_remote_auth_and_identity(tmp_path, monkeypatch):
     """The signin page calls the generated remote functions and reads the
-    $fymo/auth identity store; login carries the ?next= path require_auth
+    $auth identity store; login carries the ?next= path require_auth
     redirects arrive with. The remote callables are threaded through the
     controller context as props (the SSR pass deliberately externalizes
     $remote/*, so a top-level value import would break the SSR module;
@@ -213,7 +213,7 @@ def test_new_signin_template_wires_remote_auth_and_identity(tmp_path, monkeypatc
     assert "'login': login" in controller
     assert "'signup': signup" in controller
     content = (project / "app" / "templates" / "signin" / "index.svelte").read_text()
-    assert "$fymo/auth" in content
+    assert "$auth" in content
     assert "login" in content
     assert "signup" in content
     assert "next" in content

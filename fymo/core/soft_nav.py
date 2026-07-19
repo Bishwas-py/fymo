@@ -197,7 +197,7 @@ def handle_data(app, environ: dict, start_response) -> Iterable[bytes]:
     title = doc_meta.get("title", app.config_manager.get_app_name())
 
     # The identity slot (issue #80): same projection the full-page render
-    # embeds, so the client's $fymo/auth store updates on every soft nav.
+    # embeds, so the client's $auth store updates on every soft nav.
     try:
         from fymo.auth.public import client_identity
         identity = client_identity(environ)

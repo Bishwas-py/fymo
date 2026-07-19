@@ -3,7 +3,7 @@
 The default scaffold ships working password auth plus a signin page, so a
 real BuildPipeline run over it proves the whole chain in one shot: remote
 discovery sees app/remote/auth.py, codegen emits $remote/auth, the signin
-template compiles against $remote/auth and $fymo/auth, and every hygiene
+template compiles against $remote/auth and $auth, and every hygiene
 check passes with zero configuration. The signup/login/current_uid flow on
 this exact file set is already covered end to end by
 tests/cli/test_generate_auth.py (fymo new renders the same templates
@@ -67,7 +67,7 @@ def test_default_scaffold_builds(tmp_path, monkeypatch):
     assert any("signin" in name for name in manifest["routes"]), manifest["routes"].keys()
     assert set(manifest["remote_modules"]["auth"]["fns"]) == {"signup", "login", "logout", "me"}
     assert (project / "dist" / "client" / "_remote" / "auth.js").is_file()
-    assert (project / "dist" / "client" / "_fymo" / "auth.js").is_file()
+    assert (project / "dist" / "client" / "_auth.js").is_file()
 
     # A green build is not enough: scaffold-only files (signin controller
     # and template) can build clean and still 500 at request time, e.g. a

@@ -96,7 +96,7 @@ def logout() -> dict:
 def me() -> "dict | None":
     """Who am I, as a remote call.
 
-    Templates usually don't need this: the $fymo/auth `identity` store
+    Templates usually don't need this: the $auth `identity` store
     already carries the app/auth/public.py projection, hydrated at SSR and
     refreshed on navigation. Kept as the working example of a remote that
     reads current_uid() and returns a whitelisted subset.
