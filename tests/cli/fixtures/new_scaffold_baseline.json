@@ -1,0 +1,198 @@
+{
+  "auth": {
+    "dirs": [
+      "app",
+      "app/assets",
+      "app/assets/fonts",
+      "app/auth",
+      "app/components",
+      "app/controllers",
+      "app/lib",
+      "app/models",
+      "app/remote",
+      "app/static",
+      "app/support",
+      "app/templates",
+      "app/templates/home",
+      "app/templates/signin",
+      "dist",
+      "schema",
+      "tests"
+    ],
+    "files": {
+      ".gitignore": {
+        "mode": "0o644",
+        "sha256": "d45ed636c461cb0d4203ea22567566ab48f0678fd5c6a899f5b06ca1829455d3"
+      },
+      "README.md": {
+        "mode": "0o644",
+        "sha256": "98b160c0bfaea29ab17cc464df99ec7b44288a8d33d955b8fde08fc8254d0c1b"
+      },
+      "app/__init__.py": {
+        "mode": "0o644",
+        "sha256": "6357b4927448d87cb587a4cd3c8b71e7b3eabecdc9f0edfe5f71acecf7c09c90"
+      },
+      "app/assets/app.css": {
+        "mode": "0o644",
+        "sha256": "99f134686bdf408a1d362e3f234ec97b1fb52879bf0ac7a4c611812a0a30e83a"
+      },
+      "app/auth/__init__.py": {
+        "mode": "0o644",
+        "sha256": "cb2fb68148fc0e936a40e47f19434d4dc952dca2832a4d60677023a53c53ec77"
+      },
+      "app/auth/extras.py": {
+        "mode": "0o644",
+        "sha256": "94281c788146a82c3324bf518c2c866b729af2613f6971356c44a7419a633924"
+      },
+      "app/auth/public.py": {
+        "mode": "0o644",
+        "sha256": "7a7b1894bfafe691131238759ef0e608d698ef903654305291983e1a2dd33fd9"
+      },
+      "app/auth/resolver.py": {
+        "mode": "0o644",
+        "sha256": "e009bfe4e65e3000cfc3fc1f557d97053e14f01227d89270e77cfbe0e807db27"
+      },
+      "app/auth/store.py": {
+        "mode": "0o644",
+        "sha256": "481c1c0c38dbf2c12ac954fc63985933a905f49e86186862ed2bee4a5b95015c"
+      },
+      "app/controllers/home.py": {
+        "mode": "0o644",
+        "sha256": "e7f3cddac4bd5bf0c758dc4be040ec1a083374eab11bf7e3476cce7d63ea91d9"
+      },
+      "app/controllers/signin.py": {
+        "mode": "0o644",
+        "sha256": "df12d1eef9ef0f6da78b290634ddb6076619e1f66b697799aef8e384f9bc1e9f"
+      },
+      "app/remote/__init__.py": {
+        "mode": "0o644",
+        "sha256": "973098f11b0b9999982d7551b6206dcdff2a48d5bbc958ce6c83842e9b5be844"
+      },
+      "app/remote/auth.py": {
+        "mode": "0o644",
+        "sha256": "311a03d20a8c7fdf338b0f8803df7fbded7baa97fb4b85c5a6f30e9bd43a1f26"
+      },
+      "app/static/favicon.svg": {
+        "mode": "0o644",
+        "sha256": "805bc455c0660e5938edbff5f1e49f5cbc64d2ff9c3518cb139fdcd053ce47c0"
+      },
+      "app/support/__init__.py": {
+        "mode": "0o644",
+        "sha256": "bc93d36ddbe2a576172d20390fef97c7329398479aa5750819aa796ba8c11174"
+      },
+      "app/templates/_layout.svelte": {
+        "mode": "0o644",
+        "sha256": "fb0c1021a052b6a8ff73b603df9a433eafae22bec6685a267289785ce0356747"
+      },
+      "app/templates/home/index.svelte": {
+        "mode": "0o644",
+        "sha256": "9fbabcd80526382683adf5b551d207bca7d8be8c9d2bb37a8ed04f98e893b545"
+      },
+      "app/templates/signin/index.svelte": {
+        "mode": "0o644",
+        "sha256": "536dba9a11e5069acd41b826304fa609e746c9a6d65798f93e28a7e74c9b4a95"
+      },
+      "fymo.yml": {
+        "mode": "0o644",
+        "sha256": "ee5330f7def6df0fa4268ffa6021eb7a1b3c0caa2af03a5a41213781e39191a0"
+      },
+      "package.json": {
+        "mode": "0o644",
+        "sha256": "21923290b3ae577b26e0b912d81d1a64900605b83b4eed6315e2ccf991bf9877"
+      },
+      "requirements.txt": {
+        "mode": "0o644",
+        "sha256": "784069c28d437b7d801f9b43faf7f3c6cad839c9d0ac443355398ffdf9d69420"
+      },
+      "schema/users.sql": {
+        "mode": "0o644",
+        "sha256": "b3d570fc7b319d2ac07d120e1bff906c819a6ee283175df753654a2e0f7cab3d"
+      },
+      "server.py": {
+        "mode": "0o755",
+        "sha256": "71e58d041924db33dcec363ffcd27078755caf36ad9ddf4488b290a8f2b32116"
+      },
+      "tsconfig.json": {
+        "mode": "0o644",
+        "sha256": "1520ff5a54e3fe315e50d1d01f4519f04e1ddb22088ab79110e20658196c0ec6"
+      }
+    },
+    "project_name": "pinned_auth"
+  },
+  "no_auth": {
+    "dirs": [
+      "app",
+      "app/assets",
+      "app/assets/fonts",
+      "app/components",
+      "app/controllers",
+      "app/lib",
+      "app/models",
+      "app/static",
+      "app/support",
+      "app/templates",
+      "app/templates/home",
+      "dist",
+      "tests"
+    ],
+    "files": {
+      ".gitignore": {
+        "mode": "0o644",
+        "sha256": "d45ed636c461cb0d4203ea22567566ab48f0678fd5c6a899f5b06ca1829455d3"
+      },
+      "README.md": {
+        "mode": "0o644",
+        "sha256": "25f28879502bf41b26473ab4bf09ee4caf7eed9bae2abb32bcc76cce8bbb9b76"
+      },
+      "app/__init__.py": {
+        "mode": "0o644",
+        "sha256": "6357b4927448d87cb587a4cd3c8b71e7b3eabecdc9f0edfe5f71acecf7c09c90"
+      },
+      "app/assets/app.css": {
+        "mode": "0o644",
+        "sha256": "99f134686bdf408a1d362e3f234ec97b1fb52879bf0ac7a4c611812a0a30e83a"
+      },
+      "app/controllers/home.py": {
+        "mode": "0o644",
+        "sha256": "e7f3cddac4bd5bf0c758dc4be040ec1a083374eab11bf7e3476cce7d63ea91d9"
+      },
+      "app/static/favicon.svg": {
+        "mode": "0o644",
+        "sha256": "805bc455c0660e5938edbff5f1e49f5cbc64d2ff9c3518cb139fdcd053ce47c0"
+      },
+      "app/support/__init__.py": {
+        "mode": "0o644",
+        "sha256": "bc93d36ddbe2a576172d20390fef97c7329398479aa5750819aa796ba8c11174"
+      },
+      "app/templates/_layout.svelte": {
+        "mode": "0o644",
+        "sha256": "fb0c1021a052b6a8ff73b603df9a433eafae22bec6685a267289785ce0356747"
+      },
+      "app/templates/home/index.svelte": {
+        "mode": "0o644",
+        "sha256": "9fbabcd80526382683adf5b551d207bca7d8be8c9d2bb37a8ed04f98e893b545"
+      },
+      "fymo.yml": {
+        "mode": "0o644",
+        "sha256": "3b9fcf7de05184b6adef79840a884b0f8bd530425975ae2518352eb76f75607f"
+      },
+      "package.json": {
+        "mode": "0o644",
+        "sha256": "89acac17aba69c01cdc1c0c7589d36ba5086acda1b6a3d3480ead11287d1146a"
+      },
+      "requirements.txt": {
+        "mode": "0o644",
+        "sha256": "784069c28d437b7d801f9b43faf7f3c6cad839c9d0ac443355398ffdf9d69420"
+      },
+      "server.py": {
+        "mode": "0o755",
+        "sha256": "71e58d041924db33dcec363ffcd27078755caf36ad9ddf4488b290a8f2b32116"
+      },
+      "tsconfig.json": {
+        "mode": "0o644",
+        "sha256": "1520ff5a54e3fe315e50d1d01f4519f04e1ddb22088ab79110e20658196c0ec6"
+      }
+    },
+    "project_name": "pinned_no_auth"
+  }
+}

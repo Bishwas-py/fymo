@@ -1,0 +1,39 @@
+# __fymo_tmpl_project_name__
+
+A Fymo project - Python SSR framework for Svelte 5
+
+## Setup
+
+1. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. Install Node dependencies:
+   ```bash
+   npm install
+   ```
+
+## Development
+
+Start the development server:
+```bash
+fymo dev
+```
+
+## Build for Production
+
+```bash
+fymo build
+```
+
+## Project Structure
+
+- `app/` - Application code
+  - `controllers/` - Python controllers
+  - `templates/` - Svelte templates
+  - `models/` - Data models
+  - `assets/` - Build inputs (CSS, fonts, images) hashed into `/dist/`
+  - `static/` - Verbatim files served at `/static/`
+- `dist/` - Build output
+- `tests/` - Tests
