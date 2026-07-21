@@ -76,18 +76,36 @@ def generate():
     pass
 
 
+def _conflict_options(fn):
+    """Shared conflict-mode flags for every generator."""
+    fn = click.option('--force', is_flag=True, default=False,
+                      help='Overwrite existing files instead of refusing')(fn)
+    fn = click.option('--dry-run', is_flag=True, default=False,
+                      help='List every path that would be written; write nothing')(fn)
+    fn = click.option('--diff', is_flag=True, default=False,
+                      help='Show a unified diff against existing files; write nothing')(fn)
+    return fn
+
+
+def _check_conflict_flags(force, dry_run, diff):
+    if sum((force, dry_run, diff)) > 1:
+        raise click.UsageError("--force, --dry-run, and --diff are mutually exclusive")
+
+
 @generate.command(name="auth")
 @click.option('--clerk', is_flag=True, default=False,
               help='Clerk JWT resolver; the app adds pyjwt[crypto] to its own dependencies')
 @click.option('--skeleton', is_flag=True, default=False,
               help='Bare resolver stub returning None; build your own mechanism')
-def generate_auth_cmd(clerk, skeleton):
+@_conflict_options
+def generate_auth_cmd(clerk, skeleton, force, dry_run, diff):
     """Scaffold app-owned auth into app/auth/ (password login by default)."""
     if clerk and skeleton:
         raise click.UsageError("--clerk and --skeleton are mutually exclusive")
+    _check_conflict_flags(force, dry_run, diff)
     from fymo.cli.commands.generate_auth import generate_auth
     variant = 'clerk' if clerk else 'skeleton' if skeleton else 'password'
-    generate_auth(variant)
+    generate_auth(variant, force=force, dry_run=dry_run, diff=diff)
 
 
 @cli.group()
