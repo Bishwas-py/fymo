@@ -108,6 +108,36 @@ def generate_auth_cmd(clerk, skeleton, force, dry_run, diff):
     generate_auth(variant, force=force, dry_run=dry_run, diff=diff)
 
 
+@generate.command(name="page")
+@click.argument('name')
+@_conflict_options
+def generate_page_cmd(name, force, dry_run, diff):
+    """Generate a routed page: controller, Svelte template, route entry."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_page
+    generate_page(name, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="remote")
+@click.argument('name')
+@_conflict_options
+def generate_remote_cmd(name, force, dry_run, diff):
+    """Generate a remote module in app/remote/ plus a fymo.testing test."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_remote
+    generate_remote(name, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="resource")
+@click.argument('name')
+@_conflict_options
+def generate_resource_cmd(name, force, dry_run, diff):
+    """Generate a page and a remote module together."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_resource
+    generate_resource(name, force=force, dry_run=dry_run, diff=diff)
+
+
 @cli.group()
 def schema():
     """Schema tooling for the database objects fymo providers own."""

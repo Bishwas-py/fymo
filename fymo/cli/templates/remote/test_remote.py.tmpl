@@ -1,0 +1,33 @@
+"""Tests for app/remote/__fymo_tmpl_name__.py (generated; they are yours).
+
+fymo.testing simulates identities without a server: signed_in() registers
+an identity resolver and opens a request scope, which is exactly what
+@require_auth checks. Anonymous callers need only a plain request scope.
+Direct calls, no HTTP.
+"""
+import pytest
+
+from fymo.remote.context import request_scope
+from fymo.remote.errors import RemoteError
+from fymo.testing import signed_in
+
+from app.remote.__fymo_tmpl_name__ import create___fymo_tmpl_name__, list___fymo_tmpl_name__
+
+
+def test_list___fymo_tmpl_name___returns_the_seed_row():
+    items = list___fymo_tmpl_name__()
+    assert any(item["created_by"] == "seed" for item in items)
+
+
+def test_create___fymo_tmpl_name___attributes_the_signed_in_caller():
+    with signed_in("u_test1") as ident:
+        item = create___fymo_tmpl_name__(title="A new item")
+    assert item["title"] == "A new item"
+    assert item["created_by"] == ident.uid
+
+
+def test_create___fymo_tmpl_name___rejects_anonymous_callers():
+    with request_scope(uid="u_anon", environ={}):
+        with pytest.raises(RemoteError) as excinfo:
+            create___fymo_tmpl_name__(title="nope")
+    assert excinfo.value.status == 401

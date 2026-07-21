@@ -1,0 +1,22 @@
+<script>
+  let { title, message } = $props();
+</script>
+
+<div class="container">
+  <h1>{title}</h1>
+  <p>{message}</p>
+</div>
+
+<style>
+  .container {
+    max-width: 800px;
+    margin: 2rem auto;
+    padding: 2rem;
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+
+  h1 {
+    color: #ff3e00;
+    margin-bottom: 1rem;
+  }
+</style>
