@@ -1,7 +1,10 @@
 """Comment authorship comes from the authenticated identity, never from
 client input. fymo.testing simulates the identities: signed_in() for the
 first caller, acting_as() to switch to a second user mid-test; extras
-stand in for the app/auth/extras.py hook that attaches the email."""
+stand in for the app/auth/extras.py hook that attaches the email. Both
+keys are required here because posts.py reads through the typed
+current_extras() accessor (app/auth/extras.py's Extras dataclass), not
+identity_extras() directly."""
 from fymo.testing import acting_as, signed_in
 
 
@@ -18,7 +21,7 @@ def test_authenticated_comment_is_attributed_to_the_session_user(db):
     from app.remote.posts import NewComment, create_comment
 
     slug = _seed_post(db)
-    with signed_in("u_alice", extras={"email": "alice@example.com"}):
+    with signed_in("u_alice", extras={"email": "alice@example.com", "created_at": "2026-01-01T00:00:00Z"}):
         comment = create_comment(slug, input=NewComment(body="first!"))
     assert comment["name"] == "alice"
 
@@ -28,9 +31,9 @@ def test_second_user_cannot_comment_as_the_first(db):
 
     slug = _seed_post(db)
 
-    with signed_in("u_alice", extras={"email": "alice@example.com"}):
+    with signed_in("u_alice", extras={"email": "alice@example.com", "created_at": "2026-01-01T00:00:00Z"}):
         create_comment(slug, input=NewComment(body="alice's take"))
-        with acting_as("u_bob", extras={"email": "bob@example.com"}):
+        with acting_as("u_bob", extras={"email": "bob@example.com", "created_at": "2026-01-01T00:00:00Z"}):
             bobs_comment = create_comment(slug, input=NewComment(body="bob's reply"))
         assert bobs_comment["name"] == "bob"
 

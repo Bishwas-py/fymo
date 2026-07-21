@@ -53,7 +53,6 @@ async function buildServer() {
         minify: !config.dev,
         sourcemap: config.dev ? 'linked' : false,
         metafile: true,
-        external: ['$remote/*', '$broadcast/*'],
         // Layouts import their stylesheets (app/assets/*.css); the client
         // pass bundles those into the entry's sibling CSS output, but the
         // node SSR bundle has no use for CSS -- empty-load it so the import
@@ -69,10 +68,19 @@ async function buildServer() {
         // resolution comes up empty.
         nodePaths: [path.join(config.projectRoot, 'node_modules')],
         plugins: [
+            // Bundled into the SSR modules, same as the client pass: a
+            // component may statically `import { fn } from '$remote/x'` at
+            // top level, and an external bare specifier would make the
+            // sidecar's import() of the SSR module throw
+            // ERR_MODULE_NOT_FOUND. The generated modules are import-safe
+            // under node (top level only defines fetch wrappers); actually
+            // calling one during SSR fails at call time inside the sidecar.
+            fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
+            fymoBroadcastPlugin({ broadcastDir: path.join(config.distDir, 'client', '_broadcast') }),
             fymoRoutePlugin({ runtimePath: routeRuntimePath }),
-            // Bundled (never external, unlike $remote): the identity store
-            // must exist inside each SSR module so `$identity` renders
-            // server-side from the sidecar's per-render global.
+            // Bundled: the identity store must exist inside each SSR module
+            // so `$identity` renders server-side from the sidecar's
+            // per-render global.
             authPlugin({ authFile }),
             sveltePlugin({
                 preprocess: sveltePreprocess(),
