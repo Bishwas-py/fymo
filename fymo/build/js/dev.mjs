@@ -43,7 +43,6 @@ async function makeServerCtx() {
         minify: false,
         sourcemap: 'linked',
         metafile: true,
-        external: ['$remote/*', '$broadcast/*'],
         // Layout-imported stylesheets are a client concern; the node SSR
         // bundle empty-loads them so the import is a no-op. Mirrors build.mjs.
         loader: { '.css': 'empty' },
@@ -57,6 +56,10 @@ async function makeServerCtx() {
         // resolution comes up empty. Mirrors build.mjs.
         nodePaths: [path.join(config.projectRoot, 'node_modules')],
         plugins: [
+            // Bundled into the SSR modules so top-level $remote/$broadcast
+            // imports resolve, mirroring build.mjs.
+            fymoRemotePlugin({ remoteDir: path.join(config.distDir, 'client', '_remote') }),
+            fymoBroadcastPlugin({ broadcastDir: path.join(config.distDir, 'client', '_broadcast') }),
             fymoRoutePlugin({ runtimePath: routeRuntimePath }),
             // Bundled for SSR (never external), mirroring build.mjs.
             authPlugin({ authFile }),
