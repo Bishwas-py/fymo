@@ -1,0 +1,136 @@
+<script>
+  import { onMount } from 'svelte';
+  import { identity } from '$auth';
+  import { list___fymo_tmpl_name__, create___fymo_tmpl_name__ } from '$remote/__fymo_tmpl_name__';
+  import Item from './Item.svelte';
+
+  let items = $state([]);
+  let loaded = $state(false);
+  let title = $state('');
+  let error = $state('');
+  let pending = $state(false);
+
+  onMount(async () => {
+    items = await list___fymo_tmpl_name__();
+    loaded = true;
+  });
+
+  async function add(event) {
+    event.preventDefault();
+    if (pending || !title.trim()) return;
+    pending = true;
+    error = '';
+    try {
+      const created = await create___fymo_tmpl_name__(title.trim());
+      items = [...items, created];
+      title = '';
+    } catch (err) {
+      error = err && err.message ? err.message : String(err);
+    } finally {
+      pending = false;
+    }
+  }
+</script>
+
+<main>
+  <p class="eyebrow">Resource</p>
+  <h1>__fymo_tmpl_name_title__</h1>
+  <p class="sub">
+    Rows come from <code>list___fymo_tmpl_name__()</code> in
+    app/remote/__fymo_tmpl_name__.py, called through the typed $remote client.
+  </p>
+
+  {#if !loaded}
+    <p class="state">Loading from the server…</p>
+  {:else if items.length === 0}
+    <p class="state">Nothing here yet. Create the first one below.</p>
+  {:else}
+    <ul class="items">
+      {#each items as item (item.id)}
+        <Item {item} />
+      {/each}
+    </ul>
+  {/if}
+
+  <form onsubmit={add} class="create card">
+    {#if $identity}
+      <input
+        bind:value={title}
+        placeholder="New __fymo_tmpl_name__ title"
+        aria-label="Title"
+      />
+      <button type="submit" disabled={pending || !title.trim()}>Create</button>
+    {:else}
+      <p class="state">
+        Creating requires a session: <a href="/signin?next=/__fymo_tmpl_name__">sign in</a>.
+        The check lives on create___fymo_tmpl_name__() as @require_auth.
+      </p>
+    {/if}
+  </form>
+
+  {#if error}
+    <p class="error">{error}</p>
+  {/if}
+
+  <div class="files">
+    <span class="chip">app/remote/__fymo_tmpl_name__.py</span>
+    <span class="chip">app/templates/__fymo_tmpl_name__/Item.svelte</span>
+    <span class="chip">tests/test___fymo_tmpl_name___remote.py</span>
+  </div>
+</main>
+
+<style>
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem;
+  }
+
+  .sub {
+    color: var(--muted);
+    margin: 0 0 2rem;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    color: var(--fg);
+  }
+
+  .state {
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .items {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .create {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-top: 0.5rem;
+  }
+
+  .create input {
+    flex: 1;
+  }
+
+  .error {
+    color: var(--coral);
+    font-size: 0.875rem;
+  }
+
+  .files {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+</style>

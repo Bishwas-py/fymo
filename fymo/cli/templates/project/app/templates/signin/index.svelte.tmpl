@@ -93,7 +93,7 @@
   }
 
   h1 {
-    color: #ff3e00;
+    color: var(--fg);
     margin-bottom: 1.5rem;
   }
 
@@ -107,15 +107,15 @@
     width: 100%;
     margin-top: 0.25rem;
     padding: 0.5rem;
-    border: 1px solid #ccc;
+    border: 1px solid var(--line);
     border-radius: 4px;
     font-size: 1rem;
     box-sizing: border-box;
   }
 
   button[type='submit'] {
-    background: #ff3e00;
-    color: white;
+    background: var(--mint);
+    color: var(--mint-ink);
     border: none;
     padding: 0.5rem 1rem;
     border-radius: 4px;
@@ -124,7 +124,7 @@
   }
 
   button[type='submit']:hover {
-    background: #ff5722;
+    filter: brightness(1.08);
   }
 
   button[type='submit']:disabled {
@@ -136,7 +136,7 @@
     background: none;
     border: none;
     padding: 0;
-    color: #ff3e00;
+    color: var(--fg);
     cursor: pointer;
     font-size: 1rem;
     text-decoration: underline;

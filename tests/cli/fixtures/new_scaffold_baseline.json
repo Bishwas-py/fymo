@@ -34,7 +34,7 @@
       },
       "app/assets/app.css": {
         "mode": "0o644",
-        "sha256": "99f134686bdf408a1d362e3f234ec97b1fb52879bf0ac7a4c611812a0a30e83a"
+        "sha256": "2a1177a2555489fcf0e2f1911c7ff3baeac281a18c57a209133b6a614a974026"
       },
       "app/auth/__init__.py": {
         "mode": "0o644",
@@ -58,7 +58,7 @@
       },
       "app/controllers/home.py": {
         "mode": "0o644",
-        "sha256": "e7f3cddac4bd5bf0c758dc4be040ec1a083374eab11bf7e3476cce7d63ea91d9"
+        "sha256": "54ee4b6cbd7ea8f5c570ccc2583d50d827e0c47007bf81964d265f7ad88457c4"
       },
       "app/controllers/signin.py": {
         "mode": "0o644",
@@ -86,11 +86,11 @@
       },
       "app/templates/home/index.svelte": {
         "mode": "0o644",
-        "sha256": "9fbabcd80526382683adf5b551d207bca7d8be8c9d2bb37a8ed04f98e893b545"
+        "sha256": "d3c3d4f00cb24638eea10797cbed473c20784322170acdcfee645706d22f983f"
       },
       "app/templates/signin/index.svelte": {
         "mode": "0o644",
-        "sha256": "536dba9a11e5069acd41b826304fa609e746c9a6d65798f93e28a7e74c9b4a95"
+        "sha256": "85b4008f355651afdef07c678908ccc6bcc541f0ecf65f5890ebc5a18477b593"
       },
       "fymo.yml": {
         "mode": "0o644",
@@ -150,11 +150,11 @@
       },
       "app/assets/app.css": {
         "mode": "0o644",
-        "sha256": "99f134686bdf408a1d362e3f234ec97b1fb52879bf0ac7a4c611812a0a30e83a"
+        "sha256": "2a1177a2555489fcf0e2f1911c7ff3baeac281a18c57a209133b6a614a974026"
       },
       "app/controllers/home.py": {
         "mode": "0o644",
-        "sha256": "e7f3cddac4bd5bf0c758dc4be040ec1a083374eab11bf7e3476cce7d63ea91d9"
+        "sha256": "54ee4b6cbd7ea8f5c570ccc2583d50d827e0c47007bf81964d265f7ad88457c4"
       },
       "app/static/favicon.svg": {
         "mode": "0o644",
@@ -170,7 +170,7 @@
       },
       "app/templates/home/index.svelte": {
         "mode": "0o644",
-        "sha256": "9fbabcd80526382683adf5b551d207bca7d8be8c9d2bb37a8ed04f98e893b545"
+        "sha256": "d3c3d4f00cb24638eea10797cbed473c20784322170acdcfee645706d22f983f"
       },
       "fymo.yml": {
         "mode": "0o644",

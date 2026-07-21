@@ -149,18 +149,28 @@ def _plan_route_injection(root: Path, name: str) -> Tuple[Optional[PlannedFile],
 # --------------- plans ---------------
 
 
-def _page_plan(name: str) -> List[PlannedFile]:
+def _page_plan(name: str, *, resource: bool = False) -> List[PlannedFile]:
+    """resource=True swaps in the template wired to the generated remote
+    (live list + require_auth create through $remote), so a resource page
+    renders its resource instead of a placeholder."""
     tokens = name_variants(name)
-    return [
+    template = "resource_page/index.svelte.tmpl" if resource else "page/index.svelte.tmpl"
+    plan = [
         PlannedFile(
             f"app/controllers/{name}.py",
             _render_template("page/controller.py.tmpl", tokens),
         ),
         PlannedFile(
             f"app/templates/{name}/index.svelte",
-            _render_template("page/index.svelte.tmpl", tokens),
+            _render_template(template, tokens),
         ),
     ]
+    if resource:
+        plan.append(PlannedFile(
+            f"app/templates/{name}/Item.svelte",
+            _render_template("resource_page/Item.svelte.tmpl", tokens),
+        ))
+    return plan
 
 
 def _remote_plan(root: Path, name: str) -> List[PlannedFile]:
@@ -202,7 +212,7 @@ def _run(
 
     plan: List[PlannedFile] = []
     if page:
-        plan.extend(_page_plan(name))
+        plan.extend(_page_plan(name, resource=page and remote))
     if remote:
         plan.extend(_remote_plan(root, name))
 
