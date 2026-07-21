@@ -41,6 +41,7 @@ _RESERVED_NAMES = {"auth", "signin", "root", "resources"}
 _APP_REMOTE_INIT = '"""Remote functions exposed to the browser."""\n'
 
 _ROUTES_LINE_RE = re.compile(r"^routes:[ \t]*$", re.MULTILINE)
+_RESOURCES_LINE_RE = re.compile(r"^  resources:[ \t]*$", re.MULTILINE)
 
 
 def _refuse(message: str) -> None:
@@ -91,21 +92,62 @@ def _resource_names(routes: dict) -> set:
     return names
 
 
-def _plan_route_injection(root: Path, name: str) -> Tuple[Optional[PlannedFile], str, str]:
+def _verified_update(new_text: str, expected: dict) -> Optional[PlannedFile]:
+    """A textual edit only counts if the parsed result equals `expected`
+    (the old mapping plus exactly the intended addition)."""
+    try:
+        if yaml.safe_load(new_text) != expected:
+            return None
+    except yaml.YAMLError:
+        return None
+    return PlannedFile("fymo.yml", new_text, update=True)
+
+
+def _list_item_indent(text: str, after: int) -> str:
+    """Indent of the first list item following position `after`, for
+    matching an existing resources list's style; the scaffold's four
+    spaces otherwise. The parse verification is the real guard."""
+    for line in text[after:].split("\n")[1:]:
+        if not line.strip():
+            continue
+        item = re.match(r"^(\s+)-\s", line)
+        return item.group(1) if item else "    "
+    return "    "
+
+
+def _plan_route_injection(
+    root: Path, name: str, *, style: str = "route"
+) -> Tuple[Optional[PlannedFile], str, str]:
     """Decide how the route gets into fymo.yml.
 
     Returns (planned update or None, status, message) with status one of
     'inject', 'already', 'manual'. The manual message contains the exact
-    line to add and where; it is the caller's job to print it and still
+    lines to add and where; it is the caller's job to print it and still
     exit 0 with the files generated.
+
+    style="route" injects a plain `<name>: <name>.index` entry (one URL,
+    what `generate page` needs). style="resource" injects into the
+    resources list instead, because /name/<id> and the other detail URLs
+    only exist through the Router's resources expansion; a plain route
+    would leave every generated show page unreachable.
     """
+    resource = style == "resource"
     route_line = f"  {name}: {name}.index"
-    manual = (
-        "fymo.yml's routes block does not match the shape the fymo scaffold "
-        "produces, so the route was not injected. Add this line under "
-        "`routes:` in fymo.yml:\n\n"
-        f"{route_line}\n"
-    )
+    if resource:
+        manual = (
+            "fymo.yml's routes block does not match the shape the fymo "
+            "scaffold produces, so the route was not injected. Add these "
+            "lines under `routes:` in fymo.yml (or add just the item to an "
+            "existing `resources:` list):\n\n"
+            f"  resources:\n    - {name}\n"
+        )
+    else:
+        manual = (
+            "fymo.yml's routes block does not match the shape the fymo scaffold "
+            "produces, so the route was not injected. Add this line under "
+            "`routes:` in fymo.yml:\n\n"
+            f"{route_line}\n"
+        )
     text = (root / "fymo.yml").read_text()
     try:
         data = yaml.safe_load(text)
@@ -116,6 +158,13 @@ def _plan_route_injection(root: Path, name: str) -> Tuple[Optional[PlannedFile],
     routes = data["routes"]
 
     if name in routes or f"/{name}" in routes:
+        if resource:
+            return None, "already", (
+                f"Route: /{name} is already declared as a plain route in "
+                f"fymo.yml. Detail routes (/{name}/<id>) come from a "
+                "resources entry; replace the plain route with:\n\n"
+                f"  resources:\n    - {name}"
+            )
         return None, "already", f"Route: /{name} is already declared in fymo.yml."
     if name in _resource_names(routes):
         return None, "already", (
@@ -123,24 +172,40 @@ def _plan_route_injection(root: Path, name: str) -> Tuple[Optional[PlannedFile],
             "in fymo.yml."
         )
 
+    expected = copy.deepcopy(data)
+    if resource:
+        matches = _RESOURCES_LINE_RE.findall(text)
+        existing = routes.get("resources")
+        if len(matches) == 1 and (existing is None or isinstance(existing, list)):
+            # Prepend to the block-form resources list (empty is fine).
+            anchor = _RESOURCES_LINE_RE.search(text)
+            indent = _list_item_indent(text, anchor.end())
+            new_text = text[:anchor.end()] + f"\n{indent}- {name}" + text[anchor.end():]
+            expected["routes"]["resources"] = [name] + (existing or [])
+        elif not matches and "resources" not in routes and len(_ROUTES_LINE_RE.findall(text)) == 1:
+            # No resources list yet: start one under routes:.
+            anchor = _ROUTES_LINE_RE.search(text)
+            new_text = text[:anchor.end()] + f"\n  resources:\n    - {name}" + text[anchor.end():]
+            expected["routes"]["resources"] = [name]
+        else:
+            return None, "manual", manual
+        entry = _verified_update(new_text, expected)
+        if entry is None:
+            return None, "manual", manual
+        return entry, "inject", (
+            f"Route: injected resources entry `- {name}` into fymo.yml "
+            f"(routes /{name} and /{name}/<id>)."
+        )
+
     # Scaffold shape: exactly one block-form `routes:` line to anchor on.
     if len(_ROUTES_LINE_RE.findall(text)) != 1:
         return None, "manual", manual
-    match = _ROUTES_LINE_RE.search(text)
-    insert_at = match.end()
-    new_text = text[:insert_at] + f"\n{route_line}" + text[insert_at:]
-
-    # A textual edit only counts if the parsed result is the old mapping
-    # plus exactly the one new route.
-    expected = copy.deepcopy(data)
+    anchor = _ROUTES_LINE_RE.search(text)
+    new_text = text[:anchor.end()] + f"\n{route_line}" + text[anchor.end():]
     expected["routes"][name] = f"{name}.index"
-    try:
-        if yaml.safe_load(new_text) != expected:
-            return None, "manual", manual
-    except yaml.YAMLError:
+    entry = _verified_update(new_text, expected)
+    if entry is None:
         return None, "manual", manual
-
-    entry = PlannedFile("fymo.yml", new_text, update=True)
     return entry, "inject", (
         f"Route: injected `{name}: {name}.index` into fymo.yml."
     )
@@ -150,15 +215,18 @@ def _plan_route_injection(root: Path, name: str) -> Tuple[Optional[PlannedFile],
 
 
 def _page_plan(name: str, *, resource: bool = False) -> List[PlannedFile]:
-    """resource=True swaps in the template wired to the generated remote
-    (live list + require_auth create through $remote), so a resource page
-    renders its resource instead of a placeholder."""
+    """resource=True swaps in the templates wired to the generated remote:
+    a live list + require_auth create through $remote, a co-located
+    show.svelte detail view reached via /name/<id> (rendered through
+    index.svelte, the directory's one built entry), and a controller that
+    threads the route's id param down as item_id."""
     tokens = name_variants(name)
+    controller = "resource_page/controller.py.tmpl" if resource else "page/controller.py.tmpl"
     template = "resource_page/index.svelte.tmpl" if resource else "page/index.svelte.tmpl"
     plan = [
         PlannedFile(
             f"app/controllers/{name}.py",
-            _render_template("page/controller.py.tmpl", tokens),
+            _render_template(controller, tokens),
         ),
         PlannedFile(
             f"app/templates/{name}/index.svelte",
@@ -166,6 +234,10 @@ def _page_plan(name: str, *, resource: bool = False) -> List[PlannedFile]:
         ),
     ]
     if resource:
+        plan.append(PlannedFile(
+            f"app/templates/{name}/show.svelte",
+            _render_template("resource_page/show.svelte.tmpl", tokens),
+        ))
         plan.append(PlannedFile(
             f"app/templates/{name}/Item.svelte",
             _render_template("resource_page/Item.svelte.tmpl", tokens),
@@ -218,7 +290,10 @@ def _run(
 
     route_status, route_message = "", ""
     if page:
-        route_entry, route_status, route_message = _plan_route_injection(root, name)
+        style = "resource" if remote else "route"
+        route_entry, route_status, route_message = _plan_route_injection(
+            root, name, style=style
+        )
         if route_entry is not None:
             plan.append(route_entry)
 
@@ -240,6 +315,14 @@ def _run(
             print(route_message)
     if remote:
         print(f"Run the generated test with: pytest tests/test_{name}_remote.py")
+        if not (root / "app" / "auth").is_dir():
+            Color.print_warning(
+                f"This project has no app/auth/: create/update/delete in "
+                f"app/remote/{name}.py are @require_auth and will answer 401 "
+                "for everyone until an identity resolver exists. Run "
+                "`fymo generate auth` (password), or the --clerk / --skeleton "
+                "variants."
+            )
 
 
 def generate_page(

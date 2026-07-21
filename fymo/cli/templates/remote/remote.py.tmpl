@@ -6,10 +6,10 @@ remote.mode strict, so file placement alone is not enough); after
 '$remote/__fymo_tmpl_name__'. The in-memory rows below are stand-in
 data: swap them for your real data source and keep the typed signatures.
 """
-from typing import TypedDict
+from typing import Optional, TypedDict
 
 from fymo.auth import require_auth
-from fymo.remote import current_uid, remote
+from fymo.remote import NotFound, current_uid, remote
 
 
 class Item(TypedDict):
@@ -23,9 +23,30 @@ _ITEMS: list[Item] = [
 ]
 
 
+def _find(id: int) -> Optional[Item]:
+    return next((row for row in _ITEMS if row["id"] == id), None)
+
+
+def _owned_or_not_found(id: int) -> Item:
+    # Unknown id and someone else's row answer identically: a 403 on the
+    # ownership check would leak that the id exists.
+    row = _find(id)
+    if row is None or row["created_by"] != current_uid():
+        raise NotFound(f"__fymo_tmpl_name__ {id} not found")
+    return row
+
+
 @remote
 def list___fymo_tmpl_name__() -> list[Item]:
     return list(_ITEMS)
+
+
+@remote
+def get___fymo_tmpl_name__(id: int) -> Item:
+    row = _find(id)
+    if row is None:
+        raise NotFound(f"__fymo_tmpl_name__ {id} not found")
+    return row
 
 
 @remote
@@ -39,3 +60,19 @@ def create___fymo_tmpl_name__(title: str) -> Item:
     }
     _ITEMS.append(item)
     return item
+
+
+@remote
+@require_auth
+def update___fymo_tmpl_name__(id: int, title: str) -> Item:
+    row = _owned_or_not_found(id)
+    row["title"] = title
+    return row
+
+
+@remote
+@require_auth
+def delete___fymo_tmpl_name__(id: int) -> Item:
+    row = _owned_or_not_found(id)
+    _ITEMS.remove(row)
+    return row

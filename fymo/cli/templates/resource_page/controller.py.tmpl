@@ -1,0 +1,15 @@
+"""Controller for the __fymo_tmpl_name__ resource.
+
+One controller serves the whole resource: /__fymo_tmpl_name__ (index)
+and /__fymo_tmpl_name__/<id> (show) both land here through the resources
+entry in fymo.yml, and `id` arrives as the route param, empty on the
+index. The template branches on item_id: the list, or one row's detail.
+"""
+
+
+def getContext(id: str = ''):
+    # Returned keys arrive in the template as props, server-rendered.
+    return {
+        'name': '__fymo_tmpl_name__',
+        'item_id': id,
+    }

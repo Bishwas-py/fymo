@@ -181,12 +181,12 @@ def test_remote_writes_module_test_and_conftest(tmp_path, monkeypatch):
 
     module = (project / "app" / "remote" / "notes.py").read_text()
     assert "@remote" in module
-    assert "def list_notes(" in module
-    assert "def create_notes(" in module
+    for fn in ("list_notes", "create_notes", "get_notes", "update_notes", "delete_notes"):
+        assert f"def {fn}(" in module, fn
     assert (project / "app" / "remote" / "__init__.py").is_file()
 
     test_file = (project / "tests" / "test_notes_remote.py").read_text()
-    assert "from fymo.testing import signed_in" in test_file
+    assert "from fymo.testing import acting_as, signed_in" in test_file
     assert "from app.remote.notes import" in test_file
     conftest = (project / "tests" / "conftest.py").read_text()
     assert "sys.path" in conftest
@@ -226,6 +226,57 @@ def test_remote_generated_functions_work_through_fymo_testing(tmp_path, monkeypa
         _cleanup_app_modules()
 
 
+def test_remote_crud_semantics_through_fymo_testing(tmp_path, monkeypatch):
+    """The generated CRUD teaches the repo's authorization conventions:
+    reads are public, mutations require a session, and a row you do not
+    own answers NotFound, never a distinguishable Forbidden."""
+    from fymo.remote import NotFound
+    from fymo.testing import acting_as, signed_in
+
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_remote("widgets")
+    monkeypatch.syspath_prepend(str(project))
+    _cleanup_app_modules()
+    try:
+        from app.remote.widgets import (
+            create_widgets,
+            delete_widgets,
+            get_widgets,
+            list_widgets,
+            update_widgets,
+        )
+
+        assert get_widgets(1)["created_by"] == "seed"
+        with pytest.raises(NotFound):
+            get_widgets(999)
+
+        with signed_in("u_alice") as ident:
+            mine = create_widgets(title="Mine")
+            renamed = update_widgets(mine["id"], title="Renamed")
+            assert renamed["title"] == "Renamed"
+            assert renamed["created_by"] == ident.uid
+
+            # The seed row belongs to "seed", so a signed-in caller
+            # genuinely does not own it.
+            with pytest.raises(NotFound):
+                update_widgets(1, title="steal")
+            with pytest.raises(NotFound):
+                delete_widgets(1)
+
+            with acting_as("u_bob"):
+                with pytest.raises(NotFound):
+                    update_widgets(mine["id"], title="steal")
+                with pytest.raises(NotFound):
+                    delete_widgets(mine["id"])
+
+            deleted = delete_widgets(mine["id"])
+            assert deleted["id"] == mine["id"]
+            assert all(row["id"] != mine["id"] for row in list_widgets())
+    finally:
+        _cleanup_app_modules()
+
+
 # --------------- generate resource ---------------
 
 
@@ -237,6 +288,8 @@ def test_resource_composes_page_and_remote_in_one_run(tmp_path, monkeypatch, cap
     for rel in (
         "app/controllers/articles.py",
         "app/templates/articles/index.svelte",
+        "app/templates/articles/show.svelte",
+        "app/templates/articles/Item.svelte",
         "app/remote/articles.py",
         "tests/test_articles_remote.py",
         "tests/conftest.py",
@@ -244,7 +297,8 @@ def test_resource_composes_page_and_remote_in_one_run(tmp_path, monkeypatch, cap
         assert (project / rel).is_file(), rel
 
     data = yaml.safe_load((project / "fymo.yml").read_text())
-    assert data["routes"]["articles"] == "articles.index"
+    assert "articles" in data["routes"]["resources"]
+    assert "articles" not in data["routes"]
     out = capsys.readouterr().out
     assert out.count("Generated") == 1
 
@@ -258,6 +312,7 @@ def test_resource_dry_run_lists_every_path_and_writes_nothing(tmp_path, monkeypa
     for rel in (
         "app/controllers/articles.py",
         "app/templates/articles/index.svelte",
+        "app/templates/articles/show.svelte",
         "app/remote/articles.py",
         "tests/test_articles_remote.py",
         "fymo.yml",
@@ -280,6 +335,134 @@ def test_resource_refusal_is_all_or_nothing(tmp_path, monkeypatch):
     assert not (project / "app" / "controllers").exists()
     assert not (project / "tests").exists()
     assert (project / "fymo.yml").read_text() == before
+
+
+def test_resource_injects_a_resources_entry_and_show_route_resolves(tmp_path, monkeypatch, capsys):
+    """A plain `name: name.index` route only covers /name; detail URLs
+    exist through the Router's resources expansion, so generate resource
+    injects into the resources list and /name/<id> resolves as a declared
+    show route carrying the id param."""
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_resource("articles")
+
+    data = yaml.safe_load((project / "fymo.yml").read_text())
+    assert data["routes"]["resources"] == ["articles", "posts"]
+
+    router = Router(project / "fymo.yml")
+    match = router.match("/articles/9")
+    assert match["controller"] == "articles"
+    assert match["action"] == "show"
+    assert match["params"] == {"id": "9"}
+    assert "convention" not in match
+    index = router.match("/articles")
+    assert index["controller"] == "articles"
+    assert index["action"] == "index"
+    assert "resources" in capsys.readouterr().out
+
+
+def test_resource_creates_the_resources_block_when_absent(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    (project / "fymo.yml").write_text(
+        "name: sample_app\nroutes:\n  root: home.index\n  signin: signin.index\n"
+    )
+    monkeypatch.chdir(project)
+    generate_resource("articles")
+    data = yaml.safe_load((project / "fymo.yml").read_text())
+    assert data["routes"]["resources"] == ["articles"]
+    assert data["routes"]["root"] == "home.index"
+    match = Router(project / "fymo.yml").match("/articles/9")
+    assert match["action"] == "show"
+
+
+def test_resource_adapts_to_the_existing_list_indent(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    (project / "fymo.yml").write_text(
+        "name: sample_app\nroutes:\n  root: home.index\n  signin: signin.index\n"
+        "  resources:\n  - posts\n"
+    )
+    monkeypatch.chdir(project)
+    generate_resource("articles")
+    data = yaml.safe_load((project / "fymo.yml").read_text())
+    assert data["routes"]["resources"] == ["articles", "posts"]
+
+
+def test_resource_on_mangled_routes_prints_resources_lines(tmp_path, monkeypatch, capsys):
+    project = _project(tmp_path)
+    (project / "fymo.yml").write_text(
+        "name: sample_app\nroutes: {root: home.index, signin: signin.index}\n"
+    )
+    before = (project / "fymo.yml").read_text()
+    monkeypatch.chdir(project)
+    generate_resource("articles")
+    assert (project / "app" / "templates" / "articles" / "show.svelte").is_file()
+    assert (project / "fymo.yml").read_text() == before
+    out = capsys.readouterr().out
+    assert "resources:" in out
+    assert "- articles" in out
+
+
+def test_resource_over_an_existing_plain_route_points_at_resources(tmp_path, monkeypatch, capsys):
+    """A previously injected `name: name.index` route serves /name but not
+    /name/<id>; the generator says so instead of silently leaving detail
+    URLs dead."""
+    project = _project(tmp_path)
+    (project / "fymo.yml").write_text(
+        "name: sample_app\nroutes:\n  root: home.index\n  signin: signin.index\n"
+        "  articles: articles.index\n"
+    )
+    before = (project / "fymo.yml").read_text()
+    monkeypatch.chdir(project)
+    generate_resource("articles")
+    assert (project / "fymo.yml").read_text() == before
+    out = capsys.readouterr().out
+    assert "already" in out.lower()
+    assert "resources" in out
+
+
+def test_resource_show_and_item_render_through_index(tmp_path, monkeypatch):
+    """The build produces one rendered entry per template directory
+    (index.svelte wins over show.svelte in fymo.build.discovery), so the
+    generated show page must be reachable through index.svelte, not sit
+    beside it as a dead second entry."""
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_resource("articles")
+    index = (project / "app" / "templates" / "articles" / "index.svelte").read_text()
+    assert "import Show from './show.svelte'" in index
+    assert "item_id" in index
+    show = (project / "app" / "templates" / "articles" / "show.svelte").read_text()
+    assert "get_articles" in show
+    assert "update_articles" in show
+    assert "delete_articles" in show
+    assert "$identity" in show
+    controller = (project / "app" / "controllers" / "articles.py").read_text()
+    assert "def getContext(id" in controller
+    assert "item_id" in controller
+    item = (project / "app" / "templates" / "articles" / "Item.svelte").read_text()
+    assert 'href="/articles/{item.id}"' in item
+
+
+# --------------- no-auth project guard ---------------
+
+
+def test_resource_warns_when_the_project_has_no_auth(tmp_path, monkeypatch, capsys):
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_resource("articles")
+    out = capsys.readouterr().out
+    assert "fymo generate auth" in out
+    assert "401" in out
+    assert (project / "app" / "remote" / "articles.py").is_file()
+
+
+def test_no_auth_warning_does_not_fire_in_an_auth_project(tmp_path, monkeypatch, capsys):
+    project = _project(tmp_path)
+    (project / "app" / "auth").mkdir()
+    (project / "app" / "auth" / "resolver.py").write_text("# resolver\n")
+    monkeypatch.chdir(project)
+    generate_resource("articles")
+    assert "fymo generate auth" not in capsys.readouterr().out
 
 
 # --------------- click surface ---------------

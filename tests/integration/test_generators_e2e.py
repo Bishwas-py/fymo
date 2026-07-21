@@ -78,18 +78,22 @@ def test_new_plus_generate_resource_builds_routes_and_tests_pass(tmp_path, monke
     generate_resource("articles")
 
     # posts was already routed by the scaffold's resources entry; articles
-    # was injected as a declared route.
+    # was injected into the resources list so its detail URLs exist too.
     fymo_yml = (project / "fymo.yml").read_text()
-    assert "articles: articles.index" in fymo_yml
     data_routes = __import__("yaml").safe_load(fymo_yml)["routes"]
     assert "posts" not in data_routes
-    assert data_routes["resources"] == ["posts"]
+    assert "articles" not in data_routes
+    assert data_routes["resources"] == ["articles", "posts"]
 
     BuildPipeline(project_root=project).build(dev=False)
 
     manifest = json.loads((project / "dist" / "manifest.json").read_text())
-    assert set(manifest["remote_modules"]["posts"]["fns"]) == {"list_posts", "create_posts"}
-    assert set(manifest["remote_modules"]["articles"]["fns"]) == {"list_articles", "create_articles"}
+    assert set(manifest["remote_modules"]["posts"]["fns"]) == {
+        "list_posts", "get_posts", "create_posts", "update_posts", "delete_posts",
+    }
+    assert set(manifest["remote_modules"]["articles"]["fns"]) == {
+        "list_articles", "get_articles", "create_articles", "update_articles", "delete_articles",
+    }
     assert (project / "dist" / "client" / "_remote" / "posts.js").is_file()
 
     _cleanup_app_modules()
@@ -103,6 +107,15 @@ def test_new_plus_generate_resource_builds_routes_and_tests_pass(tmp_path, monke
         status, body = _get(app, "/articles")
         assert status == "200 OK", (status, body[:200])
         assert b"Articles" in body
+        # Detail URLs resolve through the resources expansion and render
+        # the show view (index.svelte branches to the co-located
+        # show.svelte on the id param; its file chip is stable SSR text).
+        status, body = _get(app, "/posts/1")
+        assert status == "200 OK", (status, body[:200])
+        assert b"app/templates/posts/show.svelte" in body
+        status, body = _get(app, "/articles/1")
+        assert status == "200 OK", (status, body[:200])
+        assert b"app/templates/articles/show.svelte" in body
     finally:
         app.shutdown()
 
@@ -114,4 +127,4 @@ def test_new_plus_generate_resource_builds_routes_and_tests_pass(tmp_path, monke
         cwd=project, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "6 passed" in result.stdout
+    assert "18 passed" in result.stdout

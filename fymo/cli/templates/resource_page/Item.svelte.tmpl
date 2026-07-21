@@ -1,11 +1,11 @@
 <script>
-  // One row of the __fymo_tmpl_name__ list. Grow it: link to a detail
-  // page, add actions, swap the layout. It is a plain Svelte component.
+  // One row of the __fymo_tmpl_name__ list, linking to its detail page.
+  // Grow it: add actions, swap the layout. It is a plain Svelte component.
   let { item } = $props();
 </script>
 
 <li class="card">
-  <span class="title">{item.title}</span>
+  <a class="title" href="/__fymo_tmpl_name__/{item.id}">{item.title}</a>
   <span class="by">by {item.created_by}</span>
 </li>
 
