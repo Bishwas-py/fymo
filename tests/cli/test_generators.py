@@ -42,6 +42,7 @@ def _cleanup_app_modules() -> None:
 
 @pytest.mark.parametrize("bad", [
     "Posts", "my-page", "posts/evil", "../evil", "1abc", "class", "auth", "signin", "root", "",
+    "resources",
 ])
 def test_invalid_names_are_rejected_loudly(bad, tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)

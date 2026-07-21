@@ -33,8 +33,10 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 # auth owns app/auth/ and app/remote/auth.py; signin is the auto-public
-# require_auth redirect target; root is the fymo.yml key for '/'.
-_RESERVED_NAMES = {"auth", "signin", "root"}
+# require_auth redirect target; root is the fymo.yml key for '/'; resources
+# is the routes key the Router reads as its resource list, so injecting it
+# as a page route would corrupt the routing table.
+_RESERVED_NAMES = {"auth", "signin", "root", "resources"}
 
 _APP_REMOTE_INIT = '"""Remote functions exposed to the browser."""\n'
 
