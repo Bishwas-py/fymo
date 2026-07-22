@@ -9,7 +9,8 @@ data: swap them for your real data source and keep the typed signatures.
 from typing import Optional, TypedDict
 
 from fymo.auth import require_auth
-from fymo.remote import NotFound, current_uid, remote
+from fymo.auth import current_uid
+from fymo.remote import NotFound, remote
 
 
 class Item(TypedDict):

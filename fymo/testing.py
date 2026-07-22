@@ -121,7 +121,12 @@ def signed_in(
     auth_identity.identify(_testing_identity_resolver)
     token = _acting_identity.set(ident)
     try:
-        with request_scope(uid=uid, environ={}):
+        # The scope's device uid (fymo.remote.current_uid, the fymo_uid
+        # cookie namespace) is deliberately DISTINCT from the identity uid:
+        # in a real browser the two never coincide, and code that
+        # attributes writes with the wrong accessor should fail here, not
+        # in production.
+        with request_scope(uid=f"u_device_{uid}", environ={}):
             if extras is not None:
                 _set_extras(_current_event.get(), extras)
             yield ident
