@@ -4,6 +4,10 @@ Python web framework that server-renders real Svelte 5 components. One repo, one
 
 If your backend can be JS, use SvelteKit, honestly. fymo is for when the backend is already Python, or you just want your small and medium projects in one codebase instead of a frontend repo, a backend repo, and an API layer between them.
 
+<p align="center">
+  <img src=".github/logo.png" alt="fymo" width="220">
+</p>
+
 ## Quick start
 
 You need Python 3.11+ and Node 20+ (the build shells out to esbuild).
