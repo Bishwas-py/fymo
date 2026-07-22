@@ -89,10 +89,10 @@ def test_new_plus_generate_resource_builds_routes_and_tests_pass(tmp_path, monke
 
     manifest = json.loads((project / "dist" / "manifest.json").read_text())
     assert set(manifest["remote_modules"]["posts"]["fns"]) == {
-        "list_posts", "get_posts", "create_posts", "update_posts", "delete_posts",
+        "list_posts", "get_post", "create_post", "update_post", "delete_post",
     }
     assert set(manifest["remote_modules"]["articles"]["fns"]) == {
-        "list_articles", "get_articles", "create_articles", "update_articles", "delete_articles",
+        "list_articles", "get_article", "create_article", "update_article", "delete_article",
     }
     assert (project / "dist" / "client" / "_remote" / "posts.js").is_file()
 

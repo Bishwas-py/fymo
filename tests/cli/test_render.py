@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from fymo.cli.render import UnknownTokenError, name_variants, render
+from fymo.cli.render import UnknownTokenError, name_variants, render, singularize
 
 TEMPLATES_ROOT = Path(__file__).resolve().parents[2] / "fymo" / "cli" / "templates"
 
@@ -79,12 +79,67 @@ def test_runtime_fymo_markers_are_not_tokens():
     assert render(text, {}) == text
 
 
-def test_name_variants_snake_and_title():
-    assert name_variants("posts") == {"name": "posts", "name_title": "Posts"}
+def test_name_variants_snake_title_and_singulars():
+    assert name_variants("posts") == {
+        "name": "posts",
+        "name_title": "Posts",
+        "name_singular": "post",
+        "name_singular_title": "Post",
+        "name_singular_class": "Post",
+    }
     assert name_variants("blog_posts") == {
         "name": "blog_posts",
         "name_title": "Blog Posts",
+        "name_singular": "blog_post",
+        "name_singular_title": "Blog Post",
+        "name_singular_class": "BlogPost",
     }
+
+
+@pytest.mark.parametrize("plural,singular", [
+    # plain trailing s
+    ("todos", "todo"),
+    ("posts", "post"),
+    ("notes", "note"),
+    ("articles", "article"),
+    ("widgets", "widget"),
+    # ies to y
+    ("stories", "story"),
+    ("categories", "category"),
+    # es after a sibilant
+    ("statuses", "status"),
+    ("boxes", "box"),
+    ("dishes", "dish"),
+    ("churches", "church"),
+    ("glasses", "glass"),
+    ("buses", "bus"),
+    # irregulars
+    ("children", "child"),
+    ("people", "person"),
+    ("men", "man"),
+    ("women", "woman"),
+    ("mice", "mouse"),
+    ("geese", "goose"),
+    ("feet", "foot"),
+    ("teeth", "tooth"),
+    # invariants pass through
+    ("series", "series"),
+    ("species", "species"),
+    ("fish", "fish"),
+    ("sheep", "sheep"),
+    ("news", "news"),
+    ("data", "data"),
+    # not plural-shaped stays unchanged
+    ("info", "info"),
+    ("status", "status"),
+    ("address", "address"),
+    ("analysis", "analysis"),
+    # only the last segment inflects
+    ("blog_posts", "blog_post"),
+    ("user_stories", "user_story"),
+])
+def test_singularize_battery(plural, singular):
+    assert singularize(plural) == singular
 
 
 def test_every_shipped_template_without_tokens_round_trips():

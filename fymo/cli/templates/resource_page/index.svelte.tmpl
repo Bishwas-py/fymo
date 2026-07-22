@@ -1,6 +1,6 @@
 <script>
   import { identity } from '$auth';
-  import { list___fymo_tmpl_name__, create___fymo_tmpl_name__ } from '$remote/__fymo_tmpl_name__';
+  import { list___fymo_tmpl_name__, create___fymo_tmpl_name_singular__ } from '$remote/__fymo_tmpl_name__';
   import Item from './Item.svelte';
   import Show from './show.svelte';
 
@@ -30,7 +30,7 @@
     pending = true;
     error = '';
     try {
-      const created = await create___fymo_tmpl_name__(title.trim());
+      const created = await create___fymo_tmpl_name_singular__(title.trim());
       items = [...items, created];
       title = '';
     } catch (err) {
@@ -75,7 +75,7 @@
     {:else}
       <p class="state">
         Creating requires a session: <a href="/signin?next=/__fymo_tmpl_name__">sign in</a>.
-        The check lives on create___fymo_tmpl_name__() as @require_auth.
+        The check lives on create___fymo_tmpl_name_singular__() as @require_auth.
       </p>
     {/if}
   </form>

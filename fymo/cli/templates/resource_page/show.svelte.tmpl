@@ -5,9 +5,9 @@
   // It is a plain co-located component: grow it freely.
   import { identity } from '$auth';
   import {
-    get___fymo_tmpl_name__,
-    update___fymo_tmpl_name__,
-    delete___fymo_tmpl_name__,
+    get___fymo_tmpl_name_singular__,
+    update___fymo_tmpl_name_singular__,
+    delete___fymo_tmpl_name_singular__,
   } from '$remote/__fymo_tmpl_name__';
 
   let { item_id } = $props();
@@ -26,7 +26,7 @@
     item = null;
     missing = false;
     try {
-      item = await get___fymo_tmpl_name__(id);
+      item = await get___fymo_tmpl_name_singular__(id);
       title = item.title;
     } catch (err) {
       missing = true;
@@ -39,7 +39,7 @@
     pending = true;
     error = '';
     try {
-      item = await update___fymo_tmpl_name__(item.id, title.trim());
+      item = await update___fymo_tmpl_name_singular__(item.id, title.trim());
     } catch (err) {
       error = err && err.message ? err.message : String(err);
     } finally {
@@ -52,7 +52,7 @@
     pending = true;
     error = '';
     try {
-      await delete___fymo_tmpl_name__(item.id);
+      await delete___fymo_tmpl_name_singular__(item.id);
       window.location.assign('/__fymo_tmpl_name__');
     } catch (err) {
       error = err && err.message ? err.message : String(err);

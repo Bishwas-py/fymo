@@ -181,8 +181,10 @@ def test_remote_writes_module_test_and_conftest(tmp_path, monkeypatch):
 
     module = (project / "app" / "remote" / "notes.py").read_text()
     assert "@remote" in module
-    for fn in ("list_notes", "create_notes", "get_notes", "update_notes", "delete_notes"):
+    # The collection keeps the plural; per-item verbs speak singular.
+    for fn in ("list_notes", "create_note", "get_note", "update_note", "delete_note"):
         assert f"def {fn}(" in module, fn
+    assert "class Note(TypedDict)" in module
     assert (project / "app" / "remote" / "__init__.py").is_file()
 
     test_file = (project / "tests" / "test_notes_remote.py").read_text()
@@ -216,11 +218,11 @@ def test_remote_generated_functions_work_through_fymo_testing(tmp_path, monkeypa
     monkeypatch.syspath_prepend(str(project))
     _cleanup_app_modules()
     try:
-        from app.remote.notes import create_notes, list_notes
+        from app.remote.notes import create_note, list_notes
 
         assert any(item["created_by"] == "seed" for item in list_notes())
         with signed_in("u_alice") as ident:
-            item = create_notes(title="hello")
+            item = create_note(title="hello")
         assert item["created_by"] == ident.uid
     finally:
         _cleanup_app_modules()
@@ -240,37 +242,37 @@ def test_remote_crud_semantics_through_fymo_testing(tmp_path, monkeypatch):
     _cleanup_app_modules()
     try:
         from app.remote.widgets import (
-            create_widgets,
-            delete_widgets,
-            get_widgets,
+            create_widget,
+            delete_widget,
+            get_widget,
             list_widgets,
-            update_widgets,
+            update_widget,
         )
 
-        assert get_widgets(1)["created_by"] == "seed"
+        assert get_widget(1)["created_by"] == "seed"
         with pytest.raises(NotFound):
-            get_widgets(999)
+            get_widget(999)
 
         with signed_in("u_alice") as ident:
-            mine = create_widgets(title="Mine")
-            renamed = update_widgets(mine["id"], title="Renamed")
+            mine = create_widget(title="Mine")
+            renamed = update_widget(mine["id"], title="Renamed")
             assert renamed["title"] == "Renamed"
             assert renamed["created_by"] == ident.uid
 
             # The seed row belongs to "seed", so a signed-in caller
             # genuinely does not own it.
             with pytest.raises(NotFound):
-                update_widgets(1, title="steal")
+                update_widget(1, title="steal")
             with pytest.raises(NotFound):
-                delete_widgets(1)
+                delete_widget(1)
 
             with acting_as("u_bob"):
                 with pytest.raises(NotFound):
-                    update_widgets(mine["id"], title="steal")
+                    update_widget(mine["id"], title="steal")
                 with pytest.raises(NotFound):
-                    delete_widgets(mine["id"])
+                    delete_widget(mine["id"])
 
-            deleted = delete_widgets(mine["id"])
+            deleted = delete_widget(mine["id"])
             assert deleted["id"] == mine["id"]
             assert all(row["id"] != mine["id"] for row in list_widgets())
     finally:
@@ -432,9 +434,9 @@ def test_resource_show_and_item_render_through_index(tmp_path, monkeypatch):
     assert "import Show from './show.svelte'" in index
     assert "item_id" in index
     show = (project / "app" / "templates" / "articles" / "show.svelte").read_text()
-    assert "get_articles" in show
-    assert "update_articles" in show
-    assert "delete_articles" in show
+    assert "get_article" in show
+    assert "update_article" in show
+    assert "delete_article" in show
     assert "$identity" in show
     controller = (project / "app" / "controllers" / "articles.py").read_text()
     assert "def getContext(id" in controller

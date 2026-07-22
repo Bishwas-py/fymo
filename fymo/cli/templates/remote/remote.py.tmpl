@@ -13,48 +13,48 @@ from fymo.auth import current_uid
 from fymo.remote import NotFound, remote
 
 
-class Item(TypedDict):
+class __fymo_tmpl_name_singular_class__(TypedDict):
     id: int
     title: str
     created_by: str
 
 
-_ITEMS: list[Item] = [
-    {"id": 1, "title": "First __fymo_tmpl_name__ item", "created_by": "seed"},
+_ITEMS: list[__fymo_tmpl_name_singular_class__] = [
+    {"id": 1, "title": "First __fymo_tmpl_name_singular__", "created_by": "seed"},
 ]
 
 
-def _find(id: int) -> Optional[Item]:
+def _find(id: int) -> Optional[__fymo_tmpl_name_singular_class__]:
     return next((row for row in _ITEMS if row["id"] == id), None)
 
 
-def _owned_or_not_found(id: int) -> Item:
+def _owned_or_not_found(id: int) -> __fymo_tmpl_name_singular_class__:
     # Unknown id and someone else's row answer identically: a 403 on the
     # ownership check would leak that the id exists.
     row = _find(id)
     if row is None or row["created_by"] != current_uid():
-        raise NotFound(f"__fymo_tmpl_name__ {id} not found")
+        raise NotFound(f"__fymo_tmpl_name_singular__ {id} not found")
     return row
 
 
 @remote
-def list___fymo_tmpl_name__() -> list[Item]:
+def list___fymo_tmpl_name__() -> list[__fymo_tmpl_name_singular_class__]:
     return list(_ITEMS)
 
 
 @remote
-def get___fymo_tmpl_name__(id: int) -> Item:
+def get___fymo_tmpl_name_singular__(id: int) -> __fymo_tmpl_name_singular_class__:
     row = _find(id)
     if row is None:
-        raise NotFound(f"__fymo_tmpl_name__ {id} not found")
+        raise NotFound(f"__fymo_tmpl_name_singular__ {id} not found")
     return row
 
 
 @remote
 @require_auth
-def create___fymo_tmpl_name__(title: str) -> Item:
+def create___fymo_tmpl_name_singular__(title: str) -> __fymo_tmpl_name_singular_class__:
     # The author comes from the authenticated identity, never client input.
-    item: Item = {
+    item: __fymo_tmpl_name_singular_class__ = {
         "id": max((row["id"] for row in _ITEMS), default=0) + 1,
         "title": title,
         "created_by": current_uid(),
@@ -65,7 +65,7 @@ def create___fymo_tmpl_name__(title: str) -> Item:
 
 @remote
 @require_auth
-def update___fymo_tmpl_name__(id: int, title: str) -> Item:
+def update___fymo_tmpl_name_singular__(id: int, title: str) -> __fymo_tmpl_name_singular_class__:
     row = _owned_or_not_found(id)
     row["title"] = title
     return row
@@ -73,7 +73,7 @@ def update___fymo_tmpl_name__(id: int, title: str) -> Item:
 
 @remote
 @require_auth
-def delete___fymo_tmpl_name__(id: int) -> Item:
+def delete___fymo_tmpl_name_singular__(id: int) -> __fymo_tmpl_name_singular_class__:
     row = _owned_or_not_found(id)
     _ITEMS.remove(row)
     return row
