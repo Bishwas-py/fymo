@@ -1,0 +1,153 @@
+<script>
+  // Detail view for one __fymo_tmpl_name__ row. The build renders one
+  // entry per template directory (index.svelte), so index.svelte mounts
+  // this component when the URL carries an id (/__fymo_tmpl_name__/<id>).
+  // It is a plain co-located component: grow it freely.
+  import { identity } from '$auth';
+  import {
+    get___fymo_tmpl_name_singular__,
+    update___fymo_tmpl_name_singular__,
+    delete___fymo_tmpl_name_singular__,
+  } from '$remote/__fymo_tmpl_name__';
+
+  let { item_id } = $props();
+
+  let item = $state(null);
+  let missing = $state(false);
+  let title = $state('');
+  let error = $state('');
+  let pending = $state(false);
+
+  $effect(() => {
+    load(Number(item_id));
+  });
+
+  async function load(id) {
+    item = null;
+    missing = false;
+    try {
+      item = await get___fymo_tmpl_name_singular__(id);
+      title = item.title;
+    } catch (err) {
+      missing = true;
+    }
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    if (pending || !title.trim()) return;
+    pending = true;
+    error = '';
+    try {
+      item = await update___fymo_tmpl_name_singular__(item.id, title.trim());
+    } catch (err) {
+      error = err && err.message ? err.message : String(err);
+    } finally {
+      pending = false;
+    }
+  }
+
+  async function remove() {
+    if (pending) return;
+    pending = true;
+    error = '';
+    try {
+      await delete___fymo_tmpl_name_singular__(item.id);
+      window.location.assign('/__fymo_tmpl_name__');
+    } catch (err) {
+      error = err && err.message ? err.message : String(err);
+      pending = false;
+    }
+  }
+</script>
+
+<main>
+  <p class="eyebrow"><a href="/__fymo_tmpl_name__">__fymo_tmpl_name_title__</a></p>
+
+  {#if missing}
+    <h1>Not found</h1>
+    <p class="state">
+      No __fymo_tmpl_name__ with id {item_id}.
+      <a href="/__fymo_tmpl_name__">Back to the list</a>.
+    </p>
+  {:else if !item}
+    <h1>__fymo_tmpl_name_title__ #{item_id}</h1>
+    <p class="state">Loading from the server…</p>
+  {:else}
+    <h1>{item.title}</h1>
+    <p class="sub">by <span class="who">{item.created_by}</span></p>
+
+    {#if $identity && $identity.uid === item.created_by}
+      <!-- Owner controls. The server enforces ownership regardless:
+           update/delete answer NotFound for rows you do not own. -->
+      <form onsubmit={save} class="edit card">
+        <input bind:value={title} aria-label="Title" />
+        <button type="submit" disabled={pending || !title.trim()}>Save</button>
+        <button type="button" class="delete" onclick={remove} disabled={pending}>
+          Delete
+        </button>
+      </form>
+    {/if}
+
+    {#if error}
+      <p class="error">{error}</p>
+    {/if}
+  {/if}
+
+  <div class="files">
+    <span class="chip">app/templates/__fymo_tmpl_name__/show.svelte</span>
+    <span class="chip">app/remote/__fymo_tmpl_name__.py</span>
+  </div>
+</main>
+
+<style>
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem;
+  }
+
+  .sub {
+    color: var(--muted);
+    margin: 0 0 1.5rem;
+  }
+
+  .who {
+    font-family: var(--mono);
+    font-size: 0.85em;
+  }
+
+  .state {
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .edit {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-top: 0.5rem;
+  }
+
+  .edit input {
+    flex: 1;
+  }
+
+  .delete {
+    background: transparent;
+    color: var(--coral);
+    border: 1px solid var(--line);
+  }
+
+  .error {
+    color: var(--coral);
+    font-size: 0.875rem;
+  }
+
+  .files {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+</style>

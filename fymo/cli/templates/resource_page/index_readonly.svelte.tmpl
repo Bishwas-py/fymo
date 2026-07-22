@@ -1,0 +1,98 @@
+<script>
+  import { list___fymo_tmpl_name__ } from '$remote/__fymo_tmpl_name__';
+  import Item from './Item.svelte';
+  import Show from './show.svelte';
+
+  // Read-only variant: this project had no app/auth/ at generation
+  // time, so there is no create form here and no mutation endpoints in
+  // app/remote/__fymo_tmpl_name__.py. Run `fymo generate auth`, then
+  // `fymo generate resource __fymo_tmpl_name__ --force` for full CRUD.
+  //
+  // The build renders one entry per template directory, so this file
+  // serves both resource URLs: /__fymo_tmpl_name__ renders the list,
+  // /__fymo_tmpl_name__/<id> hands the route's id (threaded through the
+  // controller as item_id) to the co-located show.svelte.
+  let { item_id } = $props();
+
+  let items = $state([]);
+  let loaded = $state(false);
+
+  $effect(() => {
+    if (item_id || loaded) return;
+    list___fymo_tmpl_name__().then((rows) => {
+      items = rows;
+      loaded = true;
+    });
+  });
+</script>
+
+{#if item_id}
+  <Show {item_id} />
+{:else}
+<main>
+  <p class="eyebrow">Resource</p>
+  <h1>__fymo_tmpl_name_title__</h1>
+  <p class="sub">
+    Rows come from <code>list___fymo_tmpl_name__()</code> in
+    app/remote/__fymo_tmpl_name__.py, called through the typed $remote client.
+  </p>
+
+  {#if !loaded}
+    <p class="state">Loading from the server…</p>
+  {:else if items.length === 0}
+    <p class="state">Nothing here yet.</p>
+  {:else}
+    <ul class="items">
+      {#each items as item (item.id)}
+        <Item {item} />
+      {/each}
+    </ul>
+  {/if}
+
+  <div class="files">
+    <span class="chip">app/remote/__fymo_tmpl_name__.py</span>
+    <span class="chip">app/templates/__fymo_tmpl_name__/Item.svelte</span>
+    <span class="chip">tests/test___fymo_tmpl_name___remote.py</span>
+  </div>
+</main>
+{/if}
+
+<style>
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem;
+  }
+
+  .sub {
+    color: var(--muted);
+    margin: 0 0 2rem;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    color: var(--fg);
+  }
+
+  .state {
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .items {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .files {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+</style>

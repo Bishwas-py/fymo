@@ -49,8 +49,8 @@ def whoami_app(blog_app: Path) -> Path:
 
     fymo_yml = dest / "fymo.yml"
     text = fymo_yml.read_text()
-    assert "    - tags\n" in text, "unexpected fymo.yml shape in examples/blog_app"
-    text = text.replace("    - tags\n", "    - tags\n    - whoami\n")
+    assert "    - posts\n" in text, "unexpected fymo.yml shape in examples/blog_app"
+    text = text.replace("    - posts\n", "    - posts\n    - whoami\n")
     fymo_yml.write_text(text)
 
     return dest

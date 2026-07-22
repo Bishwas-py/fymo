@@ -16,15 +16,16 @@ def test_remote_import_resolves(example_app: Path):
         "def hello(name: str) -> str:\n    return f'hi {name}'\n"
     )
 
-    # Patch the test.svelte to import from $remote
-    test_svelte = example_app / "app" / "templates" / "todos" / "test.svelte"
+    # Patch the co-located Item.svelte (imported by todos/index.svelte,
+    # so it really lands in the compiled bundle) to import from $remote.
+    test_svelte = example_app / "app" / "templates" / "todos" / "Item.svelte"
     new_content = (
         '<script>\n'
         '  import { hello } from "$remote/greeter";\n'
-        '  let { message = "x" } = $props();\n'
+        '  let { item } = $props();\n'
         '  async function go() { await hello("world"); }\n'
         '</script>\n'
-        '<div>{message}</div>\n'
+        '<li>{item.title}</li>\n'
     )
     test_svelte.write_text(new_content)
 

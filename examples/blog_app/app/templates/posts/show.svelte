@@ -1,73 +1,153 @@
-<script lang="ts">
-  import Comments from './Comments.svelte';
-  import ReactionBar from './ReactionBar.svelte';
-  import type { Post, Comment, ReactionCounts } from '$remote/posts';
+<script>
+  // Detail view for one posts row. The build renders one
+  // entry per template directory (index.svelte), so index.svelte mounts
+  // this component when the URL carries an id (/posts/<id>).
+  // It is a plain co-located component: grow it freely.
+  import { identity } from '$auth';
+  import {
+    get_post,
+    update_post,
+    delete_post,
+  } from '$remote/posts';
 
-  let {
-    post,
-    initial_comments,
-    initial_reactions,
-    create_comment,
-    toggle_reaction,
-  }: {
-    post: Post;
-    initial_comments: Comment[];
-    initial_reactions: ReactionCounts;
-    create_comment: (slug: string, input: { body: string }) => Promise<Comment>;
-    toggle_reaction: (slug: string, kind: 'clap' | 'fire' | 'heart' | 'mind') => Promise<ReactionCounts>;
-  } = $props();
+  let { item_id } = $props();
+
+  let item = $state(null);
+  let missing = $state(false);
+  let title = $state('');
+  let error = $state('');
+  let pending = $state(false);
+
+  $effect(() => {
+    load(Number(item_id));
+  });
+
+  async function load(id) {
+    item = null;
+    missing = false;
+    try {
+      item = await get_post(id);
+      title = item.title;
+    } catch (err) {
+      missing = true;
+    }
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    if (pending || !title.trim()) return;
+    pending = true;
+    error = '';
+    try {
+      item = await update_post(item.id, title.trim());
+    } catch (err) {
+      error = err && err.message ? err.message : String(err);
+    } finally {
+      pending = false;
+    }
+  }
+
+  async function remove() {
+    if (pending) return;
+    pending = true;
+    error = '';
+    try {
+      await delete_post(item.id);
+      window.location.assign('/posts');
+    } catch (err) {
+      error = err && err.message ? err.message : String(err);
+      pending = false;
+    }
+  }
 </script>
 
-<article>
-  <header class="post-head">
-    <p class="dateline">
-      <time>{new Date(post.published_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</time>
-      <span class="tags">{post.tags}</span>
-    </p>
-    <h1>{post.title}</h1>
-  </header>
-  <div class="body">{@html post.content_html}</div>
-</article>
+<main>
+  <p class="eyebrow"><a href="/posts">Posts</a></p>
 
-<ReactionBar slug={post.slug} initial={initial_reactions} {toggle_reaction} />
-<Comments slug={post.slug} initial={initial_comments} {create_comment} />
+  {#if missing}
+    <h1>Not found</h1>
+    <p class="state">
+      No posts with id {item_id}.
+      <a href="/posts">Back to the list</a>.
+    </p>
+  {:else if !item}
+    <h1>Posts #{item_id}</h1>
+    <p class="state">Loading from the server…</p>
+  {:else}
+    <h1>{item.title}</h1>
+    <p class="sub">by <span class="who">{item.created_by}</span></p>
+
+    {#if $identity && $identity.uid === item.created_by}
+      <!-- Owner controls. The server enforces ownership regardless:
+           update/delete answer NotFound for rows you do not own. -->
+      <form onsubmit={save} class="edit card">
+        <input bind:value={title} aria-label="Title" />
+        <button type="submit" disabled={pending || !title.trim()}>Save</button>
+        <button type="button" class="delete" onclick={remove} disabled={pending}>
+          Delete
+        </button>
+      </form>
+    {/if}
+
+    {#if error}
+      <p class="error">{error}</p>
+    {/if}
+  {/if}
+
+  <div class="files">
+    <span class="chip">app/templates/posts/show.svelte</span>
+    <span class="chip">app/remote/posts.py</span>
+  </div>
+</main>
 
 <style>
-  .post-head { margin-bottom: 2.5rem; }
-  .dateline {
-    display: flex; gap: 1rem; align-items: center;
-    font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); margin: 0 0 1rem;
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem;
   }
-  .dateline .tags { color: var(--accent); }
-  article h1 { font-size: clamp(2.1rem, 5.5vw, 3rem); font-weight: 700; margin: 0; }
 
-  /* ---- Prose ---- */
-  .body { font-size: 1.09rem; line-height: 1.78; }
-  .body :global(p) { margin: 0 0 1.4rem; color: var(--fg); }
-  .body :global(h2) {
-    font-family: var(--font-display); font-size: 1.6rem; font-weight: 600;
-    margin: 2.8rem 0 0.9rem; letter-spacing: -0.02em;
+  .sub {
+    color: var(--muted);
+    margin: 0 0 1.5rem;
   }
-  .body :global(h3) { font-family: var(--font-display); font-size: 1.25rem; margin: 2rem 0 0.6rem; }
-  .body :global(a) { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); text-underline-offset: 3px; }
-  .body :global(a:hover) { text-decoration-color: var(--accent); }
-  .body :global(strong) { font-weight: 650; }
-  .body :global(ul), .body :global(ol) { margin: 0 0 1.4rem; padding-left: 1.3rem; }
-  .body :global(li) { margin: 0.35rem 0; }
-  .body :global(blockquote) {
-    margin: 1.8rem 0; padding: 0.4rem 0 0.4rem 1.3rem;
-    border-left: 3px solid var(--accent); color: var(--muted); font-style: italic;
+
+  .who {
+    font-family: var(--mono);
+    font-size: 0.85em;
   }
-  .body :global(pre) {
-    background: var(--code-bg); padding: 1.15rem 1.25rem; border-radius: 12px;
-    overflow-x: auto; font-size: 0.88rem; line-height: 1.6;
-    border: 1px solid var(--rule); margin: 1.6rem 0;
+
+  .state {
+    color: var(--muted);
+    margin: 0;
   }
-  .body :global(code) { font-family: var(--font-mono); }
-  .body :global(pre code) { font-size: 0.88rem; }
-  .body :global(p code), .body :global(li code) {
-    background: var(--surface-2); padding: 0.12rem 0.42rem; border-radius: 6px;
-    font-size: 0.88em; border: 1px solid var(--rule);
+
+  .edit {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-top: 0.5rem;
   }
-  .body :global(hr) { border: none; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
+
+  .edit input {
+    flex: 1;
+  }
+
+  .delete {
+    background: transparent;
+    color: var(--coral);
+    border: 1px solid var(--line);
+  }
+
+  .error {
+    color: var(--coral);
+    font-size: 0.875rem;
+  }
+
+  .files {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
 </style>

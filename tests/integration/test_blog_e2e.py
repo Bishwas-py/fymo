@@ -1,4 +1,4 @@
-"""End-to-end: build the blog, hit /, hit /posts/<slug>, exercise a remote call."""
+"""End-to-end: build the blog, hit /, hit /posts/<id>, exercise the generated CRUD remotes with real auth."""
 import base64
 import io
 import json
@@ -72,12 +72,10 @@ def test_blog_e2e(blog_app: Path):
             del _sys.modules[_k]
 
     from fymo.build.pipeline import BuildPipeline
-    from tests.integration._seed_helpers import seed_test_post
 
-    seed_test_post()
     BuildPipeline(project_root=blog_app).build(dev=False)
 
-    # Pull the per-module hash from the manifest after build.
+    # Pull the per-module hashes from the manifest after build.
     manifest = json.loads((blog_app / "dist" / "manifest.json").read_text())
     hash_ = manifest["remote_modules"]["posts"]["hash"]
     # blog_app owns its auth endpoints (app/remote/auth.py, scaffolded by
@@ -87,29 +85,26 @@ def test_blog_e2e(blog_app: Path):
     from fymo import create_app
     app = create_app(blog_app)
     try:
-        # Index renders
+        # Home renders (the scaffold proof board).
         (status, _), html = _wsgi_call(app, "/")
         assert status.startswith("200"), status
-        assert b"fymo" in html.lower() or b"Welcome" in html or b"Blog" in html
+        assert b"It's alive." in html
 
-        # Post detail renders with SSR'd HTML
-        (status, _), html = _wsgi_call(app, "/posts/welcome-to-fymo")
+        # Post detail renders with SSR'd HTML: the generated show view
+        # reached through the resources route, seed row id 1.
+        (status, _), html = _wsgi_call(app, "/posts/1")
         assert status.startswith("200"), status
-        assert b"Welcome to Fymo" in html
+        assert b"app/templates/posts/show.svelte" in html
 
-        # Remote call: get_posts
-        (status, _), env = _remote_call(app, hash_, "get_posts", [])
+        # Remote call: list_posts sees the seed row.
+        (status, _), env = _remote_call(app, hash_, "list_posts", [])
         assert status.startswith("200"), status
         assert env["type"] == "result"
         posts = devalue.parse(env["result"])
-        slugs = [p["slug"] for p in posts]
-        assert "welcome-to-fymo" in slugs
+        assert any(row["id"] == 1 and row["created_by"] == "seed" for row in posts)
 
-        # Commenting is gated: an anonymous create_comment is rejected.
-        (status, _), env = _remote_call(
-            app, hash_, "create_comment",
-            ["welcome-to-fymo", {"name": "Alex", "body": "Great post"}],
-        )
+        # Mutations are gated: an anonymous create_post is rejected.
+        (status, _), env = _remote_call(app, hash_, "create_post", ["First!"])
         assert env["type"] == "error"
         assert env["status"] == 401
         assert env["error"] == "unauthenticated"
@@ -119,66 +114,47 @@ def test_blog_e2e(blog_app: Path):
             app, auth_hash, "signup", ["alex@example.com", "longpassword"],
         )
         assert env["type"] == "result", env
+        signup_uid = devalue.parse(env["result"])["uid"]
         session_cookie = _extract_cookie(signup_headers, "session")
         uid_cookie = _extract_cookie(signup_headers, "fymo_uid")
         assert session_cookie
         auth_cookies = f"{uid_cookie}; {session_cookie}"
 
-        # Authenticated create_comment succeeds; the author is taken from the
-        # identity's extras (alex@example.com -> "alex"), not client input.
+        # Authenticated create_post succeeds; the author comes from the
+        # authenticated identity, never client input.
         (status, _), env = _remote_call(
-            app, hash_, "create_comment",
-            ["welcome-to-fymo", {"body": "Great post"}],
-            cookies=auth_cookies,
+            app, hash_, "create_post", ["Hello from e2e"], cookies=auth_cookies,
         )
         assert status.startswith("200"), status
-        assert env["type"] == "result"
-        comment = devalue.parse(env["result"])
-        assert comment["name"] == "alex"
+        assert env["type"] == "result", env
+        created = devalue.parse(env["result"])
+        assert created["created_by"] == signup_uid
 
-        # Authenticated create_comment with an empty body → envelope error 422.
+        # The owner can rename it through the same dispatch.
         (status, _), env = _remote_call(
-            app, hash_, "create_comment",
-            ["welcome-to-fymo", {"body": ""}],
-            cookies=auth_cookies,
+            app, hash_, "update_post", [created["id"], "Renamed"], cookies=auth_cookies,
         )
-        assert status.startswith("200"), status
+        assert env["type"] == "result", env
+        assert devalue.parse(env["result"])["title"] == "Renamed"
+
+        # Anonymous update of the same row: 401 before any ownership check.
+        (status, _), env = _remote_call(app, hash_, "update_post", [created["id"], "steal"])
         assert env["type"] == "error"
-        assert env["status"] == 422
-        assert env["error"] == "validation"
+        assert env["status"] == 401
 
-        # Remote call: toggle_reaction (with the same uid for idempotency)
-        (status, _), env = _remote_call(
-            app, hash_, "toggle_reaction",
-            ["welcome-to-fymo", "clap"],
-            cookies=uid_cookie,
-        )
-        assert status.startswith("200"), status
-        assert env["type"] == "result"
-        counts = devalue.parse(env["result"])
-        assert counts["clap"] == 1
-
-        # Toggle again with same uid → 0
-        (status, _), env = _remote_call(
-            app, hash_, "toggle_reaction",
-            ["welcome-to-fymo", "clap"],
-            cookies=uid_cookie,
-        )
-        assert status.startswith("200"), status
-        assert env["type"] == "result"
-        counts2 = devalue.parse(env["result"])
-        assert counts2["clap"] == 0
+        # Unknown id answers the NotFound envelope.
+        (status, _), env = _remote_call(app, hash_, "get_post", [999])
+        assert env["type"] == "error"
+        assert env["status"] == 404
     finally:
         if app.sidecar:
             app.sidecar.stop()
 
 
 @pytest.mark.usefixtures("node_available")
-def test_home_page_renders_nav_via_root_layout(blog_app: Path):
-    """After migration, Nav must still appear in the rendered HTML -- just
-    sourced from the shared layout instead of each page importing it.
-    Asserts on Nav.svelte's actual markup (examples/blog_app/app/components/
-    Nav.svelte): a <nav> element containing the brand link."""
+def test_home_page_gets_root_layout_head(blog_app: Path):
+    """The root layout wraps every route: its <svelte:head> favicon link
+    must land in the rendered HTML of a page that never mentions it."""
     import subprocess
     subprocess.run(["fymo", "build"], cwd=blog_app, check=True, capture_output=True)
     from fymo import create_app
@@ -187,8 +163,8 @@ def test_home_page_renders_nav_via_root_layout(blog_app: Path):
         (status, headers), out = _wsgi_call(app, "/")
         html = out.decode("utf-8")
         assert status == "200 OK"
-        assert 'class="brand' in html and 'href="/"' in html and 'fymo' in html
-        assert "<nav" in html
+        assert 'rel="icon"' in html
+        assert 'href="/favicon.svg"' in html
     finally:
         if app.sidecar:
             app.sidecar.stop()

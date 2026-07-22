@@ -1,0 +1,18 @@
+"""Tests for app/broadcasts/__fymo_tmpl_name__.py (generated; they are yours).
+
+Discovery is the contract worth pinning: publish() and the SSE endpoint
+only know channels fymo.broadcast.discovery finds, so a channel this
+test sees is a channel the running app has.
+"""
+from pathlib import Path
+
+from fymo.broadcast.discovery import discover_broadcast_channels
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test___fymo_tmpl_name___activity_channel_is_discovered():
+    channels = discover_broadcast_channels(PROJECT_ROOT)
+    assert "__fymo_tmpl_name___activity" in channels
+    module_name, fn = channels["__fymo_tmpl_name___activity"]
+    assert module_name == "__fymo_tmpl_name__"

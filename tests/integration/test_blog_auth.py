@@ -31,12 +31,14 @@ def blog_on_path():
 
 def test_create_comment_rejects_anonymous_users(blog_on_path):
     """An unauthenticated caller must be turned away by @require_auth before
-    any comment is written — the gate fires ahead of the DB, so no store or
-    seeded database is needed to prove it."""
-    from app.remote.posts import create_comment, NewComment
+    any comment is written — the gate fires ahead of the data source, so
+    nothing needs seeding to prove it."""
+    from app.remote.comments import create_comment, list_comments
     from fymo.auth.context import AuthRequired
 
     # request scope with no resolvable identity => current_uid() is None.
     with request_scope(uid="u_anon", environ={}):
+        before = list_comments()
         with pytest.raises(AuthRequired):
-            create_comment("welcome-to-fymo", NewComment(body="hello"))
+            create_comment(title="hello")
+        assert list_comments() == before

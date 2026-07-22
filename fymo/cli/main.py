@@ -76,18 +76,151 @@ def generate():
     pass
 
 
+def _conflict_options(fn):
+    """Shared conflict-mode flags for every generator."""
+    fn = click.option('--force', is_flag=True, default=False,
+                      help='Overwrite existing files instead of refusing')(fn)
+    fn = click.option('--dry-run', is_flag=True, default=False,
+                      help='List every path that would be written; write nothing')(fn)
+    fn = click.option('--diff', is_flag=True, default=False,
+                      help='Show a unified diff against existing files; write nothing')(fn)
+    return fn
+
+
+def _check_conflict_flags(force, dry_run, diff):
+    if sum((force, dry_run, diff)) > 1:
+        raise click.UsageError("--force, --dry-run, and --diff are mutually exclusive")
+
+
 @generate.command(name="auth")
 @click.option('--clerk', is_flag=True, default=False,
               help='Clerk JWT resolver; the app adds pyjwt[crypto] to its own dependencies')
 @click.option('--skeleton', is_flag=True, default=False,
               help='Bare resolver stub returning None; build your own mechanism')
-def generate_auth_cmd(clerk, skeleton):
+@_conflict_options
+def generate_auth_cmd(clerk, skeleton, force, dry_run, diff):
     """Scaffold app-owned auth into app/auth/ (password login by default)."""
     if clerk and skeleton:
         raise click.UsageError("--clerk and --skeleton are mutually exclusive")
+    _check_conflict_flags(force, dry_run, diff)
     from fymo.cli.commands.generate_auth import generate_auth
     variant = 'clerk' if clerk else 'skeleton' if skeleton else 'password'
-    generate_auth(variant)
+    generate_auth(variant, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="page")
+@click.argument('name')
+@_conflict_options
+def generate_page_cmd(name, force, dry_run, diff):
+    """Generate a routed page: controller, Svelte template, route entry."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_page
+    generate_page(name, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="remote")
+@click.argument('name')
+@_conflict_options
+def generate_remote_cmd(name, force, dry_run, diff):
+    """Generate a remote module in app/remote/ plus a fymo.testing test."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_remote
+    generate_remote(name, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="resource")
+@click.argument('name')
+@_conflict_options
+def generate_resource_cmd(name, force, dry_run, diff):
+    """Generate a page and a remote module together."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_resource
+    generate_resource(name, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="component")
+@click.argument('name')
+@_conflict_options
+def generate_component_cmd(name, force, dry_run, diff):
+    """Generate a Svelte component in app/components/ (PascalCase name)."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_component
+    generate_component(name, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="layout")
+@click.argument('section')
+@_conflict_options
+def generate_layout_cmd(section, force, dry_run, diff):
+    """Generate a section layout for an existing app/templates/<section>/."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_layout
+    generate_layout(section, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="templates")
+@_conflict_options
+def generate_templates_cmd(force, dry_run, diff):
+    """Publish the packaged templates into .fymo/templates/ for editing."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import publish_templates
+    publish_templates(force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="broadcast")
+@click.argument('name')
+@_conflict_options
+def generate_broadcast_cmd(name, force, dry_run, diff):
+    """Generate a broadcast channel module plus its discovery test."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_broadcast
+    generate_broadcast(name, force=force, dry_run=dry_run, diff=diff)
+
+
+@cli.group()
+def destroy():
+    """Remove generated code, the safe inverse of `fymo generate`.
+
+    Covers page, remote, and resource (files plus their route entry).
+    Generated component/layout/broadcast files are single plain files:
+    delete them by hand.
+    """
+    pass
+
+
+def _destroy_options(fn):
+    fn = click.option('--force', is_flag=True, default=False,
+                      help='Delete files even when modified since generation')(fn)
+    fn = click.option('--dry-run', is_flag=True, default=False,
+                      help='Print what would be deleted; touch nothing')(fn)
+    return fn
+
+
+@destroy.command(name="page")
+@click.argument('name')
+@_destroy_options
+def destroy_page_cmd(name, force, dry_run):
+    """Delete a generated page and its route entry."""
+    from fymo.cli.commands.destroy import destroy_page
+    destroy_page(name, force=force, dry_run=dry_run)
+
+
+@destroy.command(name="remote")
+@click.argument('name')
+@_destroy_options
+def destroy_remote_cmd(name, force, dry_run):
+    """Delete a generated remote module and its test."""
+    from fymo.cli.commands.destroy import destroy_remote
+    destroy_remote(name, force=force, dry_run=dry_run)
+
+
+@destroy.command(name="resource")
+@click.argument('name')
+@_destroy_options
+def destroy_resource_cmd(name, force, dry_run):
+    """Delete a generated resource (page + remote) and its route entry."""
+    from fymo.cli.commands.destroy import destroy_resource
+    destroy_resource(name, force=force, dry_run=dry_run)
 
 
 @cli.group()

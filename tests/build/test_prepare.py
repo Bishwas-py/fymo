@@ -130,7 +130,13 @@ def test_require_auth_with_no_resolvers_raises_build_error(example_app: Path):
     """@require_auth shipped with zero @identify resolvers must fail
     `fymo build`, naming the site, before node/esbuild runs. @remote here
     keeps the function clear of the unrelated #8 exposure check, isolating
-    this test to the auth-enforcement failure."""
+    this test to the auth-enforcement failure. The regenerated example
+    ships app/auth/, so the copy sheds it to reach the zero-resolver
+    state this check exists for."""
+    import shutil
+
+    shutil.rmtree(example_app / "app" / "auth")
+    (example_app / "app" / "remote" / "auth.py").unlink()
     (example_app / "app" / "remote").mkdir(parents=True, exist_ok=True)
     (example_app / "app" / "remote" / "__init__.py").write_text("")
     (example_app / "app" / "remote" / "comments.py").write_text(_REQUIRE_AUTH_MODULE)
@@ -170,7 +176,15 @@ def test_unmarked_remote_function_raises_build_error(example_app: Path):
     """Issue #8: with explicit_optin left at its default (false) and no
     allow_implicit escape hatch, an unmarked app/remote/*.py function must
     fail the build naming the specific function. Same ordering promise as
-    directory hygiene: caught before node/esbuild."""
+    directory hygiene: caught before node/esbuild. The regenerated example
+    ships `remote.mode: strict` (where unmarked functions are simply not
+    exposed), so the copy drops the remote block to reach the legacy
+    default this check guards."""
+    fymo_yml = example_app / "fymo.yml"
+    lines = fymo_yml.read_text().split("\n")
+    fymo_yml.write_text("\n".join(
+        line for line in lines if line not in ("remote:", "  mode: strict")
+    ))
     (example_app / "app" / "remote").mkdir(parents=True, exist_ok=True)
     (example_app / "app" / "remote" / "__init__.py").write_text("")
     (example_app / "app" / "remote" / "versions.py").write_text(
@@ -306,12 +320,11 @@ def test_mode_strict_prints_no_deprecation_warning(example_app: Path, monkeypatc
 
 @pytest.mark.usefixtures("node_available")
 def test_prepare_build_config_reflects_blog_app_facts(blog_app: Path):
-    """blog_app has index/, posts/ (with a resource _layout.svelte and
-    show.svelte), tags/ (show.svelte, no resource layout), and
-    redirect_demo/ (index.svelte, a standalone demo of fymo.remote.Redirect
-    -- see tests/integration/test_redirect_hydration.py), plus a root
-    _layout.svelte -- so this pins the known shape of what prepare must
-    produce for both `fymo build` and `fymo dev` to agree on."""
+    """blog_app is pure generator output: home/, posts/ (index.svelte,
+    with show.svelte and Item.svelte as co-located components), signin/,
+    and the root _layout.svelte the scaffold ships. This pins the known
+    shape of what prepare must produce for both `fymo build` and
+    `fymo dev` to agree on."""
     dist_dir = blog_app / "dist"
     cache_dir = blog_app / ".fymo" / "entries"
 
@@ -320,14 +333,12 @@ def test_prepare_build_config_reflects_blog_app_facts(blog_app: Path):
     assert isinstance(config, BuildConfig)
 
     route_names = {r.name for r in config.routes}
-    assert route_names == {"index", "posts", "tags", "redirect_demo"}
+    assert route_names == {"home", "posts", "signin"}
 
     layout_ids = {ref.id for ref in config.all_layouts}
-    assert "_root" in layout_ids
-    assert "posts" in layout_ids
+    assert layout_ids == {"_root"}
 
     assert "_layout-_root" in config.client_entries
-    assert "_layout-posts" in config.client_entries
 
     # The _global.css magic is gone (issue #77): no _global client entry,
     # ever. Layout-imported CSS rides the _layout-* entries instead.

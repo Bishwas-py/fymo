@@ -1,0 +1,44 @@
+"""Remote functions for __fymo_tmpl_name__ (generated read-only; this file is yours).
+
+This project has no app/auth/, so no identity resolver exists and every
+mutation guarded by a session check would answer 401 for everyone; only
+the reads are generated. For full CRUD: run `fymo generate auth`, then
+regenerate this resource with --force.
+
+@remote is what makes a function browser-callable (fymo.yml ships
+remote.mode strict); after `fymo build` each one becomes a typed fetch
+wrapper importable from '$remote/__fymo_tmpl_name__'. The in-memory
+rows below are stand-in data: swap them for your real data source and
+keep the typed signatures.
+"""
+from typing import Optional, TypedDict
+
+from fymo.remote import NotFound, remote
+
+
+class __fymo_tmpl_name_singular_class__(TypedDict):
+    id: int
+    title: str
+    created_by: str
+
+
+_ITEMS: list[__fymo_tmpl_name_singular_class__] = [
+    {"id": 1, "title": "First __fymo_tmpl_name_singular__", "created_by": "seed"},
+]
+
+
+def _find(id: int) -> Optional[__fymo_tmpl_name_singular_class__]:
+    return next((row for row in _ITEMS if row["id"] == id), None)
+
+
+@remote
+def list___fymo_tmpl_name__() -> list[__fymo_tmpl_name_singular_class__]:
+    return list(_ITEMS)
+
+
+@remote
+def get___fymo_tmpl_name_singular__(id: int) -> __fymo_tmpl_name_singular_class__:
+    row = _find(id)
+    if row is None:
+        raise NotFound(f"__fymo_tmpl_name_singular__ {id} not found")
+    return row

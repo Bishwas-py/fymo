@@ -1,0 +1,148 @@
+<script>
+  import { identity } from '$auth';
+
+  // login/signup are the remote functions from app/remote/auth.py,
+  // threaded through the controller context (see app/controllers/signin.py).
+  // Do not import them as values from '$remote/auth' at the top level:
+  // that alias is client-only and a value import breaks the page during
+  // server-side rendering. `import type` from '$remote/auth' is fine.
+  let { title, login, signup } = $props();
+
+  let mode = $state('login');
+  let email = $state('');
+  let password = $state('');
+  let error = $state('');
+  let pending = $state(false);
+
+  // require_auth redirects land here carrying the page the visitor wanted
+  // as ?next=. Only local paths are honored; the server re-checks this.
+  function nextPath() {
+    const next = new URLSearchParams(window.location.search).get('next');
+    return next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (pending) return;
+    pending = true;
+    error = '';
+    try {
+      if (mode === 'signup') {
+        // signup sets the session cookie itself; continue to where the
+        // visitor was headed.
+        await signup(email, password);
+        window.location.assign(nextPath());
+      } else {
+        // login answers with a server-driven redirect to `next`; the
+        // $remote client follows it, so success navigates by itself.
+        await login(email, password, nextPath());
+      }
+    } catch (err) {
+      error = err.message ?? 'Something went wrong';
+      pending = false;
+    }
+  }
+</script>
+
+<div class="container">
+  <h1>{title}</h1>
+
+  {#if $identity}
+    <!-- The $auth identity store carries the app/auth/public.py
+         projection ({ uid, name } by default), hydrated at SSR and
+         refreshed on every navigation. -->
+    <p>Signed in as <strong>{$identity.name}</strong>. <a href="/">Back home</a></p>
+  {:else}
+    <form onsubmit={submit}>
+      <label>
+        Email
+        <input type="email" bind:value={email} required />
+      </label>
+      <label>
+        Password
+        <input type="password" bind:value={password} required minlength="8" />
+      </label>
+
+      {#if error}
+        <p class="error">{error}</p>
+      {/if}
+
+      <button type="submit" disabled={pending}>
+        {mode === 'signup' ? 'Create account' : 'Sign in'}
+      </button>
+    </form>
+
+    <p>
+      {#if mode === 'login'}
+        No account yet?
+        <button class="link" onclick={() => (mode = 'signup')}>Sign up</button>
+      {:else}
+        Already have an account?
+        <button class="link" onclick={() => (mode = 'login')}>Sign in</button>
+      {/if}
+    </p>
+  {/if}
+</div>
+
+<style>
+  .container {
+    max-width: 400px;
+    margin: 4rem auto;
+    padding: 2rem;
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+
+  h1 {
+    color: var(--fg);
+    margin-bottom: 1.5rem;
+  }
+
+  label {
+    display: block;
+    margin-bottom: 1rem;
+  }
+
+  input {
+    display: block;
+    width: 100%;
+    margin-top: 0.25rem;
+    padding: 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-size: 1rem;
+    box-sizing: border-box;
+  }
+
+  button[type='submit'] {
+    background: var(--mint);
+    color: var(--mint-ink);
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+
+  button[type='submit']:hover {
+    filter: brightness(1.08);
+  }
+
+  button[type='submit']:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  button.link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--fg);
+    cursor: pointer;
+    font-size: 1rem;
+    text-decoration: underline;
+  }
+
+  .error {
+    color: #c00;
+  }
+</style>

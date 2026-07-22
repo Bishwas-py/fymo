@@ -1,24 +1,41 @@
+# Fymo project configuration
 name: blog_app
 version: 1.0.0
-description: "A blog app example for the Fymo framework — showcases remote functions"
 
+# Routing configuration. Protect any route or resource with
+# `require_auth: true`; anonymous visitors are redirected to the route
+# named signin (page at app/templates/signin/index.svelte).
 routes:
-  root: index.index
+  root: home.index
+  signin: signin.index
   resources:
     - posts
-    - tags
-    - redirect_demo
 
-# Every function in app/remote/posts.py is marked @remote (see that file).
-# With mode: strict, that's what actually makes them reachable over the
-# wire, rather than file placement alone deciding it.
+# Remote functions (app/remote/*.py) require an explicit @remote marker to
+# be browser-callable: file placement alone is not enough. Switch to
+# mode: implicit-legacy only if migrating an older project that relies on
+# implicit exposure.
 remote:
   mode: strict
 
+# Files committed to git belong in app/static/. Files created at runtime
+# (uploads, recordings, anything a job writes) live under storage:, and an
+# expose: entry is what gives a storage directory a URL. Uncomment to use:
+# storage:
+#   provider: local
+#   root: data
+#   expose:
+#     - prefix: /media/videos/
+#       dir: videos
+#       extensions: [webm]
+
+# Build configuration
 build:
   output_dir: dist
   minify: false
-
+  
+# Server configuration  
 server:
   host: 127.0.0.1
   port: 8000
+  reload: true

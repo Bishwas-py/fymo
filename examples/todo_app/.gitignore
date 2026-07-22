@@ -16,6 +16,7 @@ npm-debug.log*
 
 # Fymo
 /dist/
+/data/
 *.log
 
 # IDE

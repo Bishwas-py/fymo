@@ -31,13 +31,13 @@ def test_getcontext_redirect_produces_303_with_location(blog_app: Path, monkeypa
     from fymo import create_app
     app = create_app(blog_app)
 
-    import app.controllers.index as index_controller
+    import app.controllers.home as home_controller
     from fymo.remote import Redirect
 
     def raise_redirect():
         raise Redirect("/login")
 
-    monkeypatch.setattr(index_controller, "getContext", raise_redirect)
+    monkeypatch.setattr(home_controller, "getContext", raise_redirect)
 
     try:
         (status, headers), body = _wsgi_get_raw(app, "/")
@@ -59,13 +59,13 @@ def test_getcontext_redirect_honors_custom_status(blog_app: Path, monkeypatch):
     from fymo import create_app
     app = create_app(blog_app)
 
-    import app.controllers.index as index_controller
+    import app.controllers.home as home_controller
     from fymo.remote import Redirect
 
     def raise_redirect():
         raise Redirect("/dashboard", status=307)
 
-    monkeypatch.setattr(index_controller, "getContext", raise_redirect)
+    monkeypatch.setattr(home_controller, "getContext", raise_redirect)
 
     try:
         (status, headers), body = _wsgi_get_raw(app, "/")

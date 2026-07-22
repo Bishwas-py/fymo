@@ -7,8 +7,9 @@ from fymo.build.pipeline import BuildPipeline
 
 @pytest.mark.usefixtures("node_available")
 def test_typescript_script_tag_compiles(example_app: Path):
-    # Inject a TS snippet into todos/test.svelte
-    test_svelte = example_app / "app" / "templates" / "todos" / "test.svelte"
+    # Inject a TS snippet into the generated co-located Item.svelte
+    # (imported by todos/index.svelte, so it is really compiled).
+    test_svelte = example_app / "app" / "templates" / "todos" / "Item.svelte"
     original = test_svelte.read_text()
     patched = original.replace(
         "<script>",

@@ -1,0 +1,43 @@
+<script>
+  let { name, route } = $props();
+</script>
+
+<main>
+  <p class="eyebrow">Route</p>
+  <h1>__fymo_tmpl_name_title__</h1>
+  <p class="sub">
+    This URL answers because fymo.yml maps <code>{route}</code> to this template
+    and its controller. It renders whatever <code>getContext()</code> returns.
+  </p>
+
+  <div class="files">
+    <span class="chip">app/templates/__fymo_tmpl_name__/index.svelte</span>
+    <span class="chip">app/controllers/__fymo_tmpl_name__.py</span>
+  </div>
+</main>
+
+<style>
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem;
+  }
+
+  .sub {
+    color: var(--muted);
+    margin: 0;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    color: var(--fg);
+  }
+
+  .files {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 1.5rem;
+  }
+</style>

@@ -95,9 +95,6 @@ def test_route_store_propagates_to_a_persistently_mounted_component(blog_app: Pa
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
-
     from fymo import create_app
     app = create_app(blog_app, dev=False)
 
@@ -134,13 +131,13 @@ def test_route_store_propagates_to_a_persistently_mounted_component(blog_app: Pa
             f"http://127.0.0.1:{port}/",
             dist_dir,
             """
-            window.__testApplyRouteNav('/posts/welcome-to-fymo', { id: 'welcome-to-fymo' });
+            window.__testApplyRouteNav('/posts/1', { id: '1' });
             await new Promise((r) => setTimeout(r, 100));
             const text = window.document.getElementById('route-probe').textContent;
-            if (!text.includes('/posts/welcome-to-fymo')) {
+            if (!text.includes('/posts/1')) {
               throw new Error('component did not react to the route mutation, saw: ' + text);
             }
-            if (!text.includes('welcome-to-fymo')) {
+            if (!text.includes('"id":"1"')) {
               throw new Error('params did not reach the component, saw: ' + text);
             }
             """,

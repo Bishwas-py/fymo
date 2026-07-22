@@ -1,14 +1,34 @@
 # Fymo project configuration
 name: todo_app
 version: 1.0.0
-description: "A todo app example built with Fymo - Python SSR framework for Svelte 5"
 
-# Routing configuration
+# Routing configuration. Protect any route or resource with
+# `require_auth: true`; anonymous visitors are redirected to the route
+# named signin (page at app/templates/signin/index.svelte).
 routes:
-  root: todos.index
+  root: home.index
+  signin: signin.index
   resources:
     - todos
-    - home
+    - posts
+
+# Remote functions (app/remote/*.py) require an explicit @remote marker to
+# be browser-callable: file placement alone is not enough. Switch to
+# mode: implicit-legacy only if migrating an older project that relies on
+# implicit exposure.
+remote:
+  mode: strict
+
+# Files committed to git belong in app/static/. Files created at runtime
+# (uploads, recordings, anything a job writes) live under storage:, and an
+# expose: entry is what gives a storage directory a URL. Uncomment to use:
+# storage:
+#   provider: local
+#   root: data
+#   expose:
+#     - prefix: /media/videos/
+#       dir: videos
+#       extensions: [webm]
 
 # Build configuration
 build:

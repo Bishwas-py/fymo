@@ -166,6 +166,95 @@ def test_refusal_leaves_no_partial_output(tmp_path, monkeypatch):
     assert not (project / "schema").exists()
 
 
+# --------------- conflict UX (issue #89 phase 2) ---------------
+
+
+def test_rendered_output_is_byte_identical_to_the_templates(tmp_path, monkeypatch):
+    """The auth templates carry no tokens, so moving the generator onto the
+    shared renderer/writer machinery must not change a single byte."""
+    from fymo.cli.commands.generate_auth import _TEMPLATES_DIR, _VARIANT_FILES
+
+    project = _scaffold_project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_auth("password")
+    for tmpl_rel, out_rel in _VARIANT_FILES["password"].items():
+        assert (project / out_rel).read_text() == (_TEMPLATES_DIR / tmpl_rel).read_text(), out_rel
+
+
+def test_dry_run_lists_every_path_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    project = _scaffold_project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_auth("password", dry_run=True)
+    out = capsys.readouterr().out
+    assert "would create" in out
+    for rel in PASSWORD_FILES:
+        assert rel in out
+    assert not (project / "app" / "auth").exists()
+    assert not (project / "schema").exists()
+
+
+def test_dry_run_with_existing_targets_still_exits_zero(tmp_path, monkeypatch, capsys):
+    project = _scaffold_project(tmp_path)
+    (project / "app" / "auth").mkdir()
+    (project / "app" / "auth" / "resolver.py").write_text("mine\n")
+    monkeypatch.chdir(project)
+    generate_auth("password", dry_run=True)
+    out = capsys.readouterr().out
+    assert "would overwrite" in out
+    assert (project / "app" / "auth" / "resolver.py").read_text() == "mine\n"
+
+
+def test_diff_shows_unified_diff_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    project = _scaffold_project(tmp_path)
+    (project / "app" / "auth").mkdir()
+    (project / "app" / "auth" / "resolver.py").write_text("mine\n")
+    monkeypatch.chdir(project)
+    generate_auth("password", diff=True)
+    out = capsys.readouterr().out
+    assert "--- a/app/auth/resolver.py" in out
+    assert "+++ b/app/auth/resolver.py" in out
+    assert "-mine" in out
+    assert (project / "app" / "auth" / "resolver.py").read_text() == "mine\n"
+    assert not (project / "schema").exists()
+
+
+def test_force_overwrites_existing_files(tmp_path, monkeypatch):
+    from fymo.cli.commands.generate_auth import _TEMPLATES_DIR
+
+    project = _scaffold_project(tmp_path)
+    (project / "app" / "auth").mkdir()
+    (project / "app" / "auth" / "resolver.py").write_text("mine\n")
+    monkeypatch.chdir(project)
+    generate_auth("password", force=True)
+    expected = (_TEMPLATES_DIR / "password/resolver.py.tmpl").read_text()
+    assert (project / "app" / "auth" / "resolver.py").read_text() == expected
+
+
+def test_cli_generate_auth_dry_run_flag(tmp_path):
+    from click.testing import CliRunner
+    from fymo.cli.main import cli
+
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        _scaffold_project(Path.cwd())
+        result = runner.invoke(cli, ["generate", "auth", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "would create" in result.output
+        assert not (Path.cwd() / "app" / "auth").exists()
+
+
+def test_cli_conflict_flags_are_mutually_exclusive(tmp_path):
+    from click.testing import CliRunner
+    from fymo.cli.main import cli
+
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        _scaffold_project(Path.cwd())
+        result = runner.invoke(cli, ["generate", "auth", "--dry-run", "--diff"])
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output
+
+
 # --------------- generated code quality ---------------
 
 

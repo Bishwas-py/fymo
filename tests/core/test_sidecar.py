@@ -5,6 +5,11 @@ import pytest
 from fymo.build.pipeline import BuildPipeline
 from fymo.core.sidecar import Sidecar, SidecarError
 
+# The scaffolded example ships a root layout, so its SSR entries are
+# composed trees expecting the same props shape the renderer sends
+# (fymo/core/template_renderer.py's sidecar_props).
+_PROPS = {"leafProps": {}, "layoutProps": {"root": {}, "resource": {}}}
+
 
 @pytest.mark.usefixtures("node_available")
 def test_render_returns_body_and_head(example_app: Path):
@@ -12,11 +17,11 @@ def test_render_returns_body_and_head(example_app: Path):
     sidecar = Sidecar(dist_dir=example_app / "dist")
     sidecar.start()
     try:
-        result = sidecar.render(route="todos", props={"todos": [], "user": {"name": "Test"}, "stats": {}})
+        result = sidecar.render(route="todos", props=_PROPS)
         assert "body" in result
         assert "head" in result
         assert isinstance(result["body"], str)
-        assert "todo-app" in result["body"]
+        assert "<h1>Todos</h1>" in result["body"]
     finally:
         sidecar.stop()
 
@@ -28,7 +33,7 @@ def test_render_propagates_errors(example_app: Path):
     sidecar.start()
     try:
         with pytest.raises(SidecarError):
-            sidecar.render(route="nonexistent_route", props={})
+            sidecar.render(route="nonexistent_route", props=_PROPS)
     finally:
         sidecar.stop()
 
@@ -46,13 +51,25 @@ def test_ping_warms_module_cache(example_app: Path):
 
 @pytest.mark.usefixtures("node_available")
 def test_render_passes_doc_to_getDoc(example_app: Path):
+    """The sidecar's doc-passing seam: a template calling getDoc() sees the
+    doc dict handed to render(). The generated example templates no longer
+    call getDoc(), so the probe template is written into the copied app."""
+    probe_dir = example_app / "app" / "templates" / "docprobe"
+    probe_dir.mkdir(parents=True)
+    (probe_dir / "index.svelte").write_text(
+        "<script>\n"
+        "  const docData = getDoc();\n"
+        "</script>\n"
+        "\n"
+        "<p>Document Title: {docData.title || 'Default Title'}</p>\n"
+    )
     BuildPipeline(project_root=example_app).build(dev=False)
     sidecar = Sidecar(dist_dir=example_app / "dist")
     sidecar.start()
     try:
         result = sidecar.render(
-            route="todos",
-            props={"todos": [], "user": {}, "stats": {}},
+            route="docprobe",
+            props=_PROPS,
             doc={"title": "Hello From Doc"},
         )
         assert "Document Title: Hello From Doc" in result["body"]
@@ -68,8 +85,8 @@ def test_auto_restarts_after_node_dies(example_app: Path):
     sidecar.start()
     try:
         # First render establishes baseline.
-        first = sidecar.render(route="todos", props={"todos": [], "user": {}, "stats": {}})
-        assert "todo-app" in first["body"]
+        first = sidecar.render(route="todos", props=_PROPS)
+        assert "<h1>Todos</h1>" in first["body"]
         old_pid = sidecar._proc.pid
         assert sidecar._restart_count == 0
 
@@ -78,8 +95,8 @@ def test_auto_restarts_after_node_dies(example_app: Path):
         sidecar._proc.wait(timeout=2)
 
         # Next render must transparently restart and succeed.
-        second = sidecar.render(route="todos", props={"todos": [], "user": {}, "stats": {}})
-        assert "todo-app" in second["body"]
+        second = sidecar.render(route="todos", props=_PROPS)
+        assert "<h1>Todos</h1>" in second["body"]
         assert sidecar._proc is not None
         assert sidecar._proc.pid != old_pid
         assert sidecar._restart_count == 1
@@ -95,8 +112,8 @@ def test_send_after_explicit_stop_restarts(example_app: Path):
     sidecar.start()
     sidecar.stop()
     try:
-        result = sidecar.render(route="todos", props={"todos": [], "user": {}, "stats": {}})
-        assert "todo-app" in result["body"]
+        result = sidecar.render(route="todos", props=_PROPS)
+        assert "<h1>Todos</h1>" in result["body"]
     finally:
         sidecar.stop()
 
@@ -116,7 +133,7 @@ def test_timeout_kills_hung_node_and_raises(tmp_path: Path):
     sidecar.start()
     try:
         with pytest.raises(SidecarError, match="IPC failed"):
-            sidecar.render(route="anything", props={})
+            sidecar.render(route="anything", props=_PROPS)
         # After timeout: the original child was killed, retry spawned a fresh
         # one that also timed out → final SidecarError. Two restarts total.
         assert sidecar._restart_count >= 1
@@ -146,7 +163,7 @@ def _render_in_thread(sidecar: Sidecar, join_seconds: float):
     def work():
         try:
             outcome["result"] = sidecar.render(
-                route="todos", props={"todos": [], "user": {}, "stats": {}}
+                route="todos", props=_PROPS
             )
         except Exception as e:
             outcome["error"] = e
@@ -169,11 +186,11 @@ def test_console_log_during_render_does_not_hang(example_app: Path):
         t, outcome = _render_in_thread(sidecar, join_seconds=10.0)
         assert not t.is_alive(), "render hung: console.log corrupted the IPC stream"
         assert "error" not in outcome, outcome.get("error")
-        assert "todo-app" in outcome["result"]["body"]
+        assert "<h1>Todos</h1>" in outcome["result"]["body"]
 
         # The same process must serve the next request: no corruption carryover.
-        again = sidecar.render(route="todos", props={"todos": [], "user": {}, "stats": {}})
-        assert "todo-app" in again["body"]
+        again = sidecar.render(route="todos", props=_PROPS)
+        assert "<h1>Todos</h1>" in again["body"]
         assert sidecar._restart_count == 0
     finally:
         sidecar.stop()
@@ -189,7 +206,7 @@ def test_other_console_methods_do_not_hang(example_app: Path, method: str):
     try:
         t, outcome = _render_in_thread(sidecar, join_seconds=10.0)
         assert not t.is_alive(), f"render hung on console.{method}"
-        assert "todo-app" in outcome["result"]["body"]
+        assert "<h1>Todos</h1>" in outcome["result"]["body"]
     finally:
         sidecar.stop()
 
@@ -204,7 +221,7 @@ def test_console_output_surfaces_on_stderr_prefixed(example_app: Path, capsys):
     sidecar = Sidecar(dist_dir=example_app / "dist", timeout=5.0)
     sidecar.start()
     try:
-        sidecar.render(route="todos", props={"todos": [], "user": {}, "stats": {}})
+        sidecar.render(route="todos", props=_PROPS)
         # The pump thread forwards asynchronously; poll briefly.
         deadline = time.monotonic() + 3.0
         err = ""
@@ -231,7 +248,7 @@ def test_high_volume_console_logging_does_not_deadlock(example_app: Path):
     try:
         t, outcome = _render_in_thread(sidecar, join_seconds=15.0)
         assert not t.is_alive(), "render hung: stderr pipe buffer filled without a reader"
-        assert "todo-app" in outcome["result"]["body"]
+        assert "<h1>Todos</h1>" in outcome["result"]["body"]
     finally:
         sidecar.stop()
 
@@ -256,7 +273,7 @@ def test_garbage_on_stdout_fails_bounded_not_forever(tmp_path: Path):
     try:
         start = time.monotonic()
         with pytest.raises(SidecarError, match="IPC failed"):
-            sidecar.render(route="anything", props={})
+            sidecar.render(route="anything", props=_PROPS)
         elapsed = time.monotonic() - start
         # One attempt + one retry, each bounded by the 0.5s deadline, plus
         # process spawn overhead. Generous bound; the point is "not forever".
@@ -290,7 +307,7 @@ def test_slow_but_valid_frame_within_deadline_succeeds(tmp_path: Path):
     sidecar = Sidecar(dist_dir=slow_dir, timeout=5.0)
     sidecar.start()
     try:
-        result = sidecar.render(route="anything", props={})
+        result = sidecar.render(route="anything", props=_PROPS)
         assert result["body"] == "slow"
     finally:
         sidecar.stop()

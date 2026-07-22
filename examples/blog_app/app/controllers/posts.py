@@ -1,17 +1,15 @@
-"""Post detail controller. Receives slug as `id` from the resource route."""
-from app.remote.posts import get_post, get_comments, get_reactions, create_comment, toggle_reaction
+"""Controller for the posts resource.
+
+One controller serves the whole resource: /posts (index)
+and /posts/<id> (show) both land here through the resources
+entry in fymo.yml, and `id` arrives as the route param, empty on the
+index. The template branches on item_id: the list, or one row's detail.
+"""
 
 
-def getContext(id: str = ""):
-    post = get_post(id)
+def getContext(id: str = ''):
+    # Returned keys arrive in the template as props, server-rendered.
     return {
-        "post": post,
-        "initial_comments": get_comments(id),
-        "initial_reactions": get_reactions(id),
-        "create_comment": create_comment,    # remote callable threaded as prop
-        "toggle_reaction": toggle_reaction,  # remote callable threaded as prop
+        'name': 'posts',
+        'item_id': id,
     }
-
-
-def getDoc():
-    return {"title": "Post"}

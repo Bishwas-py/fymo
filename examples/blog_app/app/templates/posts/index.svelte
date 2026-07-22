@@ -1,0 +1,149 @@
+<script>
+  import { identity } from '$auth';
+  import { list_posts, create_post } from '$remote/posts';
+  import Item from './Item.svelte';
+  import Show from './show.svelte';
+
+  // The build renders one entry per template directory, so this file
+  // serves both resource URLs: /posts renders the list,
+  // /posts/<id> hands the route's id (threaded through the
+  // controller as item_id) to the co-located show.svelte.
+  let { item_id } = $props();
+
+  let items = $state([]);
+  let loaded = $state(false);
+  let title = $state('');
+  let error = $state('');
+  let pending = $state(false);
+
+  $effect(() => {
+    if (item_id || loaded) return;
+    list_posts().then((rows) => {
+      items = rows;
+      loaded = true;
+    });
+  });
+
+  async function add(event) {
+    event.preventDefault();
+    if (pending || !title.trim()) return;
+    pending = true;
+    error = '';
+    try {
+      const created = await create_post(title.trim());
+      items = [...items, created];
+      title = '';
+    } catch (err) {
+      error = err && err.message ? err.message : String(err);
+    } finally {
+      pending = false;
+    }
+  }
+</script>
+
+{#if item_id}
+  <Show {item_id} />
+{:else}
+<main>
+  <p class="eyebrow">Resource</p>
+  <h1>Posts</h1>
+  <p class="sub">
+    Rows come from <code>list_posts()</code> in
+    app/remote/posts.py, called through the typed $remote client.
+  </p>
+
+  {#if !loaded}
+    <p class="state">Loading from the server…</p>
+  {:else if items.length === 0}
+    <p class="state">Nothing here yet. Create the first one below.</p>
+  {:else}
+    <ul class="items">
+      {#each items as item (item.id)}
+        <Item {item} />
+      {/each}
+    </ul>
+  {/if}
+
+  <form onsubmit={add} class="create card">
+    {#if $identity}
+      <input
+        bind:value={title}
+        placeholder="New posts title"
+        aria-label="Title"
+      />
+      <button type="submit" disabled={pending || !title.trim()}>Create</button>
+    {:else}
+      <p class="state">
+        Creating requires a session: <a href="/signin?next=/posts">sign in</a>.
+        The check lives on create_post() as @require_auth.
+      </p>
+    {/if}
+  </form>
+
+  {#if error}
+    <p class="error">{error}</p>
+  {/if}
+
+  <div class="files">
+    <span class="chip">app/remote/posts.py</span>
+    <span class="chip">app/templates/posts/Item.svelte</span>
+    <span class="chip">tests/test_posts_remote.py</span>
+  </div>
+</main>
+{/if}
+
+<style>
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem;
+  }
+
+  .sub {
+    color: var(--muted);
+    margin: 0 0 2rem;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    color: var(--fg);
+  }
+
+  .state {
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .items {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .create {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-top: 0.5rem;
+  }
+
+  .create input {
+    flex: 1;
+  }
+
+  .error {
+    color: var(--coral);
+    font-size: 0.875rem;
+  }
+
+  .files {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+</style>
