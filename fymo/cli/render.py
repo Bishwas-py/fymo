@@ -17,9 +17,26 @@ changing. A marker whose key is not in the provided tokens raises
 UnknownTokenError instead of passing through silently.
 """
 import re
+from pathlib import Path
 from typing import Mapping
 
 _TOKEN_RE = re.compile(r"__fymo_tmpl_[a-z0-9_]+?__")
+
+PACKAGED_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+
+
+def load_template(project_root: Path, rel: str) -> str:
+    """Template text for `rel`, honoring project overrides.
+
+    Lookup order: <project>/.fymo/templates/<rel> wins over the template
+    packaged inside fymo (fymo/cli/templates/<rel>). `fymo generate
+    templates` publishes the packaged tree into .fymo/templates/ for
+    editing; tokens and the conflict writer behave identically either way.
+    """
+    override = Path(project_root) / ".fymo" / "templates" / rel
+    if override.is_file():
+        return override.read_text()
+    return (PACKAGED_TEMPLATES_DIR / rel).read_text()
 
 
 class UnknownTokenError(ValueError):

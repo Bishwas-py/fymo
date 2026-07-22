@@ -1,11 +1,18 @@
-"""`fymo generate page/remote/resource`: the daily-loop generators.
+"""`fymo generate`: the daily-loop generators.
 
 Same ownership philosophy as `fymo generate auth`: templates are inert
-text shipped inside the fymo package (fymo/cli/templates/page/ and
-remote/), rendered once with the name's token variants, and the output
-is plain app code fymo never imports at runtime. The only runtime
-coupling is the existing auto-discovery (controllers by route,
-app/remote/*.py by remote discovery, tests by pytest).
+text shipped inside the fymo package (fymo/cli/templates/), rendered
+once with the name's token variants, and the output is plain app code
+fymo never imports at runtime. The only runtime coupling is the
+existing auto-discovery (controllers by route, app/remote/*.py by
+remote discovery, app/broadcasts/*.py by broadcast discovery, tests by
+pytest).
+
+Templates are overridable per project: a file at
+<project>/.fymo/templates/<same relative path> wins over the packaged
+one, with identical tokens and conflict behavior (see
+fymo.cli.render.load_template). `fymo generate templates` publishes the
+packaged tree there for editing.
 
 Route wiring is the one in-place edit. In scaffolded projects the
 router reads fymo.yml (it wins over config/routes.py in
@@ -24,11 +31,9 @@ from typing import List, Optional, Tuple
 
 import yaml
 
-from fymo.cli.render import name_variants, render
+from fymo.cli.render import PACKAGED_TEMPLATES_DIR, load_template, name_variants, render
 from fymo.cli.writer import PlannedFile, execute_plan
 from fymo.utils.colors import Color
-
-_TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -80,8 +85,8 @@ def _validate_name(name: str, command: str) -> None:
         )
 
 
-def _render_template(rel: str, tokens: dict) -> str:
-    return render((_TEMPLATES_DIR / rel).read_text(), tokens)
+def _render_template(root: Path, rel: str, tokens: dict) -> str:
+    return render(load_template(root, rel), tokens)
 
 
 # --------------- route injection ---------------
@@ -219,7 +224,7 @@ def _plan_route_injection(
 # --------------- plans ---------------
 
 
-def _page_plan(name: str, *, resource: bool = False, readonly: bool = False) -> List[PlannedFile]:
+def _page_plan(root: Path, name: str, *, resource: bool = False, readonly: bool = False) -> List[PlannedFile]:
     """resource=True swaps in the templates wired to the generated remote:
     a live list + require_auth create through $remote, a co-located
     show.svelte detail view reached via /name/<id> (rendered through
@@ -239,21 +244,21 @@ def _page_plan(name: str, *, resource: bool = False, readonly: bool = False) -> 
     plan = [
         PlannedFile(
             f"app/controllers/{name}.py",
-            _render_template(controller, tokens),
+            _render_template(root, controller, tokens),
         ),
         PlannedFile(
             f"app/templates/{name}/index.svelte",
-            _render_template(index, tokens),
+            _render_template(root, index, tokens),
         ),
     ]
     if resource:
         plan.append(PlannedFile(
             f"app/templates/{name}/show.svelte",
-            _render_template(show, tokens),
+            _render_template(root, show, tokens),
         ))
         plan.append(PlannedFile(
             f"app/templates/{name}/Item.svelte",
-            _render_template("resource_page/Item.svelte.tmpl", tokens),
+            _render_template(root, "resource_page/Item.svelte.tmpl", tokens),
         ))
     return plan
 
@@ -268,16 +273,16 @@ def _remote_plan(root: Path, name: str, *, readonly: bool = False) -> List[Plann
         plan.append(PlannedFile("app/remote/__init__.py", _APP_REMOTE_INIT))
     plan.append(PlannedFile(
         f"app/remote/{name}.py",
-        _render_template(remote_tmpl, tokens),
+        _render_template(root, remote_tmpl, tokens),
     ))
     if not (root / "tests" / "conftest.py").exists():
         plan.append(PlannedFile(
             "tests/conftest.py",
-            _render_template("remote/conftest.py.tmpl", tokens),
+            _render_template(root, "remote/conftest.py.tmpl", tokens),
         ))
     plan.append(PlannedFile(
         f"tests/test_{name}_remote.py",
-        _render_template(test_tmpl, tokens),
+        _render_template(root, test_tmpl, tokens),
     ))
     return plan
 
@@ -305,7 +310,7 @@ def _run(
 
     plan: List[PlannedFile] = []
     if page:
-        plan.extend(_page_plan(name, resource=page and remote, readonly=readonly))
+        plan.extend(_page_plan(root, name, resource=page and remote, readonly=readonly))
     if remote:
         plan.extend(_remote_plan(root, name, readonly=readonly))
 
@@ -379,7 +384,7 @@ def generate_component(
         )
     plan = [PlannedFile(
         f"app/components/{name}.svelte",
-        _render_template("component/Component.svelte.tmpl", {"component_name": name}),
+        _render_template(root, "component/Component.svelte.tmpl", {"component_name": name}),
     )]
     written = execute_plan(root, plan, command=command,
                            force=force, dry_run=dry_run, diff=diff)
@@ -405,7 +410,7 @@ def generate_layout(
         )
     plan = [PlannedFile(
         f"app/templates/{section}/_layout.svelte",
-        _render_template("layout/_layout.svelte.tmpl", name_variants(section)),
+        _render_template(root, "layout/_layout.svelte.tmpl", name_variants(section)),
     )]
     written = execute_plan(root, plan, command=command,
                            force=force, dry_run=dry_run, diff=diff)
@@ -429,16 +434,16 @@ def generate_broadcast(
         plan.append(PlannedFile("app/broadcasts/__init__.py", _APP_BROADCASTS_INIT))
     plan.append(PlannedFile(
         f"app/broadcasts/{name}.py",
-        _render_template("broadcast/broadcast.py.tmpl", tokens),
+        _render_template(root, "broadcast/broadcast.py.tmpl", tokens),
     ))
     if not (root / "tests" / "conftest.py").exists():
         plan.append(PlannedFile(
             "tests/conftest.py",
-            _render_template("remote/conftest.py.tmpl", tokens),
+            _render_template(root, "remote/conftest.py.tmpl", tokens),
         ))
     plan.append(PlannedFile(
         f"tests/test_{name}_broadcast.py",
-        _render_template("broadcast/test_broadcast.py.tmpl", tokens),
+        _render_template(root, "broadcast/test_broadcast.py.tmpl", tokens),
     ))
     written = execute_plan(root, plan, command=command,
                            force=force, dry_run=dry_run, diff=diff)
@@ -449,3 +454,31 @@ def generate_broadcast(
         print(f"  {rel}")
     print(f"Publish with fymo.broadcast.publish('{name}_activity', id=..., data=...);")
     print(f"subscribe in the browser via $broadcast/{name} after `fymo build`.")
+
+
+def publish_templates(
+    *, force: bool = False, dry_run: bool = False, diff: bool = False
+) -> None:
+    """Copy the packaged template tree into .fymo/templates/ for editing.
+
+    Published files win over the packaged ones on every later generate
+    run (see fymo.cli.render.load_template); deleting a published file
+    falls back to the packaged template."""
+    command = "fymo generate templates"
+    root = _project_root(command)
+    plan = [
+        PlannedFile(
+            f".fymo/templates/{tmpl.relative_to(PACKAGED_TEMPLATES_DIR).as_posix()}",
+            tmpl.read_text(),
+        )
+        for tmpl in sorted(PACKAGED_TEMPLATES_DIR.rglob("*.tmpl"))
+    ]
+    written = execute_plan(root, plan, command=command,
+                           force=force, dry_run=dry_run, diff=diff)
+    if dry_run or diff:
+        return
+    Color.print_success("Published:")
+    for rel in written:
+        print(f"  {rel}")
+    print("Edit these; generators prefer them over the packaged templates.")
+    print("Delete a file to fall back to the packaged version.")

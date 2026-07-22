@@ -44,9 +44,9 @@ def _candidates(root: Path, name: str, *, page: bool, remote: bool) -> Dict[str,
 
     if page and remote:
         for readonly in (False, True):
-            add(gen._page_plan(name, resource=True, readonly=readonly))
+            add(gen._page_plan(root, name, resource=True, readonly=readonly))
     elif page:
-        add(gen._page_plan(name, resource=False))
+        add(gen._page_plan(root, name, resource=False))
     if remote:
         for readonly in (False, True):
             add(gen._remote_plan(root, name, readonly=readonly))

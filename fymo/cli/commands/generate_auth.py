@@ -11,7 +11,7 @@ remote discovery finds them with zero manual wiring).
 from pathlib import Path
 from typing import List, Optional
 
-from fymo.cli.render import render
+from fymo.cli.render import load_template, render
 from fymo.cli.writer import PlannedFile, execute_plan
 from fymo.utils.colors import Color
 
@@ -57,7 +57,9 @@ def _build_plan(root: Path, variant: str) -> List[PlannedFile]:
     for tmpl_rel, out_rel in files.items():
         # The auth templates carry no tokens; render({}) is a byte-identical
         # copy and would fail loudly if a marker ever slipped in unrendered.
-        plan.append(PlannedFile(out_rel, render((_TEMPLATES_DIR / tmpl_rel).read_text(), {})))
+        # load_template honors a project override at
+        # .fymo/templates/auth/<tmpl_rel>, same as every other generator.
+        plan.append(PlannedFile(out_rel, render(load_template(root, f"auth/{tmpl_rel}"), {})))
     return plan
 
 

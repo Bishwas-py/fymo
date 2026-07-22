@@ -158,6 +158,15 @@ def generate_layout_cmd(section, force, dry_run, diff):
     generate_layout(section, force=force, dry_run=dry_run, diff=diff)
 
 
+@generate.command(name="templates")
+@_conflict_options
+def generate_templates_cmd(force, dry_run, diff):
+    """Publish the packaged templates into .fymo/templates/ for editing."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import publish_templates
+    publish_templates(force=force, dry_run=dry_run, diff=diff)
+
+
 @generate.command(name="broadcast")
 @click.argument('name')
 @_conflict_options
