@@ -138,6 +138,36 @@ def generate_resource_cmd(name, force, dry_run, diff):
     generate_resource(name, force=force, dry_run=dry_run, diff=diff)
 
 
+@generate.command(name="component")
+@click.argument('name')
+@_conflict_options
+def generate_component_cmd(name, force, dry_run, diff):
+    """Generate a Svelte component in app/components/ (PascalCase name)."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_component
+    generate_component(name, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="layout")
+@click.argument('section')
+@_conflict_options
+def generate_layout_cmd(section, force, dry_run, diff):
+    """Generate a section layout for an existing app/templates/<section>/."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_layout
+    generate_layout(section, force=force, dry_run=dry_run, diff=diff)
+
+
+@generate.command(name="broadcast")
+@click.argument('name')
+@_conflict_options
+def generate_broadcast_cmd(name, force, dry_run, diff):
+    """Generate a broadcast channel module plus its discovery test."""
+    _check_conflict_flags(force, dry_run, diff)
+    from fymo.cli.commands.generators import generate_broadcast
+    generate_broadcast(name, force=force, dry_run=dry_run, diff=diff)
+
+
 @cli.group()
 def destroy():
     """Remove generated code, the safe inverse of `fymo generate`."""

@@ -1,0 +1,10 @@
+<script>
+  // Section layout for app/templates/__fymo_tmpl_name__/ (generated;
+  // this file is yours). It wraps every page in this directory; the
+  // root layout (app/templates/_layout.svelte) already wraps this one
+  // and owns the global stylesheet, so import here only what this
+  // section adds on top.
+  let { children } = $props();
+</script>
+
+{@render children()}

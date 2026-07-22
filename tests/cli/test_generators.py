@@ -15,7 +15,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from fymo.cli.commands.generators import generate_page, generate_remote, generate_resource
+from fymo.cli.commands.generators import (
+    generate_broadcast,
+    generate_component,
+    generate_layout,
+    generate_page,
+    generate_remote,
+    generate_resource,
+)
 from fymo.core.router import Router
 
 
@@ -453,6 +460,79 @@ def test_resource_show_and_item_render_through_index(tmp_path, monkeypatch):
     assert "item_id" in controller
     item = (project / "app" / "templates" / "articles" / "Item.svelte").read_text()
     assert 'href="/articles/{item.id}"' in item
+
+
+# --------------- generate component / layout / broadcast ---------------
+
+
+def test_component_generates_pascal_case_svelte(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_component("StatCard")
+    content = (project / "app" / "components" / "StatCard.svelte").read_text()
+    assert "$props()" in content
+    assert "children" in content
+    assert "<style>" in content
+    assert "__fymo_tmpl_" not in content
+
+
+@pytest.mark.parametrize("bad", ["statCard", "stat_card", "stat-card", "posts", "1Card", ""])
+def test_component_rejects_non_pascal_case_names(bad, tmp_path, monkeypatch, capsys):
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    with pytest.raises(SystemExit):
+        generate_component(bad)
+    assert not (project / "app" / "components").exists()
+    assert "PascalCase" in "".join(capsys.readouterr())
+
+
+def test_layout_requires_an_existing_section(tmp_path, monkeypatch, capsys):
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    with pytest.raises(SystemExit):
+        generate_layout("about")
+    combined = "".join(capsys.readouterr())
+    assert "generate page" in combined
+
+
+def test_layout_generates_children_render_and_refuses_second_run(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_page("about")
+    generate_layout("about")
+    layout = (project / "app" / "templates" / "about" / "_layout.svelte").read_text()
+    assert "let { children } = $props();" in layout
+    assert "{@render children()}" in layout
+    with pytest.raises(SystemExit):
+        generate_layout("about")
+
+
+def test_broadcast_generates_discoverable_channel_and_test(tmp_path, monkeypatch):
+    from fymo.broadcast.discovery import discover_broadcast_channels
+
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    generate_broadcast("posts")
+
+    module = (project / "app" / "broadcasts" / "posts.py").read_text()
+    assert "def posts_activity(" in module
+    assert "$broadcast/posts" in module
+    assert "subscribe.posts_activity" in module
+    compile(module, "posts.py", "exec")
+    assert (project / "app" / "broadcasts" / "__init__.py").is_file()
+
+    test_file = (project / "tests" / "test_posts_broadcast.py").read_text()
+    assert "discover_broadcast_channels" in test_file
+    compile(test_file, "test_posts_broadcast.py", "exec")
+
+    _cleanup_app_modules()
+    try:
+        channels = discover_broadcast_channels(project)
+        assert "posts_activity" in channels
+        module_name, fn = channels["posts_activity"]
+        assert module_name == "posts"
+    finally:
+        _cleanup_app_modules()
 
 
 # --------------- no-auth projects get the read-only variant ---------------

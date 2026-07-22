@@ -39,6 +39,11 @@ _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _RESERVED_NAMES = {"auth", "signin", "root", "resources"}
 
 _APP_REMOTE_INIT = '"""Remote functions exposed to the browser."""\n'
+_APP_BROADCASTS_INIT = '"""Broadcast channels: every top-level function is a channel."""\n'
+
+# Components are imported as classes ($components/StatCard.svelte), so
+# their names follow Svelte's component convention, not the route rule.
+_COMPONENT_NAME_RE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 
 _ROUTES_LINE_RE = re.compile(r"^routes:[ \t]*$", re.MULTILINE)
 _RESOURCES_LINE_RE = re.compile(r"^  resources:[ \t]*$", re.MULTILINE)
@@ -360,3 +365,87 @@ def generate_resource(
 ) -> None:
     _run("fymo generate resource", name, page=True, remote=True,
          force=force, dry_run=dry_run, diff=diff)
+
+
+def generate_component(
+    name: str, *, force: bool = False, dry_run: bool = False, diff: bool = False
+) -> None:
+    command = "fymo generate component"
+    root = _project_root(command)
+    if not _COMPONENT_NAME_RE.match(name):
+        _refuse(
+            f"Invalid component name '{name}' for `{command}`: use PascalCase "
+            "(letters and digits, starts with a capital), e.g. StatCard."
+        )
+    plan = [PlannedFile(
+        f"app/components/{name}.svelte",
+        _render_template("component/Component.svelte.tmpl", {"component_name": name}),
+    )]
+    written = execute_plan(root, plan, command=command,
+                           force=force, dry_run=dry_run, diff=diff)
+    if dry_run or diff:
+        return
+    Color.print_success("Generated:")
+    for rel in written:
+        print(f"  {rel}")
+    print(f"Import it with: import {name} from '$components/{name}.svelte';")
+
+
+def generate_layout(
+    section: str, *, force: bool = False, dry_run: bool = False, diff: bool = False
+) -> None:
+    command = "fymo generate layout"
+    root = _project_root(command)
+    _validate_name(section, command)
+    if not (root / "app" / "templates" / section).is_dir():
+        _refuse(
+            f"app/templates/{section}/ does not exist yet, and a layout "
+            "without pages is dead code. Generate a page first: "
+            f"`fymo generate page {section}`."
+        )
+    plan = [PlannedFile(
+        f"app/templates/{section}/_layout.svelte",
+        _render_template("layout/_layout.svelte.tmpl", name_variants(section)),
+    )]
+    written = execute_plan(root, plan, command=command,
+                           force=force, dry_run=dry_run, diff=diff)
+    if dry_run or diff:
+        return
+    Color.print_success("Generated:")
+    for rel in written:
+        print(f"  {rel}")
+    print(f"Every page under app/templates/{section}/ now renders inside it.")
+
+
+def generate_broadcast(
+    name: str, *, force: bool = False, dry_run: bool = False, diff: bool = False
+) -> None:
+    command = "fymo generate broadcast"
+    root = _project_root(command)
+    _validate_name(name, command)
+    tokens = name_variants(name)
+    plan: List[PlannedFile] = []
+    if not (root / "app" / "broadcasts" / "__init__.py").exists():
+        plan.append(PlannedFile("app/broadcasts/__init__.py", _APP_BROADCASTS_INIT))
+    plan.append(PlannedFile(
+        f"app/broadcasts/{name}.py",
+        _render_template("broadcast/broadcast.py.tmpl", tokens),
+    ))
+    if not (root / "tests" / "conftest.py").exists():
+        plan.append(PlannedFile(
+            "tests/conftest.py",
+            _render_template("remote/conftest.py.tmpl", tokens),
+        ))
+    plan.append(PlannedFile(
+        f"tests/test_{name}_broadcast.py",
+        _render_template("broadcast/test_broadcast.py.tmpl", tokens),
+    ))
+    written = execute_plan(root, plan, command=command,
+                           force=force, dry_run=dry_run, diff=diff)
+    if dry_run or diff:
+        return
+    Color.print_success("Generated:")
+    for rel in written:
+        print(f"  {rel}")
+    print(f"Publish with fymo.broadcast.publish('{name}_activity', id=..., data=...);")
+    print(f"subscribe in the browser via $broadcast/{name} after `fymo build`.")

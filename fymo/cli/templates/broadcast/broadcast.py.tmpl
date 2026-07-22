@@ -1,0 +1,33 @@
+"""Broadcast channels for __fymo_tmpl_name__ (generated; this file is yours).
+
+Every non-private top-level function here is a channel: the signature
+is the subscribe args, the return annotation is the payload publish()
+is checked against in dev mode, and the body is the subscribe-time
+authorization guard, run on every SSE subscribe.
+
+Publish from any server code (a remote function, a job):
+
+    from fymo.broadcast import publish
+
+    publish("__fymo_tmpl_name___activity", id=1, data={"kind": "updated"})
+
+Subscribe from the browser through the typed client `fymo build` emits:
+
+    import { subscribe } from '$broadcast/__fymo_tmpl_name__';
+
+    const unsubscribe = subscribe.__fymo_tmpl_name___activity({ id }, (data) => {
+      // react to data.kind
+    });
+"""
+from typing import Literal, TypedDict
+
+
+class __fymo_tmpl_name_singular_class__Activity(TypedDict):
+    kind: Literal["created", "updated", "deleted"]
+
+
+def __fymo_tmpl_name___activity(id: int) -> __fymo_tmpl_name_singular_class__Activity:
+    # Subscribe-time guard. Raise fymo.remote.NotFound or Unauthorized to
+    # deny the subscription (unknown id, private data); falling through
+    # admits it. Open to everyone by default.
+    pass
