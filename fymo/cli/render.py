@@ -63,8 +63,15 @@ def render(text: str, tokens: Mapping[str, str]) -> str:
 
 # English inflection, heuristic and stdlib-only: enough for generated
 # API names to read grammatically (get_post, not get_posts). Irregulars
-# and invariants are checked first; everything else runs three suffix
-# rules; a name that is not plural-shaped passes through unchanged.
+# and invariants are checked first; everything else runs suffix rules;
+# a name that is not plural-shaped passes through unchanged.
+#
+# The -es rules deserve a note: no suffix rule can split houses/causes
+# from buses/statuses (all end in -uses), so the default for -ses/-zes
+# stems restores the silent e (course, size, database) and a short list
+# names the nouns whose singular really ends in the sibilant. The same
+# shape applies to -oes (shoe by default, hero via the list) and to
+# -ches/-shes (church by default, cache via the list).
 _IRREGULAR_SINGULARS = {
     "children": "child",
     "people": "person",
@@ -74,11 +81,36 @@ _IRREGULAR_SINGULARS = {
     "geese": "goose",
     "feet": "foot",
     "teeth": "tooth",
+    # ves nouns
+    "knives": "knife",
+    "wolves": "wolf",
+    "leaves": "leaf",
+    "lives": "life",
+    "halves": "half",
+    "shelves": "shelf",
+    # Greek ses nouns; bases stays with base (the common web noun),
+    # accepting the ambiguity with basis.
+    "analyses": "analysis",
+    "crises": "crisis",
+    "theses": "thesis",
+    "diagnoses": "diagnosis",
+    "parentheses": "parenthesis",
 }
 
 _INVARIANT_NAMES = {"series", "species", "fish", "sheep", "news", "data"}
 
-_SIBILANT_ENDINGS = ("s", "x", "z", "ch", "sh")
+# Singulars that really end in the sibilant: buses -> bus, not "buse".
+# Doubles as a passthrough so the singular itself never gets clipped.
+_SIBILANT_SINGULARS = {
+    "bus", "status", "virus", "bonus", "gas", "lens",
+    "alias", "campus", "atlas", "canvas",
+}
+
+# oes nouns whose singular ends in o (default keeps the e: shoes -> shoe).
+_O_NOUNS = {"hero", "potato", "tomato", "echo", "veto"}
+
+# ches nouns whose singular ends in e (default strips es: church, dish).
+_E_FINAL_CH_NOUNS = {"cache", "niche", "mustache", "headache", "avalanche"}
 
 
 def singularize(name: str) -> str:
@@ -88,12 +120,26 @@ def singularize(name: str) -> str:
     prefix = f"{head}_" if head else ""
     if last in _IRREGULAR_SINGULARS:
         return prefix + _IRREGULAR_SINGULARS[last]
-    if last in _INVARIANT_NAMES:
+    if last in _INVARIANT_NAMES or last in _SIBILANT_SINGULARS:
         return name
     if last.endswith("ies") and len(last) > 3:
         return prefix + last[:-3] + "y"
-    if last.endswith("es") and last[:-2].endswith(_SIBILANT_ENDINGS):
-        return prefix + last[:-2]
+    if last.endswith("oes"):
+        stem = last[:-2]
+        return prefix + (stem if stem in _O_NOUNS else last[:-1])
+    if last.endswith("es"):
+        stem = last[:-2]
+        if stem in _SIBILANT_SINGULARS:
+            return prefix + stem
+        if stem.endswith("ss") or stem.endswith("x"):
+            return prefix + stem
+        if stem.endswith("zz"):
+            return prefix + stem[:-1]
+        if stem.endswith(("ch", "sh")):
+            restored = stem + "e"
+            return prefix + (restored if restored in _E_FINAL_CH_NOUNS else stem)
+        if stem.endswith(("s", "z")):
+            return prefix + stem + "e"
     if last.endswith("s") and not last.endswith(("ss", "us", "is")):
         return prefix + last[:-1]
     return name
