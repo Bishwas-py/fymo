@@ -313,6 +313,8 @@ def test_lib_and_components_aliases_resolve_to_real_files(blog_app: Path, node_a
     """
     from fymo.build.pipeline import BuildPipeline
 
+    (blog_app / "app" / "lib").mkdir(exist_ok=True)
+    (blog_app / "app" / "components").mkdir(exist_ok=True)
     (blog_app / "app" / "lib" / "util.ts").write_text(
         "export const label: string = 'from-lib';\n"
     )
