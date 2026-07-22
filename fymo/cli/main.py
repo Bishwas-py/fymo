@@ -139,6 +139,47 @@ def generate_resource_cmd(name, force, dry_run, diff):
 
 
 @cli.group()
+def destroy():
+    """Remove generated code, the safe inverse of `fymo generate`."""
+    pass
+
+
+def _destroy_options(fn):
+    fn = click.option('--force', is_flag=True, default=False,
+                      help='Delete files even when modified since generation')(fn)
+    fn = click.option('--dry-run', is_flag=True, default=False,
+                      help='Print what would be deleted; touch nothing')(fn)
+    return fn
+
+
+@destroy.command(name="page")
+@click.argument('name')
+@_destroy_options
+def destroy_page_cmd(name, force, dry_run):
+    """Delete a generated page and its route entry."""
+    from fymo.cli.commands.destroy import destroy_page
+    destroy_page(name, force=force, dry_run=dry_run)
+
+
+@destroy.command(name="remote")
+@click.argument('name')
+@_destroy_options
+def destroy_remote_cmd(name, force, dry_run):
+    """Delete a generated remote module and its test."""
+    from fymo.cli.commands.destroy import destroy_remote
+    destroy_remote(name, force=force, dry_run=dry_run)
+
+
+@destroy.command(name="resource")
+@click.argument('name')
+@_destroy_options
+def destroy_resource_cmd(name, force, dry_run):
+    """Delete a generated resource (page + remote) and its route entry."""
+    from fymo.cli.commands.destroy import destroy_resource
+    destroy_resource(name, force=force, dry_run=dry_run)
+
+
+@cli.group()
 def schema():
     """Schema tooling for the database objects fymo providers own."""
     pass
