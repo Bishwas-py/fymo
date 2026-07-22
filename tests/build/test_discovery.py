@@ -5,7 +5,7 @@ from fymo.build.discovery import discover_routes, Route
 def test_discover_finds_top_level_index_svelte(example_app: Path):
     routes = discover_routes(example_app / "app" / "templates")
     names = sorted(r.name for r in routes)
-    assert names == ["home", "todos"]
+    assert names == ["home", "signin", "todos"]
 
 
 def test_route_entry_path_is_absolute(example_app: Path):
@@ -24,8 +24,14 @@ def test_discover_ignores_non_index(tmp_path: Path):
     assert [r.name for r in routes] == ["todos"]
 
 
-def test_route_has_no_layout_chain_when_none_exist(example_app: Path):
-    routes = discover_routes(example_app / "app" / "templates")
+def test_route_has_no_layout_chain_when_none_exist(tmp_path: Path):
+    # The regenerated example ships a root layout, so the no-layout case
+    # needs its own tree.
+    templates = tmp_path / "app" / "templates"
+    (templates / "home").mkdir(parents=True)
+    (templates / "home" / "index.svelte").write_text("<div></div>")
+    routes = discover_routes(templates)
+    assert [r.name for r in routes] == ["home"]
     for r in routes:
         assert r.layout_chain == []
 

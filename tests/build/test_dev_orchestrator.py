@@ -118,8 +118,8 @@ def test_real_dev_session_resolves_route_runtime(blog_app: Path, node_available)
 
 def test_real_dev_session_writes_correct_layout_manifest(blog_app: Path, node_available):
     """End-to-end: the actual bug. Runs a real `fymo dev` session (via
-    DevOrchestrator directly, not the CLI) against blog_app -- which has a
-    real root _layout.svelte -- and confirms the manifest it writes has
+    DevOrchestrator directly, not the CLI) against blog_app (regenerated: scaffold home/posts/signin with the
+    scaffold's real root _layout.svelte) -- and confirms the manifest it writes has
     uses_layout_shell=True / a populated layout_chain, matching what
     BuildPipeline.build() would write for the exact same source tree.
     Before this fix, DevOrchestrator always wrote layout_chain=[] regardless
@@ -143,8 +143,8 @@ def test_real_dev_session_writes_correct_layout_manifest(blog_app: Path, node_av
             time.sleep(0.2)
             manifest = Manifest.read(manifest_path)
 
-        assert manifest.routes["index"].uses_layout_shell is True
-        assert any(ref.level == "root" and ref.id == "_root" for ref in manifest.routes["index"].layout_chain)
+        assert manifest.routes["home"].uses_layout_shell is True
+        assert any(ref.level == "root" and ref.id == "_root" for ref in manifest.routes["home"].layout_chain)
         assert manifest.routes["posts"].uses_layout_shell is True
         assert "_root" in manifest.layouts
     finally:

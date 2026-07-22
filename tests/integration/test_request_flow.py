@@ -33,7 +33,7 @@ def test_request_renders_via_sidecar_when_flag_set(example_app, monkeypatch):
 
     assert responses[0][0].startswith("200")
     text = body.decode("utf-8")
-    assert "todo-app" in text
+    assert "It's alive." in text
     assert "<div id=\"svelte-app\">" in text
 
     if hasattr(app, 'sidecar') and app.sidecar:
@@ -60,7 +60,7 @@ def test_response_html_under_10kb(example_app, monkeypatch):
         assert responses[0][0].startswith("200")
         assert len(body) < 10_000, f"response size {len(body)}B exceeds 10KB limit"
         # Must reference the bundle externally, not inline
-        assert b'<script type="module" src="/dist/client/todos.' in body
+        assert b'<script type="module" src="/dist/client/home.' in body
         assert b'_fymo_packages' not in body  # old IIFE bundle inlining must be gone
     finally:
         if app.sidecar:
@@ -101,7 +101,7 @@ def test_response_includes_stylesheet_link_and_css_serves(example_app, monkeypat
             "wsgi.input": io.BytesIO(), "wsgi.errors": sys.stderr, "wsgi.url_scheme": "http",
         }, sr2))
         assert responses2[0][0].startswith("200"), f"CSS request failed: {responses2[0][0]}"
-        assert b"todo-app" in css_body or len(css_body) > 0
+        assert len(css_body) > 0
     finally:
         if app.sidecar:
             app.sidecar.stop()
@@ -179,7 +179,7 @@ def test_client_entry_calls_resolve_remote_props(example_app, monkeypatch):
             "SERVER_NAME": "x", "SERVER_PORT": "0", "SERVER_PROTOCOL": "HTTP/1.1",
             "wsgi.input": io.BytesIO(), "wsgi.errors": sys.stderr, "wsgi.url_scheme": "http",
         }, sr))
-        m = re.search(rb'src="(/dist/client/todos\.[A-Z0-9]+\.js)"', body)
+        m = re.search(rb'src="(/dist/client/home\.[A-Z0-9]+\.js)"', body)
         assert m is not None
         bundle_url = m.group(1).decode()
         b2 = []

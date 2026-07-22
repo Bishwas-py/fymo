@@ -51,6 +51,11 @@ def _reset_remote_router_globals():
 def example_app(tmp_path: Path) -> Path:
     """Copy of examples/todo_app into an isolated tmp dir.
 
+    The example is pure generator output: the fymo new scaffold (root
+    layout, home proof board, password auth with a signin page) plus
+    `fymo generate resource todos` (controller, index/show/Item
+    templates, app/remote/todos.py).
+
     node_modules is symlinked (not copied) from the original to keep fixture
     setup fast. Treat it as read-only — tests must not write into it, since
     the symlink target is shared across all test runs and the developer's
@@ -70,32 +75,32 @@ def example_app(tmp_path: Path) -> Path:
 def blog_app(tmp_path: Path) -> Path:
     """Copy of examples/blog_app into an isolated tmp dir.
 
-    Unlike todo_app, this example has real app/remote/*.py functions and
-    auth enabled — needed for tests that exercise remote-module discovery
-    (todo_app has neither). Same node_modules-symlink treatment as
-    example_app: read-only, shared across test runs.
+    Both examples are pure generator output with auth and remote
+    functions; blog_app is the richer one (posts resource plus a
+    comments remote), so tests exercising remote-module discovery use
+    it. Same node_modules-symlink treatment as example_app: read-only,
+    shared across test runs.
 
     `FymoApp.__init__` (fymo/core/server.py) inserts `project_root` onto
     `sys.path` so `app.*` is importable, but never removes it or clears
     `sys.modules` afterward. Since every blog_app copy uses the same
     top-level package name ("app"), a second test in the same pytest
     process that uses this fixture with a *different* tmp_path would
-    otherwise silently reuse the first test's cached `app.data.db` (etc.)
-    module -- e.g. `seed_test_post()` would insert its row into the FIRST
-    test's SQLite file, not the current test's, and the current test's own
-    server would then see an empty database with no error at all, just a
-    confusing 404. This fixture inserts `dest` onto `sys.path` itself (some
-    tests call `app.*` helpers like `seed_test_post()` *before* constructing
-    a FymoApp, so they can't rely on `FymoApp.__init__` to do it in time),
-    and cleans up both `sys.path` and the cached `app.*` modules after each
-    test using this fixture to prevent cross-test pollution when multiple tests
-    use this fixture with different tmp_path instances.
+    otherwise silently reuse the first test's cached `app.*` modules,
+    mutating the FIRST test's in-memory rows (or SQLite file) with no
+    error at all, just confusing misses. This fixture inserts `dest`
+    onto `sys.path` itself (some tests import `app.*` *before*
+    constructing a FymoApp, so they can't rely on `FymoApp.__init__` to
+    do it in time), and cleans up both `sys.path` and the cached `app.*`
+    modules after each test using this fixture to prevent cross-test
+    pollution when multiple tests use this fixture with different
+    tmp_path instances.
     """
     import sys
     dest = tmp_path / "blog_app"
     shutil.copytree(
         BLOG_APP, dest,
-        ignore=shutil.ignore_patterns("node_modules", "dist", ".fymo", "app/data", "__pycache__"),
+        ignore=shutil.ignore_patterns("node_modules", "dist", ".fymo", "data", "__pycache__"),
     )
     nm = BLOG_APP / "node_modules"
     if nm.is_dir():

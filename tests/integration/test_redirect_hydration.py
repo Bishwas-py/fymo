@@ -5,8 +5,8 @@ JSON envelope -- see issue #58.
 Builds blog_app for real, serves it on a real TCP port, and drives the real
 compiled client bundle through jsdom's real hydrate() (fymo/build/js/
 hydration_check.mjs, same tool tests/integration/test_hydration_real.py
-uses), then clicks the `#go-to-login` button wired to blog_app's
-`app/remote/redirect_demo.go_to_login` remote function. That function
+uses), then clicks the `#go-to-login` button wired to the test-owned
+`app/remote/redirect_demo.go_to_login` remote function written onto the copy. That function
 unconditionally raises Redirect("/login"), so a real click round-trips
 through: the real Svelte click handler -> the real generated `__rpc` (the
 exact code at fymo/build/entry_generator.py's `if (env.type === 'redirect')`
@@ -41,6 +41,41 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 HYDRATION_CHECK_JS = REPO_ROOT / "fymo" / "build" / "js" / "hydration_check.mjs"
 
 
+_REDIRECT_REMOTE = '''"""Test-owned remote exercising fymo.remote.Redirect end to end."""
+from fymo.remote import remote, Redirect
+
+
+@remote
+def go_to_login() -> None:
+    raise Redirect("/login")
+'''
+
+_REDIRECT_CONTROLLER = '''"""Test-owned page threading the redirect remote as a prop."""
+from app.remote.redirect_demo import go_to_login
+
+
+def getContext():
+    return {"go_to_login": go_to_login}
+'''
+
+_REDIRECT_TEMPLATE = """<script>
+  let { go_to_login } = $props();
+</script>
+
+<button id="go-to-login" onclick={() => go_to_login()}>Go to login</button>
+"""
+
+
+def _write_redirect_demo(blog_app: Path) -> None:
+    """The regenerated blog no longer ships a redirect demo page, so the
+    test writes its own onto the copy (route via convention: /redirect_demo)."""
+    (blog_app / "app" / "remote" / "redirect_demo.py").write_text(_REDIRECT_REMOTE)
+    (blog_app / "app" / "controllers" / "redirect_demo.py").write_text(_REDIRECT_CONTROLLER)
+    tpl = blog_app / "app" / "templates" / "redirect_demo"
+    tpl.mkdir()
+    (tpl / "index.svelte").write_text(_REDIRECT_TEMPLATE)
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -50,6 +85,7 @@ def _free_port() -> int:
 @pytest.mark.usefixtures("node_available")
 def test_remote_function_redirect_navigates_through_real_client_bundle(blog_app: Path, monkeypatch):
     from fymo.build.pipeline import BuildPipeline
+    _write_redirect_demo(blog_app)
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)

@@ -99,13 +99,17 @@ def built_app(tmp_path_factory, node_available):
     else:
         pytest.skip("examples/todo_app/node_modules not found; run npm install in examples/todo_app/")
     (dest / "fymo.yml").write_text(FYMO_YML)
+    # The regenerated example ships its own app/auth/ and the password
+    # endpoints; this module owns the whole identity surface, so both go.
+    shutil.rmtree(dest / "app" / "auth")
+    (dest / "app" / "remote" / "auth.py").unlink()
     auth_dir = dest / "app" / "auth"
     auth_dir.mkdir(parents=True)
     (auth_dir / "__init__.py").write_text("")
     (auth_dir / "resolver.py").write_text(RESOLVER)
     (auth_dir / "public.py").write_text(PUBLIC)
     remote_dir = dest / "app" / "remote"
-    remote_dir.mkdir(parents=True)
+    remote_dir.mkdir(parents=True, exist_ok=True)
     (remote_dir / "__init__.py").write_text("")
     (remote_dir / "notes.py").write_text(GUARDED_REMOTE)
     (dest / "app" / "templates" / "home" / "index.svelte").write_text(TEMPLATE)

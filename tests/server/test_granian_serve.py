@@ -229,7 +229,7 @@ def test_granian_real_boot_serves_ssr_and_healthz(example_app):
                 time.sleep(0.25)
 
         assert status == 200
-        assert b"todo-app" in body, "expected real SSR HTML from the todo_app home page"
+        assert b"It's alive." in body, "expected real SSR HTML from the todo_app home page"
 
         hz_status, hz_body = _get(f"http://127.0.0.1:{port}/healthz")
         assert hz_status == 200

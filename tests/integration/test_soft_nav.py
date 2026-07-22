@@ -24,17 +24,17 @@ def _wsgi_get(app, path: str):
 
 @pytest.mark.usefixtures("node_available")
 def test_soft_nav_data_returns_leaf_envelope(blog_app: Path, monkeypatch):
-    """Hitting /_fymo/data/posts/welcome-to-fymo returns the bundle URL + props."""
+    """Hitting /_fymo/data/posts/1 returns the bundle URL + props; the
+    signin leaf covers the remote-callable-as-prop marker seam the old
+    blog's comment props used to exercise."""
     from fymo.build.pipeline import BuildPipeline
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
-        (status, headers), envelope = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
+        (status, headers), envelope = _wsgi_get(app, "/_fymo/data/posts/1")
         assert status.startswith("200"), status
         assert envelope["type"] == "result", envelope
         result = devalue.parse(envelope["result"])
@@ -46,16 +46,18 @@ def test_soft_nav_data_returns_leaf_envelope(blog_app: Path, monkeypatch):
         assert leaf["module"].endswith(".js")
         # CSS may or may not exist depending on stylesheet output
         assert isinstance(leaf["css"], list)
-        # Props came from posts.getContext(id="welcome-to-fymo")
+        # Props came from posts.getContext(id="1")
         props = leaf["props"]
-        assert "post" in props
-        assert props["post"]["slug"] == "welcome-to-fymo"
-        # Remote callables threaded through controller props become markers
-        assert isinstance(props["create_comment"], dict)
-        assert "__fymo_remote" in props["create_comment"]
-
-        # title from getDoc()
+        assert props["item_id"] == "1"
         assert "title" in result
+
+        # Remote callables threaded through controller props become
+        # markers: the signin controller threads login/signup.
+        (status, _), envelope = _wsgi_get(app, "/_fymo/data/signin")
+        assert envelope["type"] == "result", envelope
+        signin_props = devalue.parse(envelope["result"])["leaf"]["props"]
+        assert isinstance(signin_props["login"], dict)
+        assert "__fymo_remote" in signin_props["login"]
     finally:
         if app.sidecar:
             app.sidecar.stop()
@@ -70,15 +72,13 @@ def test_soft_nav_envelope_exposes_matched_params(blog_app: Path, monkeypatch):
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
-        (status, _), envelope = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
+        (status, _), envelope = _wsgi_get(app, "/_fymo/data/posts/1")
         assert status.startswith("200"), status
         result = devalue.parse(envelope["result"])
-        assert result["params"] == {"id": "welcome-to-fymo"}
+        assert result["params"] == {"id": "1"}
     finally:
         if app.sidecar:
             app.sidecar.stop()
@@ -92,8 +92,6 @@ def test_soft_nav_envelope_params_empty_for_static_route(blog_app: Path, monkeyp
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
@@ -112,8 +110,6 @@ def test_soft_nav_unknown_route_returns_no_route(blog_app: Path, monkeypatch):
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
@@ -134,8 +130,6 @@ def test_soft_nav_root_path(blog_app: Path, monkeypatch):
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
@@ -143,7 +137,7 @@ def test_soft_nav_root_path(blog_app: Path, monkeypatch):
         assert status.startswith("200"), envelope
         assert envelope["type"] == "result"
         result = devalue.parse(envelope["result"])
-        assert result["leaf"]["id"] == "index"
+        assert result["leaf"]["id"] == "home"
     finally:
         if app.sidecar:
             app.sidecar.stop()
@@ -182,8 +176,8 @@ def whoami_blog_app(blog_app: Path):
 
     fymo_yml = blog_app / "fymo.yml"
     text = fymo_yml.read_text()
-    assert "    - tags\n" in text, "unexpected fymo.yml shape in examples/blog_app"
-    text = text.replace("    - tags\n", "    - tags\n    - whoami\n")
+    assert "    - posts\n" in text, "unexpected fymo.yml shape in examples/blog_app"
+    text = text.replace("    - posts\n", "    - posts\n    - whoami\n")
     fymo_yml.write_text(text)
     return blog_app
 
@@ -261,11 +255,11 @@ def test_soft_nav_disabled_resource_returns_error_envelope(blog_app: Path, monke
         "name: blog_app\n"
         "version: 1.0.0\n"
         "routes:\n"
-        "  root: index.index\n"
+        "  root: home.index\n"
+        "  signin: signin.index\n"
         "  resources:\n"
         "    - name: posts\n"
         "      soft_nav: false\n"
-        "    - tags\n"
         "build:\n"
         "  output_dir: dist\n"
     )
@@ -274,18 +268,16 @@ def test_soft_nav_disabled_resource_returns_error_envelope(blog_app: Path, monke
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
     from fymo import create_app
     app = create_app(blog_app)
     try:
-        (status, _), env = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
+        (status, _), env = _wsgi_get(app, "/_fymo/data/posts/1")
         assert status.startswith("200")
         assert env["type"] == "error"
         assert env["error"] == "soft_nav_disabled"
         assert env["status"] == 409
 
-        (status, _), env = _wsgi_get(app, "/_fymo/data/tags")
+        (status, _), env = _wsgi_get(app, "/_fymo/data/signin")
         assert status.startswith("200")
         assert env["type"] == "result", env
     finally:
@@ -325,10 +317,7 @@ def test_soft_nav_includes_resource_layout_for_layout_routes(blog_app: Path, nod
     from fymo.core.server import FymoApp
     app = FymoApp(blog_app, dev=False)
 
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
-
-    (status, _), payload = _wsgi_get(app, "/_fymo/data/posts/welcome-to-fymo")
+    (status, _), payload = _wsgi_get(app, "/_fymo/data/posts/1")
     decoded = devalue.parse(payload["result"])
     assert decoded["leaf"]["usesLayoutShell"] is True
     assert decoded["leaf"]["resourceLayout"]["id"] == "posts"

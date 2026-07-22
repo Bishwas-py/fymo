@@ -54,7 +54,10 @@ def test_dev_built_ssr_renders_with_project_svelte(example_app: Path):
         sidecar = Sidecar(dist)
         sidecar.start()
         try:
-            out = sidecar.render("todos", {})
+            out = sidecar.render(
+                "todos",
+                {"leafProps": {}, "layoutProps": {"root": {}, "resource": {}}},
+            )
         finally:
             sidecar.stop()
         assert out["body"].strip(), "SSR body should be non-empty"
@@ -72,7 +75,7 @@ def test_dev_manifest_includes_remote_modules(blog_app: Path):
     remote_modules entirely — even overwriting a good manifest a prior
     `fymo build` had produced. Any SSR prop referencing a remote function
     (e.g. a controller passing a remote callable to a template, as
-    app/controllers/posts.py does with create_comment/toggle_reaction) then
+    app/controllers/signin.py does with login/signup) then
     crashed with "remote module '...' has no hash in manifest" — and
     `fymo serve` afterward inherited the same broken manifest file, since
     serve only reads whatever's on disk rather than rebuilding it.
@@ -86,8 +89,8 @@ def test_dev_manifest_includes_remote_modules(blog_app: Path):
 
         assert "posts" in remote_modules, f"expected 'posts' in remote_modules, got {list(remote_modules)}"
         assert remote_modules["posts"]["hash"]
-        assert "create_comment" in remote_modules["posts"]["fns"]
-        assert "toggle_reaction" in remote_modules["posts"]["fns"]
+        assert "create_post" in remote_modules["posts"]["fns"]
+        assert "list_posts" in remote_modules["posts"]["fns"]
 
         # auth is enabled in blog_app's fymo.yml -> the password provider's
         # remote functions (signup/login/logout/me) must also be discovered,

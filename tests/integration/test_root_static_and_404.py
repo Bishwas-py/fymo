@@ -114,7 +114,9 @@ def test_favicon_conditional_request_gets_304(built_app, prod_app):
 
 
 def test_absent_allowlisted_file_is_404_never_500(prod_app):
-    status, _, body = _get(prod_app, "/favicon.svg")
+    # robots.txt is allowlisted and the scaffold ships no robots.txt
+    # (favicon.svg it does ship, so that one now really serves).
+    status, _, body = _get(prod_app, "/robots.txt")
     assert status == "404 NOT FOUND"
     assert b"fymo build" not in body
 

@@ -94,6 +94,10 @@ def built_app(tmp_path_factory, node_available):
     else:
         pytest.skip("examples/todo_app/node_modules not found — run npm install in examples/todo_app/")
     (dest / "fymo.yml").write_text(FYMO_YML)
+    # The regenerated example ships its own app/auth/ and the password
+    # endpoints; this module owns its resolver, so both go.
+    shutil.rmtree(dest / "app" / "auth")
+    (dest / "app" / "remote" / "auth.py").unlink()
     auth_dir = dest / "app" / "auth"
     auth_dir.mkdir(parents=True)
     (auth_dir / "__init__.py").write_text("")
@@ -238,6 +242,10 @@ def bypass_app(tmp_path_factory, node_available):
     else:
         pytest.skip("examples/todo_app/node_modules not found — run npm install in examples/todo_app/")
     (dest / "fymo.yml").write_text(BYPASS_YML)
+    # The regenerated example ships its own app/auth/ and the password
+    # endpoints; this module owns its resolver, so both go.
+    shutil.rmtree(dest / "app" / "auth")
+    (dest / "app" / "remote" / "auth.py").unlink()
     auth_dir = dest / "app" / "auth"
     auth_dir.mkdir(parents=True)
     (auth_dir / "__init__.py").write_text("")

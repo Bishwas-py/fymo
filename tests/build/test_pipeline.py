@@ -56,13 +56,9 @@ def test_build_output_css_is_external_not_injected(example_app: Path):
 
 
 def test_pipeline_populates_layout_chain_and_layouts_manifest(blog_app: Path, node_available):
-    """blog_app doesn't have a _layout.svelte yet at this point in the plan
-    (Task 11 adds it) -- this test creates a minimal one inline so Task 7 is
-    independently verifiable before the example app migration happens."""
-    templates = blog_app / "app" / "templates"
-    (templates / "_layout.svelte").write_text(
-        "<script>\n  let { children } = $props();\n</script>\n{@render children()}\n"
-    )
+    """The regenerated blog_app ships the scaffold's real root
+    _layout.svelte, so the manifest must carry the chain for every
+    route."""
     from fymo.build.pipeline import BuildPipeline
     result = BuildPipeline(blog_app).build(dev=False)
     from fymo.build.manifest import Manifest
@@ -71,7 +67,7 @@ def test_pipeline_populates_layout_chain_and_layouts_manifest(blog_app: Path, no
     assert "_root" in manifest.layouts
     assert manifest.layouts["_root"].client.startswith("client/")
 
-    for route_name in ("index", "posts", "tags"):
+    for route_name in ("home", "posts", "signin"):
         chain = manifest.routes[route_name].layout_chain
         assert any(ref.level == "root" and ref.id == "_root" for ref in chain)
         assert manifest.routes[route_name].uses_layout_shell is True
@@ -145,9 +141,12 @@ def test_pipeline_raises_on_unmatched_layout_output(blog_app: Path):
 
 
 def test_pipeline_no_layout_routes_unaffected(example_app: Path, node_available):
-    """todo_app has no _layout.svelte -- manifest routes must have empty
-    layout_chain and uses_layout_shell=False, matching pre-feature behavior."""
+    """An app with no _layout.svelte gets empty layout_chain and
+    uses_layout_shell=False, matching pre-layout behavior. The regenerated
+    example ships a root layout, so the copy sheds it (and the app.css
+    import that rides in it) to reach the layout-free state."""
     from fymo.build.pipeline import BuildPipeline
+    (example_app / "app" / "templates" / "_layout.svelte").unlink()
     result = BuildPipeline(example_app).build(dev=False)
     from fymo.build.manifest import Manifest
     manifest = Manifest.read(result.manifest_path)
@@ -301,42 +300,57 @@ def test_pipeline_bare_package_css_import_resolves_from_node_modules(example_app
 
 
 def test_lib_and_components_aliases_resolve_to_real_files(blog_app: Path, node_available):
-    """blog_app's real source imports via `$lib/auth` (Nav.svelte) and
-    `$components/Nav.svelte` (_layout.svelte). Proves both aliases are
-    load-bearing -- not just "the build happens not to error" -- via a
-    negative control: the build must succeed with the real files present,
-    then FAIL specifically once each aliased target is removed, showing
-    the resolution genuinely depends on that exact file rather than
-    silently falling back to something else. (Fingerprinting compiled
-    output for identifier names doesn't work here since prod builds
-    minify and rename local bindings; this is the reliable alternative.)
+    """Proves the $lib/* and $components/* aliases are load-bearing --
+    not just "the build happens not to error" -- via a negative control:
+    write real aliased files into the copy plus a template importing
+    both, build green, then FAIL specifically once each aliased target
+    is removed, showing the resolution genuinely depends on that exact
+    file rather than silently falling back to something else. The
+    regenerated blog no longer ships alias-using source of its own, so
+    the test owns the files. (Fingerprinting compiled output for
+    identifier names doesn't work here since prod builds minify and
+    rename local bindings; this is the reliable alternative.)
     """
     from fymo.build.pipeline import BuildPipeline
+
+    (blog_app / "app" / "lib" / "util.ts").write_text(
+        "export const label: string = 'from-lib';\n"
+    )
+    (blog_app / "app" / "components" / "Badge.svelte").write_text(
+        "<script>\n  import { label } from '$lib/util';\n</script>\n"
+        "<span>{label}</span>\n"
+    )
+    probe = blog_app / "app" / "templates" / "aliasprobe"
+    probe.mkdir()
+    (probe / "index.svelte").write_text(
+        "<script>\n  import Badge from '$components/Badge.svelte';\n</script>\n"
+        "<Badge />\n"
+    )
 
     # Positive: real files present, both aliases resolve, build succeeds.
     result = BuildPipeline(blog_app).build(dev=False)
     assert result.ok
 
     # Negative control for $lib/*: remove its target, confirm the build now
-    # fails because Nav.svelte's `$lib/auth` import can no longer resolve.
-    auth_ts = blog_app / "app" / "lib" / "auth.ts"
-    auth_ts.rename(blog_app / "app" / "lib" / "auth.ts.bak")
+    # fails because Badge.svelte's `$lib/util` import can no longer resolve.
+    util_ts = blog_app / "app" / "lib" / "util.ts"
+    util_ts.rename(blog_app / "app" / "lib" / "util.ts.bak")
     try:
         with pytest.raises(BuildError):
             BuildPipeline(blog_app).build(dev=False)
     finally:
-        (blog_app / "app" / "lib" / "auth.ts.bak").rename(auth_ts)
+        (blog_app / "app" / "lib" / "util.ts.bak").rename(util_ts)
 
     # Negative control for $components/*: remove its target, confirm the
-    # build now fails because _layout.svelte's `$components/Nav.svelte`
+    # build now fails because the probe template's `$components/Badge.svelte`
     # import can no longer resolve.
-    nav_svelte = blog_app / "app" / "components" / "Nav.svelte"
-    nav_svelte.rename(blog_app / "app" / "components" / "Nav.svelte.bak")
+    badge = blog_app / "app" / "components" / "Badge.svelte"
+    badge.rename(blog_app / "app" / "components" / "Badge.svelte.bak")
     try:
         with pytest.raises(BuildError):
             BuildPipeline(blog_app).build(dev=False)
     finally:
-        (blog_app / "app" / "components" / "Nav.svelte.bak").rename(nav_svelte)
+        (blog_app / "app" / "components" / "Badge.svelte.bak").rename(badge)
 
     # Confirm the fixture is back to a fully working state (both renames
     # were restored) rather than just trusting the finally blocks ran.

@@ -57,9 +57,6 @@ def test_layout_shell_routes_hydrate_cleanly(blog_app: Path, monkeypatch):
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
-
     from fymo import create_app
     app = create_app(blog_app, dev=False)
 
@@ -70,7 +67,7 @@ def test_layout_shell_routes_hydrate_cleanly(blog_app: Path, monkeypatch):
     thread.start()
     try:
         dist_dir = blog_app / "dist"
-        for route_path in ("/", "/posts/welcome-to-fymo"):
+        for route_path in ("/", "/posts/1"):
             result = _run_hydration_check(f"http://127.0.0.1:{port}{route_path}", dist_dir)
             assert result["errors"] == [], f"{route_path}: {result}"
             assert result["warnings"] == [], f"{route_path}: {result}"
@@ -98,9 +95,6 @@ def test_hydration_check_reusable_across_calls_in_one_process(blog_app: Path, mo
     BuildPipeline(project_root=blog_app).build(dev=False)
 
     monkeypatch.chdir(blog_app)
-    from tests.integration._seed_helpers import seed_test_post
-    seed_test_post()
-
     from fymo import create_app
     app = create_app(blog_app, dev=False)
 
@@ -121,7 +115,7 @@ const r1 = await checkHydration({json.dumps(f"http://127.0.0.1:{port}/")}, {json
 const eventRestoredAfterRun1 = globalThis.Event === nodeEventBefore;
 const eventTargetRestoredAfterRun1 = globalThis.EventTarget === nodeEventTargetBefore;
 
-const r2 = await checkHydration({json.dumps(f"http://127.0.0.1:{port}/posts/welcome-to-fymo")}, {json.dumps(str(dist_dir))});
+const r2 = await checkHydration({json.dumps(f"http://127.0.0.1:{port}/posts/1")}, {json.dumps(str(dist_dir))});
 const eventRestoredAfterRun2 = globalThis.Event === nodeEventBefore;
 const eventTargetRestoredAfterRun2 = globalThis.EventTarget === nodeEventTargetBefore;
 
