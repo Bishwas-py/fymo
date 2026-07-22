@@ -466,12 +466,15 @@ def publish_templates(
     falls back to the packaged template."""
     command = "fymo generate templates"
     root = _project_root(command)
+    # project/ is the fymo new scaffold, rendered outside any project, so
+    # overrides can never reach it; publishing it would be dead files.
     plan = [
         PlannedFile(
             f".fymo/templates/{tmpl.relative_to(PACKAGED_TEMPLATES_DIR).as_posix()}",
             tmpl.read_text(),
         )
         for tmpl in sorted(PACKAGED_TEMPLATES_DIR.rglob("*.tmpl"))
+        if tmpl.relative_to(PACKAGED_TEMPLATES_DIR).parts[0] != "project"
     ]
     written = execute_plan(root, plan, command=command,
                            force=force, dry_run=dry_run, diff=diff)

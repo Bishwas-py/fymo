@@ -199,6 +199,19 @@ def test_destroy_resource_removes_only_its_resources_entry(tmp_path, monkeypatch
 # --------------- click surface ---------------
 
 
+def test_cli_destroy_help_states_its_coverage(tmp_path):
+    """destroy covers page/remote/resource; component, layout, and
+    broadcast files are plain deletions by hand. The asymmetry is fine
+    but must be stated where the user will look."""
+    from click.testing import CliRunner
+    from fymo.cli.main import cli
+
+    result = CliRunner().invoke(cli, ["destroy", "--help"])
+    assert result.exit_code == 0
+    assert "component" in result.output
+    assert "by hand" in result.output
+
+
 def test_cli_destroy_commands_wired(tmp_path):
     from click.testing import CliRunner
     from fymo.cli.main import cli

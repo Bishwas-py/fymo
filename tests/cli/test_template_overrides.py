@@ -63,10 +63,25 @@ def test_publish_templates_copies_the_packaged_tree(tmp_path, monkeypatch):
         p.relative_to(project / ".fymo" / "templates").as_posix()
         for p in (project / ".fymo" / "templates").rglob("*.tmpl")
     )
-    packaged = sorted(p.relative_to(PACKAGED).as_posix() for p in PACKAGED.rglob("*.tmpl"))
+    packaged = sorted(
+        p.relative_to(PACKAGED).as_posix()
+        for p in PACKAGED.rglob("*.tmpl")
+        if p.relative_to(PACKAGED).parts[0] != "project"
+    )
     assert published == packaged
+    assert published, "publish produced nothing"
     rel = "page/controller.py.tmpl"
     assert (project / ".fymo" / "templates" / rel).read_bytes() == (PACKAGED / rel).read_bytes()
+
+
+def test_publish_excludes_the_fymo_new_scaffold_templates(tmp_path, monkeypatch):
+    """fymo new runs outside any project and never reads overrides, so
+    publishing project/ would create dead files under a claim that
+    generators prefer them."""
+    project = _project(tmp_path)
+    monkeypatch.chdir(project)
+    publish_templates()
+    assert not (project / ".fymo" / "templates" / "project").exists()
 
 
 def test_publish_refuses_over_existing_without_force(tmp_path, monkeypatch, capsys):

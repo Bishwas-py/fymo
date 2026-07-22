@@ -179,7 +179,12 @@ def generate_broadcast_cmd(name, force, dry_run, diff):
 
 @cli.group()
 def destroy():
-    """Remove generated code, the safe inverse of `fymo generate`."""
+    """Remove generated code, the safe inverse of `fymo generate`.
+
+    Covers page, remote, and resource (files plus their route entry).
+    Generated component/layout/broadcast files are single plain files:
+    delete them by hand.
+    """
     pass
 
 
