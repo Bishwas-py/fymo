@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "paths": {
       "$remote/*": ["./dist/client/_remote/*"],
+      "$auth": ["./dist/client/_auth"],
       "$lib/*": ["./app/lib/*"],
       "$components/*": ["./app/components/*"]
     }

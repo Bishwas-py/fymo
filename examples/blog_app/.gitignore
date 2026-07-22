@@ -1,6 +1,27 @@
-dist/
-.fymo/
-.venv/
-node_modules/
-app/data/*.db
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Fymo
+/dist/
+/data/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store

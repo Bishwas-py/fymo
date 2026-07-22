@@ -2,6 +2,7 @@
   "name": "blog_app",
   "version": "1.0.0",
   "type": "module",
+  "description": "A Fymo project",
   "scripts": {
     "dev": "fymo dev",
     "build": "fymo build"

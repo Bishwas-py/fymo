@@ -1,7 +1,7 @@
 virtualenv/
 .idea/
 __pycache__/
-node_modules/
+node_modules
 dist/
 venv/
 .venv/

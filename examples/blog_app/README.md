@@ -1,4 +1,4 @@
-# todo_app
+# blog_app
 
 A Fymo project - Python SSR framework for Svelte 5
 

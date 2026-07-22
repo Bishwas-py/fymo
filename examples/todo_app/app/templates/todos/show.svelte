@@ -1,14 +1,14 @@
 <script>
-  // Detail view for one posts row. The build renders one
+  // Detail view for one todos row. The build renders one
   // entry per template directory (index.svelte), so index.svelte mounts
-  // this component when the URL carries an id (/posts/<id>).
+  // this component when the URL carries an id (/todos/<id>).
   // It is a plain co-located component: grow it freely.
   import { identity } from '$auth';
   import {
-    get_post,
-    update_post,
-    delete_post,
-  } from '$remote/posts';
+    get_todo,
+    update_todo,
+    delete_todo,
+  } from '$remote/todos';
 
   let { item_id } = $props();
 
@@ -26,7 +26,7 @@
     item = null;
     missing = false;
     try {
-      item = await get_post(id);
+      item = await get_todo(id);
       title = item.title;
     } catch (err) {
       missing = true;
@@ -39,7 +39,7 @@
     pending = true;
     error = '';
     try {
-      item = await update_post(item.id, title.trim());
+      item = await update_todo(item.id, title.trim());
     } catch (err) {
       error = err && err.message ? err.message : String(err);
     } finally {
@@ -52,8 +52,8 @@
     pending = true;
     error = '';
     try {
-      await delete_post(item.id);
-      window.location.assign('/posts');
+      await delete_todo(item.id);
+      window.location.assign('/todos');
     } catch (err) {
       error = err && err.message ? err.message : String(err);
       pending = false;
@@ -62,16 +62,16 @@
 </script>
 
 <main>
-  <p class="eyebrow"><a href="/posts">Posts</a></p>
+  <p class="eyebrow"><a href="/todos">Todos</a></p>
 
   {#if missing}
     <h1>Not found</h1>
     <p class="state">
-      No posts with id {item_id}.
-      <a href="/posts">Back to the list</a>.
+      No todos with id {item_id}.
+      <a href="/todos">Back to the list</a>.
     </p>
   {:else if !item}
-    <h1>Posts #{item_id}</h1>
+    <h1>Todos #{item_id}</h1>
     <p class="state">Loading from the server…</p>
   {:else}
     <h1>{item.title}</h1>
@@ -95,8 +95,8 @@
   {/if}
 
   <div class="files">
-    <span class="chip">app/templates/posts/show.svelte</span>
-    <span class="chip">app/remote/posts.py</span>
+    <span class="chip">app/templates/todos/show.svelte</span>
+    <span class="chip">app/remote/todos.py</span>
   </div>
 </main>
 

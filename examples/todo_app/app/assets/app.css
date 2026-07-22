@@ -1,0 +1,98 @@
+/* Design tokens for the scaffold. One committed theme (fymo's dark ink),
+   one accent doing the work (mint), one warm note used sparingly (coral).
+   Shared primitives live here; page-level <style> blocks handle layout. */
+
+:root {
+  color-scheme: dark;
+
+  --ink: #101318;      /* page */
+  --raise: #191e26;    /* cards, inputs */
+  --line: #2a303a;     /* hairlines */
+  --fg: #e9ecf1;       /* body text */
+  --muted: #98a2b0;    /* secondary text */
+  --mint: #3ddc97;     /* actions, live signals */
+  --mint-ink: #0b2b1d; /* text on mint */
+  --coral: #ff6b4a;    /* markers, errors */
+
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 {
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+  margin: 0 0 0.35rem;
+}
+
+a { color: var(--mint); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Uppercase kicker above a card or section title. */
+.eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.card {
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.1rem 1.25rem;
+}
+
+/* A file path the reader is being pointed at. */
+.chip {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+}
+
+button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--mint-ink);
+  background: var(--mint);
+  border: none;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+input {
+  font: inherit;
+  color: var(--fg);
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+
+input:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

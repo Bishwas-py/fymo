@@ -1,12 +1,12 @@
 <script>
   import { identity } from '$auth';
-  import { list_todos, create_todo } from '$remote/todos';
+  import { list_posts, create_post } from '$remote/posts';
   import Item from './Item.svelte';
   import Show from './show.svelte';
 
   // The build renders one entry per template directory, so this file
-  // serves both resource URLs: /todos renders the list,
-  // /todos/<id> hands the route's id (threaded through the
+  // serves both resource URLs: /posts renders the list,
+  // /posts/<id> hands the route's id (threaded through the
   // controller as item_id) to the co-located show.svelte.
   let { item_id } = $props();
 
@@ -18,7 +18,7 @@
 
   $effect(() => {
     if (item_id || loaded) return;
-    list_todos().then((rows) => {
+    list_posts().then((rows) => {
       items = rows;
       loaded = true;
     });
@@ -30,7 +30,7 @@
     pending = true;
     error = '';
     try {
-      const created = await create_todo(title.trim());
+      const created = await create_post(title.trim());
       items = [...items, created];
       title = '';
     } catch (err) {
@@ -46,10 +46,10 @@
 {:else}
 <main>
   <p class="eyebrow">Resource</p>
-  <h1>Todos</h1>
+  <h1>Posts</h1>
   <p class="sub">
-    Rows come from <code>list_todos()</code> in
-    app/remote/todos.py, called through the typed $remote client.
+    Rows come from <code>list_posts()</code> in
+    app/remote/posts.py, called through the typed $remote client.
   </p>
 
   {#if !loaded}
@@ -68,14 +68,14 @@
     {#if $identity}
       <input
         bind:value={title}
-        placeholder="New todos title"
+        placeholder="New posts title"
         aria-label="Title"
       />
       <button type="submit" disabled={pending || !title.trim()}>Create</button>
     {:else}
       <p class="state">
-        Creating requires a session: <a href="/signin?next=/todos">sign in</a>.
-        The check lives on create_todo() as @require_auth.
+        Creating requires a session: <a href="/signin?next=/posts">sign in</a>.
+        The check lives on create_post() as @require_auth.
       </p>
     {/if}
   </form>
@@ -85,9 +85,9 @@
   {/if}
 
   <div class="files">
-    <span class="chip">app/remote/todos.py</span>
-    <span class="chip">app/templates/todos/Item.svelte</span>
-    <span class="chip">tests/test_todos_remote.py</span>
+    <span class="chip">app/remote/posts.py</span>
+    <span class="chip">app/templates/posts/Item.svelte</span>
+    <span class="chip">tests/test_posts_remote.py</span>
   </div>
 </main>
 {/if}
