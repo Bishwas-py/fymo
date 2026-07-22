@@ -214,15 +214,23 @@ def _plan_route_injection(
 # --------------- plans ---------------
 
 
-def _page_plan(name: str, *, resource: bool = False) -> List[PlannedFile]:
+def _page_plan(name: str, *, resource: bool = False, readonly: bool = False) -> List[PlannedFile]:
     """resource=True swaps in the templates wired to the generated remote:
     a live list + require_auth create through $remote, a co-located
     show.svelte detail view reached via /name/<id> (rendered through
     index.svelte, the directory's one built entry), and a controller that
-    threads the route's id param down as item_id."""
+    threads the route's id param down as item_id. readonly=True (the
+    no-auth-project variant) renders the same file set without the create
+    form or owner controls."""
     tokens = name_variants(name)
     controller = "resource_page/controller.py.tmpl" if resource else "page/controller.py.tmpl"
-    template = "resource_page/index.svelte.tmpl" if resource else "page/index.svelte.tmpl"
+    if resource:
+        index = ("resource_page/index_readonly.svelte.tmpl" if readonly
+                 else "resource_page/index.svelte.tmpl")
+        show = ("resource_page/show_readonly.svelte.tmpl" if readonly
+                else "resource_page/show.svelte.tmpl")
+    else:
+        index = "page/index.svelte.tmpl"
     plan = [
         PlannedFile(
             f"app/controllers/{name}.py",
@@ -230,13 +238,13 @@ def _page_plan(name: str, *, resource: bool = False) -> List[PlannedFile]:
         ),
         PlannedFile(
             f"app/templates/{name}/index.svelte",
-            _render_template(template, tokens),
+            _render_template(index, tokens),
         ),
     ]
     if resource:
         plan.append(PlannedFile(
             f"app/templates/{name}/show.svelte",
-            _render_template("resource_page/show.svelte.tmpl", tokens),
+            _render_template(show, tokens),
         ))
         plan.append(PlannedFile(
             f"app/templates/{name}/Item.svelte",
@@ -245,14 +253,17 @@ def _page_plan(name: str, *, resource: bool = False) -> List[PlannedFile]:
     return plan
 
 
-def _remote_plan(root: Path, name: str) -> List[PlannedFile]:
+def _remote_plan(root: Path, name: str, *, readonly: bool = False) -> List[PlannedFile]:
     tokens = name_variants(name)
+    remote_tmpl = "remote/remote_readonly.py.tmpl" if readonly else "remote/remote.py.tmpl"
+    test_tmpl = ("remote/test_remote_readonly.py.tmpl" if readonly
+                 else "remote/test_remote.py.tmpl")
     plan: List[PlannedFile] = []
     if not (root / "app" / "remote" / "__init__.py").exists():
         plan.append(PlannedFile("app/remote/__init__.py", _APP_REMOTE_INIT))
     plan.append(PlannedFile(
         f"app/remote/{name}.py",
-        _render_template("remote/remote.py.tmpl", tokens),
+        _render_template(remote_tmpl, tokens),
     ))
     if not (root / "tests" / "conftest.py").exists():
         plan.append(PlannedFile(
@@ -261,7 +272,7 @@ def _remote_plan(root: Path, name: str) -> List[PlannedFile]:
         ))
     plan.append(PlannedFile(
         f"tests/test_{name}_remote.py",
-        _render_template("remote/test_remote.py.tmpl", tokens),
+        _render_template(test_tmpl, tokens),
     ))
     return plan
 
@@ -282,11 +293,16 @@ def _run(
     root = _project_root(command)
     _validate_name(name, command)
 
+    # No app/auth/ means no identity resolver: every @require_auth
+    # mutation would answer 401 for everyone, so remote generation falls
+    # back to the read-only variant (list + get) until auth exists.
+    readonly = remote and not (root / "app" / "auth").is_dir()
+
     plan: List[PlannedFile] = []
     if page:
-        plan.extend(_page_plan(name, resource=page and remote))
+        plan.extend(_page_plan(name, resource=page and remote, readonly=readonly))
     if remote:
-        plan.extend(_remote_plan(root, name))
+        plan.extend(_remote_plan(root, name, readonly=readonly))
 
     route_status, route_message = "", ""
     if page:
@@ -315,13 +331,13 @@ def _run(
             print(route_message)
     if remote:
         print(f"Run the generated test with: pytest tests/test_{name}_remote.py")
-        if not (root / "app" / "auth").is_dir():
+        if readonly:
+            singular = name_variants(name)["name_singular"]
             Color.print_warning(
-                f"This project has no app/auth/: create/update/delete in "
-                f"app/remote/{name}.py are @require_auth and will answer 401 "
-                "for everyone until an identity resolver exists. Run "
-                "`fymo generate auth` (password), or the --clerk / --skeleton "
-                "variants."
+                f"No app/auth/ in this project, so {name} was generated "
+                f"read-only (list_{name} and get_{singular} only). For full "
+                f"CRUD: run `fymo generate auth`, then `{command} {name} "
+                "--force`."
             )
 
 

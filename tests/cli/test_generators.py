@@ -25,6 +25,16 @@ def _scaffold_yml() -> str:
 
 
 def _project(tmp_path: Path) -> Path:
+    """An auth project (app/auth/ present), the full-CRUD path."""
+    (tmp_path / "fymo.yml").write_text(_scaffold_yml())
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "__init__.py").write_text('"""Application package"""')
+    (tmp_path / "app" / "auth").mkdir()
+    return tmp_path
+
+
+def _project_no_auth(tmp_path: Path) -> Path:
+    """A project without app/auth/: generators emit the read-only variant."""
     (tmp_path / "fymo.yml").write_text(_scaffold_yml())
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "__init__.py").write_text('"""Application package"""')
@@ -445,26 +455,72 @@ def test_resource_show_and_item_render_through_index(tmp_path, monkeypatch):
     assert 'href="/articles/{item.id}"' in item
 
 
-# --------------- no-auth project guard ---------------
+# --------------- no-auth projects get the read-only variant ---------------
 
 
-def test_resource_warns_when_the_project_has_no_auth(tmp_path, monkeypatch, capsys):
-    project = _project(tmp_path)
+def test_no_auth_project_generates_read_only_resource(tmp_path, monkeypatch, capsys):
+    """Without app/auth/ a @require_auth mutation answers 401 for everyone
+    and the create form points at a /signin that does not exist; the
+    generator emits reads only and states the upgrade path instead."""
+    project = _project_no_auth(tmp_path)
     monkeypatch.chdir(project)
     generate_resource("articles")
+
+    module = (project / "app" / "remote" / "articles.py").read_text()
+    assert "def list_articles(" in module
+    assert "def get_article(" in module
+    for absent in ("create_article", "update_article", "delete_article", "require_auth"):
+        assert absent not in module, absent
+
+    index = (project / "app" / "templates" / "articles" / "index.svelte").read_text()
+    assert "list_articles" in index
+    assert "create_article" not in index
+    assert "$auth" not in index
+    assert "/signin" not in index
+
+    show = (project / "app" / "templates" / "articles" / "show.svelte").read_text()
+    assert "get_article" in show
+    for absent in ("update_article", "delete_article", "$auth"):
+        assert absent not in show, absent
+
+    test_file = (project / "tests" / "test_articles_remote.py").read_text()
+    assert "list_articles" in test_file
+    assert "create_article" not in test_file
+
     out = capsys.readouterr().out
+    assert "read-only" in out
     assert "fymo generate auth" in out
-    assert "401" in out
-    assert (project / "app" / "remote" / "articles.py").is_file()
+    assert "fymo generate resource articles --force" in out
 
 
-def test_no_auth_warning_does_not_fire_in_an_auth_project(tmp_path, monkeypatch, capsys):
+def test_no_auth_read_only_functions_work(tmp_path, monkeypatch):
+    from fymo.remote import NotFound
+
+    project = _project_no_auth(tmp_path)
+    monkeypatch.chdir(project)
+    generate_remote("gadgets")
+    monkeypatch.syspath_prepend(str(project))
+    _cleanup_app_modules()
+    try:
+        from app.remote.gadgets import get_gadget, list_gadgets
+
+        assert any(item["created_by"] == "seed" for item in list_gadgets())
+        assert get_gadget(1)["created_by"] == "seed"
+        with pytest.raises(NotFound):
+            get_gadget(999)
+    finally:
+        _cleanup_app_modules()
+
+
+def test_auth_project_gets_full_crud_with_no_upgrade_note(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
-    (project / "app" / "auth").mkdir()
-    (project / "app" / "auth" / "resolver.py").write_text("# resolver\n")
     monkeypatch.chdir(project)
     generate_resource("articles")
-    assert "fymo generate auth" not in capsys.readouterr().out
+    module = (project / "app" / "remote" / "articles.py").read_text()
+    assert "def create_article(" in module
+    out = capsys.readouterr().out
+    assert "read-only" not in out
+    assert "fymo generate auth" not in out
 
 
 # --------------- click surface ---------------

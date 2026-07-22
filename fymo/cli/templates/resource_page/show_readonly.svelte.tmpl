@@ -1,0 +1,80 @@
+<script>
+  // Read-only detail view for one __fymo_tmpl_name__ row, rendered by
+  // index.svelte when the URL carries an id (/__fymo_tmpl_name__/<id>).
+  // No owner controls: this project had no app/auth/ at generation
+  // time. Run `fymo generate auth`, then regenerate with --force for
+  // the editable variant.
+  import { get___fymo_tmpl_name_singular__ } from '$remote/__fymo_tmpl_name__';
+
+  let { item_id } = $props();
+
+  let item = $state(null);
+  let missing = $state(false);
+
+  $effect(() => {
+    load(Number(item_id));
+  });
+
+  async function load(id) {
+    item = null;
+    missing = false;
+    try {
+      item = await get___fymo_tmpl_name_singular__(id);
+    } catch (err) {
+      missing = true;
+    }
+  }
+</script>
+
+<main>
+  <p class="eyebrow"><a href="/__fymo_tmpl_name__">__fymo_tmpl_name_title__</a></p>
+
+  {#if missing}
+    <h1>Not found</h1>
+    <p class="state">
+      No __fymo_tmpl_name_singular__ with id {item_id}.
+      <a href="/__fymo_tmpl_name__">Back to the list</a>.
+    </p>
+  {:else if !item}
+    <h1>__fymo_tmpl_name_title__ #{item_id}</h1>
+    <p class="state">Loading from the server…</p>
+  {:else}
+    <h1>{item.title}</h1>
+    <p class="sub">by <span class="who">{item.created_by}</span></p>
+  {/if}
+
+  <div class="files">
+    <span class="chip">app/templates/__fymo_tmpl_name__/show.svelte</span>
+    <span class="chip">app/remote/__fymo_tmpl_name__.py</span>
+  </div>
+</main>
+
+<style>
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem;
+  }
+
+  .sub {
+    color: var(--muted);
+    margin: 0 0 1.5rem;
+  }
+
+  .who {
+    font-family: var(--mono);
+    font-size: 0.85em;
+  }
+
+  .state {
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .files {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+</style>

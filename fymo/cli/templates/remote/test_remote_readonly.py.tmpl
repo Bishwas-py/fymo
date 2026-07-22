@@ -1,0 +1,26 @@
+"""Tests for app/remote/__fymo_tmpl_name__.py (generated; they are yours).
+
+The read-only variant has no identity-dependent behavior, so these are
+plain direct calls, no HTTP and no fymo.testing session. When you
+upgrade to full CRUD (`fymo generate auth`, then regenerate with
+--force), the regenerated tests cover the ownership rules too.
+"""
+import pytest
+
+from fymo.remote import NotFound
+
+from app.remote.__fymo_tmpl_name__ import get___fymo_tmpl_name_singular__, list___fymo_tmpl_name__
+
+
+def test_list___fymo_tmpl_name___returns_the_seed_row():
+    items = list___fymo_tmpl_name__()
+    assert any(item["created_by"] == "seed" for item in items)
+
+
+def test_get___fymo_tmpl_name_singular___returns_the_seed_row():
+    assert get___fymo_tmpl_name_singular__(1)["created_by"] == "seed"
+
+
+def test_get___fymo_tmpl_name_singular___unknown_id_raises_not_found():
+    with pytest.raises(NotFound):
+        get___fymo_tmpl_name_singular__(999)
